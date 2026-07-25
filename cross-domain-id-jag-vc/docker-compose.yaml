@@ -12,9 +12,9 @@ name: cross-domain-stack
 #   OpenCode       → Org A AI agent (mock), phases A+B steps 1-13
 #   AGNTCY         → identity node (badge/VC registry) + idjag-issuer (assertion mint)
 #   Keycloak A     → Org A IdP (org-a realm), authenticates Sarah
-#   Envoy+OPA A    → SKIPPED (mocked ALLOW in agent stubs)
+#   Envoy+OPA A    → SKIPPED (future Org A egress milestone)
 #   Keycloak B     → Org B IdP (org-b realm), receives cross-domain ID-JAG assertion
-#   Envoy+OPA B    → SKIPPED (mocked ALLOW in agent stubs)
+#   Envoy+OPA B    → Built On Envoy gateway (Milestone 1 allow-only policy)
 #   Triage         → Org B remediation agent (mock), steps 13-19
 #   Sub-Agent      → Org B sub-agent (mock, bounded privilege), steps 20-25
 #   Gitea          → resource (repository for PRs)
@@ -26,6 +26,8 @@ name: cross-domain-stack
 #   identity-node   → host:4005 (REST) / 4006 (gRPC)
 #   gitea           → host:3002
 #   gitea-gateway   → host:9103  (Org B resource enforcer)
+#   envoy-org-b     → host:10000 (ticket ingress) / 10001 (resource access)
+#                     admin:127.0.0.1:9901
 #   opencode-agent  → host:8100  (Org A mock agent)
 #   triage-agent    → host:8200  (Org B mock agent)
 #   sub-agent       → host:8300  (Org B sub-agent)
@@ -326,6 +328,40 @@ services:
       start_period: 5s
 
   # ---------------------------------------------------------------------------
+  # Org B gateway — Envoy + Built On Envoy inline OPA dynamic module
+  #   - Listener 10000 proxies cross-domain ticket requests to Triage
+  #   - Listener 10001 is provisioned for the resource boundary in Milestone 3
+  #   - Milestone 1 loads an explicit allow-all Rego policy to prove the image,
+  #     dynamic module, routing, and observability path before enforcement
+  # ---------------------------------------------------------------------------
+  envoy-org-b:
+    build:
+      context: ./envoy
+      pull: true
+      args:
+        BOE_COMPOSER_IMAGE: ${BOE_COMPOSER_IMAGE:-ghcr.io/tetratelabs/built-on-envoy/composer:0.11.0-dev@sha256:842fca7db63af7385478380bf097c6e85eb16db7158a88778d6f2018b265d84f}
+        ENVOY_IMAGE: ${ENVOY_BASE_IMAGE:-envoyproxy/envoy:v1.38.3@sha256:5f7c43e1147412fdb3af578c651c67478a3df818eae89d2261e707e06c209cdb}
+    image: cd-envoy-boe:${ENVOY_IMAGE_TAG:-milestone1}
+    container_name: cd-envoy-org-b
+    depends_on:
+      triage-agent:
+        condition: service_healthy
+      gitea-gateway:
+        condition: service_healthy
+    ports:
+      - "${ENVOY_TICKET_PORT:-10000}:10000"
+      - "${ENVOY_RESOURCE_PORT:-10001}:10001"
+      - "127.0.0.1:${ENVOY_ADMIN_PORT:-9901}:9901"
+    networks:
+      - cd-net
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9901"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  # ---------------------------------------------------------------------------
   # OpenCode Agent (mock) — Org A AI agent
   #   Phase A (steps 1-2): Sarah sign-in, mock CVE scan
   #   Discovery (steps 3-6): badge resolution (mocked → identity-node)
@@ -345,8 +381,8 @@ services:
         condition: service_healthy
       idjag-issuer:
         condition: service_healthy
-      triage-agent:
-        condition: service_started
+      envoy-org-b:
+        condition: service_healthy
     ports:
       - "${OPENCODE_PORT:-8100}:8100"
     environment:
@@ -366,8 +402,8 @@ services:
       # AGNTCY services
       IDJAG_ISSUER_URL: http://idjag-issuer:9000
       IDENTITY_NODE_URL: http://identity-node:4000
-      # Downstream Org B agent
-      TRIAGE_AGENT_URL: http://triage-agent:8200
+      # Org B trust boundary; Envoy proxies the request to Triage.
+      TRIAGE_AGENT_URL: http://envoy-org-b:10000
       # Default scan target
       SCAN_REPO: ${SCAN_REPO:-demo-admin/payments-service}
     networks:
@@ -588,8 +624,8 @@ services:
         condition: service_completed_successfully
       dir-apiserver:
         condition: service_started
-      triage-agent:
-        condition: service_started
+      envoy-org-b:
+        condition: service_healthy
     ports:
       - "${WEBAPP_PORT:-8090}:8090"
     environment:
@@ -606,7 +642,7 @@ services:
       SARAH_EMAIL: ${SARAH_EMAIL:-sarah@org-a.example}
       IDJAG_ISSUER_URL: http://idjag-issuer:9000
       IDENTITY_NODE_URL: http://identity-node:4000
-      TRIAGE_AGENT_URL: http://triage-agent:8200
+      TRIAGE_AGENT_URL: http://envoy-org-b:10000
       DIR_APISERVER_URL: dir-apiserver:8888
       VAULT_ADDR: http://identity-vault:8200
       VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:?set VAULT_DEV_ROOT_TOKEN in .env}

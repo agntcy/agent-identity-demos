@@ -28,14 +28,15 @@ It also wires in two AGNTCY components for real:
 | 5–6 | CIMD generate/resolve id (Vault-signed proof JWT → identity-node) | **Real** |
 | 7 | RFC 8693 token exchange at Keycloak A | Mocked |
 | 8–9 | ID-JAG mint + Keycloak B `jwt-bearer` redemption | **Real** |
-| 10–13 | Ticket creation, OPA ingress check, plan, sub-badge mint | OPA mocked; ticket + mint real |
+| 10–13 | Envoy ingress, ticket creation, OPA check, plan, sub-badge mint | Envoy + inline OPA real (allow-only); delegation policy output mocked |
 | 14 | Sub-Agent spawned with the narrowed badge | **Real** |
 | 15–18 | Sub-Agent `jwt-bearer` exchange, push file, open PR (via gitea-gateway) | **Real** |
 | 19 | OPA egress check | Mocked |
 | 20 | PR created, causal act-chain audit | **Real** |
 
-Mocked steps are intentionally out of scope for this demo — see
-`Envoy+OPA` in the compose file comments.
+Milestone 1 provisions a real Built On Envoy gateway and loads the inline OPA
+dynamic module with an explicit allow-all policy. Delegation-aware enforcement
+and the Sub-Agent resource path remain later milestones.
 
 ## Architecture
 
@@ -57,6 +58,7 @@ flowchart TB
 
     subgraph OrgB[" Org B "]
         KCB["Keycloak B\norg-b realm"]
+        Envoy["Built On Envoy\ninline OPA"]
         Triage["Triage Agent"]
         Sub["Sub-Agent\nbounded privilege"]
         GW["Gitea Gateway\nscope + deny-list"]
@@ -69,7 +71,8 @@ flowchart TB
     IdNode -.->|"proof JWT signing"| Vault
     OC -->|"mint assertion"| IDJAG
     OC -->|"jwt-bearer exchange"| KCB
-    OC -->|"POST /api/ticket"| Triage
+    OC -->|"POST /api/ticket"| Envoy
+    Envoy -->|"allow-only → proxy"| Triage
     Triage -->|"mint narrowed sub-badge"| IDJAG
     Triage -->|"spawn"| Sub
     Sub -->|"jwt-bearer exchange"| KCB
@@ -84,7 +87,7 @@ flowchart TB
     class Dir,IdNode,Vault,IDJAG shared;
 ```
 
-18 services on one Docker network (`cd-net`):
+21 services on one Docker network (`cd-net`):
 
 | Service | Image | Host port(s) | Purpose |
 |---|---|---|---|
@@ -104,6 +107,7 @@ flowchart TB
 | `gitea` | `gitea/gitea:1.22` | `3002` (HTTP), `2223` (SSH) | Protected resource (repo server) |
 | `gitea-init` | `gitea/gitea:1.22` | _(one-shot)_ | Seeds the Gitea admin + demo repo |
 | `gitea-gateway` | built from `../archive/single-org-id-jag-app-access/gitea-gateway` | `9103` | Enforces narrow scope + deny-list in front of Gitea |
+| `envoy-org-b` | built from `./envoy` (Envoy + Built On Envoy Composer) | `10000`, `10001`; admin `127.0.0.1:9901` | Org B gateway; inline OPA allow-only policy for Milestone 1 |
 | `opencode-agent` | built from `./opencode-agent` | `8101` | Org A mock agent (Phase A/B driver) |
 | `triage-agent` | built from `./triage-agent` | `8200` | Org B mock agent (ticket → sub-badge → spawn) |
 | `sub-agent` | built from `./sub-agent` | `8300` | Org B bounded-privilege mock agent (push + PR) |
@@ -185,7 +189,7 @@ sequenceDiagram
 ## Quick start
 
 ```bash
-cd demos/cross-domain-id-jag-vc
+cd cross-domain-id-jag-vc
 cp .env.example .env
 # SARAH_PASSWORD / OPENCODE_CLIENT_SECRET / TRIAGE_CLIENT_SECRET /
 # SUB_AGENT_CLIENT_SECRET must stay as the .env.example defaults (or be
@@ -193,6 +197,14 @@ cp .env.example .env
 # — everything else can be freely changed.
 
 docker compose up -d --build
+```
+
+The first build pulls the pinned Envoy base image and Built On Envoy Composer
+artifact. To deliberately refresh those pinned inputs:
+
+```bash
+docker compose build --pull envoy-org-b
+docker compose up -d envoy-org-b
 ```
 
 First boot takes ~3–5 minutes (Keycloak + identity-node + Directory cold
@@ -206,6 +218,103 @@ Wait until these one-shot containers exit 0: `kc-a-init`, `kc-b-init`,
 `gitea-init`, `identity-node-init`, `agent-dir-init`.
 
 ## Testing
+
+### Envoy Milestone 1 reviewer verification
+
+The following procedure verifies the image build, both proxy listeners, the
+Built On Envoy OPA module, the end-to-end demo path, and Envoy access logs.
+Run it from the repository root with Docker and Docker Compose available.
+
+1. Create the local environment file if one does not already exist, then build
+   the gateway from its digest-pinned multi-architecture inputs:
+
+   ```bash
+   cd cross-domain-id-jag-vc
+   test -f .env || cp .env.example .env
+   docker compose build --pull envoy-org-b
+   docker compose up -d --build
+   ```
+
+2. Allow 3–5 minutes for the first startup, then inspect the stack:
+
+   ```bash
+   docker compose ps -a
+   docker compose logs --tail=100 envoy-org-b
+   ```
+
+   `envoy-org-b` and the long-running services should be healthy. The
+   `kc-a-init`, `kc-b-init`, `gitea-init`, `identity-node-init`, and
+   `agent-dir-init` one-shot services should exit with status 0.
+
+3. Exercise both Envoy listeners and the admin readiness endpoint:
+
+   ```bash
+   curl --fail --silent --show-error http://localhost:10000/health | jq .
+   curl --fail --silent --show-error http://localhost:10001/healthz | jq .
+   curl --fail --silent --show-error http://127.0.0.1:9901/ready
+   ```
+
+   Both listener requests should return HTTP 200 JSON responses. The first is
+   proxied to `triage-agent`; the second is proxied to `gitea-gateway`. Envoy
+   readiness should print `LIVE`.
+
+4. Confirm that the inline OPA dynamic module evaluated both requests:
+
+   ```bash
+   curl --fail --silent --show-error \
+     'http://127.0.0.1:9901/stats?filter=opa_requests_total'
+   ```
+
+   The allowed counter should be at least 2 and resemble:
+
+   ```text
+   dynamicmodulescustom.opa_requests_total.decision.allowed: 2
+   ```
+
+5. Run the complete cross-domain remediation sequence:
+
+   ```bash
+   curl --fail --silent --show-error \
+     -X POST http://localhost:8090/api/run \
+     -H 'Content-Type: application/json' \
+     -d '{"cve":"CVE-2024-12345","repo":"demo-admin/payments-service"}' \
+     | jq '{ok, failed_steps: [.steps[] | select(.status == "error") | .id]}'
+   ```
+
+   The expected summary is:
+
+   ```json
+   {
+     "ok": true,
+     "failed_steps": []
+   }
+   ```
+
+6. Verify that the ticket request traversed Envoy:
+
+   ```bash
+   docker compose logs --since=5m envoy-org-b | grep triage_agent
+   ```
+
+   At least one JSON access-log entry should contain
+   `"upstream_cluster":"triage_agent"` and a 2xx `response_code`. The access
+   log deliberately excludes authorization and actor-token headers.
+
+Milestone 1 deliberately loads `allow-all.rego`: requests are expected to pass.
+Identity-aware allow/deny behavior is part of the next milestone; a denial test
+is therefore not an acceptance criterion for this PR.
+
+If a port is already allocated, change the corresponding `ENVOY_*_PORT` value
+in `.env`. For startup failures, inspect `docker compose logs envoy-org-b` and
+`docker compose logs triage-agent gitea-gateway`.
+
+When finished, stop the stack without deleting its persistent data:
+
+```bash
+docker compose down
+```
+
+Use `docker compose down -v` only when intentionally resetting all demo data.
 
 ### Via the webapp (recommended)
 
@@ -240,6 +349,9 @@ curl http://localhost:8083/realms/org-b/.well-known/openid-configuration | jq .i
 curl http://localhost:9002/jwks | jq .
 curl http://localhost:4005/v1alpha1/issuer/org-a/.well-known/jwks.json | jq .
 curl http://localhost:9103/healthz
+curl http://localhost:10000/health
+curl http://127.0.0.1:9901/ready
+curl 'http://127.0.0.1:9901/stats?filter=opa_requests_total'
 curl http://localhost:8200/health
 curl http://localhost:8200/.well-known/agent.json | jq .name
 grpcurl -plaintext localhost:8888 list   # Directory gRPC services (needs `brew install grpcurl`)
@@ -300,8 +412,9 @@ omit either and you'll get an opaque failure with no useful error message.
 
 ```
 cross-domain-id-jag-vc/
-├── docker-compose.yaml        # the 18-service stack (source of truth)
+├── docker-compose.yaml        # the 21-service stack (source of truth)
 ├── .env.example
+├── envoy/                     # Built On Envoy image, listeners, allow-only Rego policy
 ├── identity-node-init.py      # Vault Transit bootstrap + org-a issuer registration
 ├── keycloak-a/, keycloak-b/   # realm import JSON + scope bootstrap scripts
 ├── gitea/                     # Gitea admin/repo seed script
