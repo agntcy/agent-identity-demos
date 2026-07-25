@@ -331,7 +331,7 @@
 
         <!-- Triage: OPA + plan + mint sub-badge — lights up once mint-sub-badge (step 13) is revealed -->
         <g data-step="mint-sub-badge" class="g">
-          <text class="seq-label" x="924" y="586">OPA ingress ✓  plan  mint sub-badge (gitea:write gitea:pr)</text>
+          <text class="seq-label" x="924" y="586">OPA ingress ✓  mint repo-bound sub-badge (gitea:write gitea:pr)</text>
           <line class="seq-msg"      x1="922" y1="592" x2="654" y2="592" marker-end="url(#arr)"/>
           <text class="seq-label" x="652" y="610" text-anchor="end">sub-badge (act_chain: sarah→opencode→triage→sub)</text>
           <line class="seq-msg ret"  x1="654" y1="616" x2="928" y2="616" marker-end="url(#arr)"/>
@@ -344,15 +344,15 @@
           <line class="seq-msg ret"  x1="774" y1="652" x2="928" y2="652" marker-end="url(#arr)"/>
         </g>
 
-        <!-- push file + open PR — lights up once open-pr (step 18) is revealed -->
+        <!-- resource Envoy + push + PR — lights up once open-pr is revealed -->
         <g data-step="open-pr" class="g">
-          <text class="seq-label" x="924" y="672">push fix file + open PR</text>
+          <text class="seq-label" x="924" y="672">Envoy resource OPA ✓  push fix file + open PR</text>
           <line class="seq-msg"      x1="922" y1="678" x2="1056" y2="678" marker-end="url(#arr)"/>
           <text class="seq-label" x="1054" y="696" text-anchor="end">PR created ✓</text>
           <line class="seq-msg ret"  x1="1056" y1="702" x2="928" y2="702" marker-end="url(#arr)"/>
         </g>
 
-        <!-- OPA egress + final return — lights up once pr-created (step 20) is revealed -->
+        <!-- resource decision + final return — lights up once pr-created is revealed -->
         <g data-step="pr-created" class="g">
           <text class="seq-label" x="924" y="722">OPA egress: delegation depth ✓ sub-scope ⊆ parent ✓ → ALLOW</text>
           <path class="seq-msg" d="M922,728 L950,728 L950,738 L924,738" marker-end="url(#arr)"/>
@@ -459,9 +459,12 @@ POST /realms/org-b/protocol/openid-connect/token
     runs the inline OPA delegation policy before Triage plans the fix and mints
     a <b>narrowed sub-badge</b> for Sub-Agent:
     caps ⊆ parent — only <code>gitea:write gitea:pr</code> (no <code>triage:create</code>),
-    with a nested act-chain: <code>Sarah → OpenCode → Triage → Sub-Agent</code>.
-    Sub-Agent redeems the sub-badge at Keycloak B, pushes the fix file to a feature branch,
-    and opens a PR through the Gitea gateway.</p>
+    with a nested act-chain: <code>Sarah → OpenCode → Triage → Sub-Agent</code>,
+    signed intent <code>create-pr-fix</code>, and signed resource
+    <code>demo-admin/payments-service</code>. Sub-Agent redeems the sub-badge at
+    Keycloak B, then sends both the access token and original sub-badge through
+    Envoy's resource listener. Inline OPA permits only the repo-bound push and
+    pull-request operations before Gitea Gateway can use its admin credential.</p>
 
     <h2>Architecture</h2>
     <div class="diagram doc">
@@ -583,13 +586,13 @@ POST /realms/org-b/protocol/openid-connect/token
     'create-ticket': "OpenCode sends both the Org B access token and original actor token through Envoy. Both signatures must verify before the inline OPA policy checks their subject, scope, chain, signed intent, and target repo.",
     'opa-ingress': "Org B's Envoy gateway validates the access token and signed actor token, then inline OPA checks the delegation chain, scope, intent, method, path, and repository before Triage receives the ticket.",
     'plan': "Triage plans the fix and decides the actual code change should be delegated to a bounded sub-agent, not done itself.",
-    'mint-sub-badge': "Triage mints a narrower sub-badge for Sub-Agent — scoped only to gitea:write and gitea:pr, deliberately excluding triage:create. The delegation chain now has 3 links: Sarah → OpenCode → Triage → Sub-Agent.",
+    'mint-sub-badge': "Triage mints a narrower sub-badge for Sub-Agent — scoped only to gitea:write and gitea:pr, excluding triage:create, and cryptographically bound to the exact target repository. The delegation chain is Sarah → OpenCode → Triage → Sub-Agent.",
     'spawn-sub-agent': "Triage spawns Sub-Agent with the narrowed badge. Even though Triage launched it, Sub-Agent can't exceed what that badge grants.",
-    'idjag-gitea': "The access token Sub-Agent already holds carries exactly gitea:write and gitea:pr — no extra ID-JAG hop is needed to reach Gitea.",
-    'push-file': "Sub-Agent pushes the fix to a fresh, randomly-named feature branch. The gateway checks for gitea:write before allowing this.",
-    'open-pr': "Sub-Agent opens a pull request. The gateway checks gitea:pr — a separate scope from gitea:write, so a push-only token couldn't do this step.",
-    'denied-pr-attempt': "Sub-Agent tries the exact same PR call against demo-protected — a deny-listed repo. Same token, same gitea:pr scope, same everything — but the gateway's policy layer refuses it anyway. Scope says what a token *could* do; policy still gets the final word on *where*.",
-    'opa-egress': "(Mocked) Org B's egress policy would verify delegation depth and that Sub-Agent's scope is a subset of Triage's — defense in depth beyond the token alone.",
+    'idjag-gitea': "Sub-Agent carries two credentials to the resource boundary: its scoped Keycloak access token and the original signed sub-badge. Envoy verifies both independently.",
+    'push-file': "Sub-Agent asks Envoy to push a fix to a fresh feature branch. Inline OPA requires gitea:write and checks the signed intent, delegation chain, ticket, operation, and exact repository before forwarding.",
+    'open-pr': "Sub-Agent asks Envoy to open a pull request. The resource policy requires the separate gitea:pr scope, a main base branch, an agent feature branch, and the repository signed into the sub-badge.",
+    'denied-pr-attempt': "Sub-Agent tries the same PR operation against demo-protected. Envoy refuses it because the repository is protected and is outside the signed resource claim, even though the token still has gitea:pr.",
+    'opa-egress': "Org B's real inline resource policy verified both JWTs, delegation depth, narrowed scope, signed intent, operation shape, and exact repository before Gitea Gateway received the request.",
     'pr-created': "The PR is live. Every hop — Sarah, OpenCode, Triage, Sub-Agent — is recorded in the token's act chain: a full causal audit trail for one code change.",
   };
 

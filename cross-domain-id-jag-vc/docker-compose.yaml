@@ -4,7 +4,7 @@
 name: cross-domain-stack
 
 # Cross-domain agent remediation demo — sequence diagram:
-#   local scan → discovery → cross-domain token exchange → PDP (mocked) →
+#   local scan → discovery → cross-domain token exchange → inline OPA PDP →
 #   sub-agent spawn → Gitea PR audit
 #
 # Actors from the diagram:
@@ -14,7 +14,7 @@ name: cross-domain-stack
 #   Keycloak A     → Org A IdP (org-a realm), authenticates Sarah
 #   Envoy+OPA A    → SKIPPED (future Org A egress milestone)
 #   Keycloak B     → Org B IdP (org-b realm), receives cross-domain ID-JAG assertion
-#   Envoy+OPA B    → Built On Envoy gateway (Milestone 1 allow-only policy)
+#   Envoy+OPA B    → ticket-ingress + resource-access inline policies
 #   Triage         → Org B remediation agent (mock), steps 13-19
 #   Sub-Agent      → Org B sub-agent (mock, bounded privilege), steps 20-25
 #   Gitea          → resource (repository for PRs)
@@ -25,11 +25,10 @@ name: cross-domain-stack
 #   idjag-issuer    → host:9002  (AGNTCY assertion minter)
 #   identity-node   → host:4005 (REST) / 4006 (gRPC)
 #   gitea           → host:3002
-#   gitea-gateway   → host:9103  (Org B resource enforcer)
 #   envoy-org-b     → host:10000 (ticket ingress) / 10001 (resource access)
 #                     admin:127.0.0.1:9901
 #   opencode-agent  → host:8100  (Org A mock agent)
-#   triage-agent    → host:8200  (Org B mock agent)
+#   triage-agent    → internal only (behind Envoy)
 #   sub-agent       → host:8300  (Org B sub-agent)
 #
 # Quick start:
@@ -110,6 +109,7 @@ services:
       - ./keycloak-b:/opt/keycloak/data/import:ro
     networks:
       - cd-net
+      - resource-net
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && echo OK || exit 1"]
       interval: 5s
@@ -261,6 +261,7 @@ services:
       - "${GITEA_SSH_PORT:-2223}:22"
     networks:
       - cd-net
+      - resource-net
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:3000/api/healthz || exit 1"]
       interval: 5s
@@ -293,7 +294,7 @@ services:
   #   - Validates tokens issued by Keycloak B (org-b realm) via JWKS
   #   - Scope enforcement: gitea:read / gitea:write / gitea:pr
   #   - Policy deny-list: demo-protected is always blocked for PR creation
-  #   - Sub-Agent (step 22) calls this with its KC-B access token
+  #   - Internal-only; Sub-Agent traffic must traverse envoy-org-b:10001
   # ---------------------------------------------------------------------------
   gitea-gateway:
     build:
@@ -305,8 +306,6 @@ services:
         condition: service_healthy
       gitea:
         condition: service_healthy
-    ports:
-      - "${GITEA_GATEWAY_PORT:-9103}:9100"
     environment:
       # Validate tokens against Keycloak B (Org B)
       KEYCLOAK_URL: http://keycloak-b:8080
@@ -318,8 +317,9 @@ services:
       GITEA_WRITE_SCOPE: gitea:write
       GITEA_PR_SCOPE: gitea:pr
       GITEA_DENY_LIST: demo-protected
+      REQUIRE_ENVOY_POLICY: "true"
     networks:
-      - cd-net
+      - resource-net
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9100/healthz').status==200 else 1)\""]
       interval: 10s
@@ -330,9 +330,9 @@ services:
   # ---------------------------------------------------------------------------
   # Org B gateway — Envoy + Built On Envoy inline OPA dynamic module
   #   - Listener 10000 proxies cross-domain ticket requests to Triage
-  #   - Listener 10001 is provisioned for the resource boundary in Milestone 3
-  #   - Milestone 2 verifies the Org B access token and ID-JAG actor token, then
-  #     enforces the signed delegation, scope, intent, and resource in Rego
+  #   - Listener 10001 enforces Sub-Agent resource access before Gitea Gateway
+  #   - Both paths verify an Org B access token plus the original ID-JAG actor
+  #     token, then enforce delegation, scope, intent, and resource in Rego
   # ---------------------------------------------------------------------------
   envoy-org-b:
     build:
@@ -341,7 +341,7 @@ services:
       args:
         BOE_COMPOSER_IMAGE: ${BOE_COMPOSER_IMAGE:-ghcr.io/tetratelabs/built-on-envoy/composer:0.11.0-dev@sha256:842fca7db63af7385478380bf097c6e85eb16db7158a88778d6f2018b265d84f}
         ENVOY_IMAGE: ${ENVOY_BASE_IMAGE:-envoyproxy/envoy:v1.38.3@sha256:5f7c43e1147412fdb3af578c651c67478a3df818eae89d2261e707e06c209cdb}
-    image: cd-envoy-boe:${ENVOY_IMAGE_TAG:-milestone2}
+    image: cd-envoy-boe:${ENVOY_IMAGE_TAG:-milestone3}
     container_name: cd-envoy-org-b
     depends_on:
       keycloak-b:
@@ -358,6 +358,7 @@ services:
       - "127.0.0.1:${ENVOY_ADMIN_PORT:-9901}:9901"
     networks:
       - cd-net
+      - resource-net
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9901"]
       interval: 5s
@@ -456,11 +457,12 @@ services:
 
   # ---------------------------------------------------------------------------
   # Sub-Agent (mock) — Org B, bounded privilege
-  #   Steps 20-25: jwt-bearer exchange → push file → open PR → OPA (mocked) → PR created
+  #   Steps 20-25: jwt-bearer exchange → Envoy OPA → push file → open PR → PR created
   #
   # Spawned by Triage with a narrowed sub-badge carrying:
   #   - caps ⊆ parent (gitea:write gitea:pr only, no triage:create)
   #   - nested act-chain: Sarah → OpenCode → Triage → Sub-Agent
+  #   - signed intent=create-pr-fix and resource=the exact target repository
   # ---------------------------------------------------------------------------
   sub-agent:
     build:
@@ -482,7 +484,8 @@ services:
       SUB_AGENT_CLIENT_ID: sub-agent
       SUB_AGENT_CLIENT_SECRET: ${SUB_AGENT_CLIENT_SECRET:-demo-subagent-secret-change-me}
       IDJAG_ISSUER_URL: http://idjag-issuer:9000
-      GITEA_GATEWAY_URL: http://gitea-gateway:9100
+      # Org B resource boundary; direct Gitea Gateway access is not exposed.
+      GITEA_GATEWAY_URL: http://envoy-org-b:10001
       GITEA_ADMIN_USER: ${GITEA_ADMIN_USER:-demo-admin}
     networks:
       - cd-net
@@ -663,6 +666,9 @@ services:
 networks:
   cd-net:
     driver: bridge
+  resource-net:
+    driver: bridge
+    internal: true
 
 volumes:
   cd-gitea-data:

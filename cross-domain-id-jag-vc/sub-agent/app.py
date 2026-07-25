@@ -6,9 +6,10 @@
 Performs the bounded-privilege remediation action:
   20. RFC 8693 / jwt-bearer exchange (subject=Sarah, actor=sub-badge) → Keycloak B
   21. Use access token (carries gitea:write gitea:pr) for Gitea gateway calls
-  22. Push fix file to feature branch → gitea-gateway (needs gitea:write)
-  22b. Open PR → gitea-gateway (needs gitea:pr)
-  23-24. OPA: delegation depth ✓  sub-scope ⊆ parent ✓  action ∈ intent ✓  → ALLOW (mocked)
+  22. Push fix file through Envoy → gitea-gateway (needs gitea:write)
+  22b. Open PR through Envoy → gitea-gateway (needs gitea:pr)
+  23-24. Envoy verifies both JWTs; inline OPA enforces delegation, scope,
+         signed intent, operation, and repository
   25. PR created ✓
 
 The sub-badge carries a nested act-chain: Sarah → OpenCode → Triage → Sub-Agent.
@@ -30,7 +31,9 @@ KC_B_REALM = os.environ.get("KC_B_REALM", "org-b")
 SUB_AGENT_CLIENT_ID = os.environ.get("SUB_AGENT_CLIENT_ID", "sub-agent")
 SUB_AGENT_CLIENT_SECRET = os.environ.get("SUB_AGENT_CLIENT_SECRET", "")
 IDJAG_ISSUER_URL = os.environ.get("IDJAG_ISSUER_URL", "http://idjag-issuer:9000").rstrip("/")
-GITEA_GATEWAY_URL = os.environ.get("GITEA_GATEWAY_URL", "http://gitea-gateway:9100").rstrip("/")
+GITEA_GATEWAY_URL = os.environ.get(
+    "GITEA_GATEWAY_URL", "http://envoy-org-b:10001"
+).rstrip("/")
 GITEA_ADMIN_USER = os.environ.get("GITEA_ADMIN_USER", "demo-admin")
 
 KC_B_TOKEN_EP = f"{KC_B_URL}/realms/{KC_B_REALM}/protocol/openid-connect/token"
@@ -61,8 +64,10 @@ def config():
     }
 
 
-def _ok(status: str) -> bool:
-    return status in ("ok", "denied")
+def _expected_outcome(step: dict) -> bool:
+    if step.get("id") == "denied-pr-attempt":
+        return step.get("status") == "denied"
+    return step.get("status") == "ok"
 
 
 @app.post("/api/run")
@@ -108,19 +113,29 @@ async def run(body: RunRequest):
             return JSONResponse({"ok": False, "steps": steps})
         steps.append(s)
 
-        # ── Step 21: token carries gitea:write gitea:pr (no separate ID-JAG needed) ──
+        # ── Step 21: carry both credentials to the resource boundary ───────
         steps.append({
             "id": "idjag-gitea",
-            "title": "21. ID-JAG for Gitea API — access token from step 20 carries gitea:write gitea:pr",
+            "title": "21. Resource credentials — scoped access token + signed sub-badge",
             "status": "ok",
             "result": {
                 "note": (
                     "The sub-badge was scoped to gitea:write gitea:pr when minted by Triage. "
-                    "Keycloak B issued the access token with those scopes. "
-                    "gitea-gateway validates this token directly — no additional ID-JAG needed."
+                    "The Sub-Agent sends both that original badge and the resulting Keycloak B "
+                    "access token to Envoy for independent verification."
                 ),
             },
         })
+
+        resource_headers = {
+            "Authorization": f"Bearer {access_token}",
+            "X-AGNTCY-Actor-Token": f"Bearer {body.sub_badge}",
+        }
+        resource_context = {
+            "intent": body.intent,
+            "act_chain": body.act_chain,
+            "ticket_id": body.ticket_id,
+        }
 
         # ── Step 22: Push fix file to feature branch ───────────────────────
         s = {
@@ -131,7 +146,8 @@ async def run(body: RunRequest):
         try:
             r = await client.post(
                 f"{GITEA_GATEWAY_URL}/api/gitea/push/{owner}/{repo_slug}",
-                headers={"Authorization": f"Bearer {access_token}"},
+                headers=resource_headers,
+                json=resource_context,
             )
             if r.status_code in (200, 201):
                 s.update(status="ok", result=r.json())
@@ -154,8 +170,7 @@ async def run(body: RunRequest):
         try:
             r = await client.post(
                 f"{GITEA_GATEWAY_URL}/api/gitea/pulls/{owner}/{repo_slug}",
-                headers={"Authorization": f"Bearer {access_token}",
-                         "Content-Type": "application/json"},
+                headers=resource_headers,
                 json={
                     "head": branch,
                     "base": "main",
@@ -164,6 +179,7 @@ async def run(body: RunRequest):
                         f" [ticket={body.ticket_id or 'TRIAGE'}]"
                         f" [act-chain={' → '.join(body.act_chain)}]"
                     ),
+                    **resource_context,
                 },
             )
             if r.status_code in (200, 201):
@@ -188,12 +204,12 @@ async def run(body: RunRequest):
         try:
             r = await client.post(
                 f"{GITEA_GATEWAY_URL}/api/gitea/pulls/{owner}/demo-protected",
-                headers={"Authorization": f"Bearer {access_token}",
-                         "Content-Type": "application/json"},
+                headers=resource_headers,
                 json={
                     "head": branch,
                     "base": "main",
                     "title": "fix: attempted change to a protected repo (expected to be denied)",
+                    **resource_context,
                 },
             )
             if r.status_code == 403:
@@ -210,19 +226,32 @@ async def run(body: RunRequest):
             s.update(status="error", error=str(exc))
         steps.append(s)
 
-        # ── Steps 23-24: OPA egress (mocked — ALLOW) ───────────────────────
+        # ── Steps 23-24: real Envoy + inline OPA resource decision ─────────
+        policy = next(
+            (
+                step.get("result", {}).get("policy")
+                for step in steps
+                if step.get("id") in {"push-file", "open-pr"}
+                and step.get("result", {}).get("policy")
+            ),
+            {},
+        )
         steps.append({
             "id": "opa-egress",
             "title": (
-                "23-24. OPA: delegation depth ✓  sub-scope ⊆ parent ✓"
-                "  action ∈ intent ✓  → ALLOW (mocked)"
+                "23-24. Envoy + OPA resource boundary: both JWTs ✓  depth ✓"
+                "  sub-scope ✓  signed intent ✓  repository ✓  → ALLOW"
             ),
-            "status": "ok",
+            "status": "ok" if policy.get("decision") == "ALLOW" else "error",
             "result": {
-                "decision": "ALLOW",
-                "delegation_depth": len(body.act_chain),
+                "decision": policy.get("decision"),
+                "enforced_by": policy.get("enforced_by"),
+                "rule": policy.get("rule"),
+                "action": policy.get("action"),
+                "repository": policy.get("repository"),
+                "delegation_depth": policy.get("delegation_depth"),
                 "sub_scope_subset": True,
-                "note": "mocked — real impl: Envoy+OPA at Org B ingress verifies depth + sub-scope",
+                "note": "decision headers were injected by the Built On Envoy inline OPA filter",
             },
         })
 
@@ -232,7 +261,7 @@ async def run(body: RunRequest):
     steps.append({
         "id": "pr-created",
         "title": "25. PR created ✓ — causal audit: Sarah → OpenCode → Triage → Sub-Agent",
-        "status": "ok" if _ok(pr_step.get("status", "error")) else "error",
+        "status": "ok" if pr_step.get("status") == "ok" else "error",
         "result": {
             "pr_url": pr_url,
             "act_chain": body.act_chain,
@@ -242,6 +271,6 @@ async def run(body: RunRequest):
     })
 
     return JSONResponse({
-        "ok": all(_ok(s.get("status", "error")) for s in steps),
+        "ok": all(_expected_outcome(step) for step in steps),
         "steps": steps,
     })

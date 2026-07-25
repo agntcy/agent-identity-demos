@@ -15,7 +15,9 @@ The most complete demo. Shows a full cross-domain agent delegation scenario:
 - Org B's **Triage** agent narrows the privilege further and spawns a bounded **Sub-Agent** to open the PR
 - Every step is audited via the **AGNTCY Directory Node** (OASF records) and identities are minted/resolved through the **AGNTCY Identity Node** with Vault-backed cryptographic proof
 
-18 services total. Most steps are real (Keycloak, Vault, identity-node, Gitea); CVE scan and OPA policy checks are intentionally mocked.
+21 services total. Most steps are real (Keycloak, Vault, identity-node, Gitea,
+and two Built On Envoy inline OPA boundaries); only the CVE scan and Org A
+token exchange are intentionally mocked.
 
 → [Full walkthrough and quick start](./cross-domain-id-jag-vc/README.md)
 
