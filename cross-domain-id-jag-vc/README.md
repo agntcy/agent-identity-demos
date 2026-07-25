@@ -189,7 +189,7 @@ sequenceDiagram
 ## Quick start
 
 ```bash
-cd demos/cross-domain-id-jag-vc
+cd cross-domain-id-jag-vc
 cp .env.example .env
 # SARAH_PASSWORD / OPENCODE_CLIENT_SECRET / TRIAGE_CLIENT_SECRET /
 # SUB_AGENT_CLIENT_SECRET must stay as the .env.example defaults (or be
@@ -218,6 +218,103 @@ Wait until these one-shot containers exit 0: `kc-a-init`, `kc-b-init`,
 `gitea-init`, `identity-node-init`, `agent-dir-init`.
 
 ## Testing
+
+### Envoy Milestone 1 reviewer verification
+
+The following procedure verifies the image build, both proxy listeners, the
+Built On Envoy OPA module, the end-to-end demo path, and Envoy access logs.
+Run it from the repository root with Docker and Docker Compose available.
+
+1. Create the local environment file if one does not already exist, then build
+   the gateway from its digest-pinned multi-architecture inputs:
+
+   ```bash
+   cd cross-domain-id-jag-vc
+   test -f .env || cp .env.example .env
+   docker compose build --pull envoy-org-b
+   docker compose up -d --build
+   ```
+
+2. Allow 3–5 minutes for the first startup, then inspect the stack:
+
+   ```bash
+   docker compose ps -a
+   docker compose logs --tail=100 envoy-org-b
+   ```
+
+   `envoy-org-b` and the long-running services should be healthy. The
+   `kc-a-init`, `kc-b-init`, `gitea-init`, `identity-node-init`, and
+   `agent-dir-init` one-shot services should exit with status 0.
+
+3. Exercise both Envoy listeners and the admin readiness endpoint:
+
+   ```bash
+   curl --fail --silent --show-error http://localhost:10000/health | jq .
+   curl --fail --silent --show-error http://localhost:10001/healthz | jq .
+   curl --fail --silent --show-error http://127.0.0.1:9901/ready
+   ```
+
+   Both listener requests should return HTTP 200 JSON responses. The first is
+   proxied to `triage-agent`; the second is proxied to `gitea-gateway`. Envoy
+   readiness should print `LIVE`.
+
+4. Confirm that the inline OPA dynamic module evaluated both requests:
+
+   ```bash
+   curl --fail --silent --show-error \
+     'http://127.0.0.1:9901/stats?filter=opa_requests_total'
+   ```
+
+   The allowed counter should be at least 2 and resemble:
+
+   ```text
+   dynamicmodulescustom.opa_requests_total.decision.allowed: 2
+   ```
+
+5. Run the complete cross-domain remediation sequence:
+
+   ```bash
+   curl --fail --silent --show-error \
+     -X POST http://localhost:8090/api/run \
+     -H 'Content-Type: application/json' \
+     -d '{"cve":"CVE-2024-12345","repo":"demo-admin/payments-service"}' \
+     | jq '{ok, failed_steps: [.steps[] | select(.status == "error") | .id]}'
+   ```
+
+   The expected summary is:
+
+   ```json
+   {
+     "ok": true,
+     "failed_steps": []
+   }
+   ```
+
+6. Verify that the ticket request traversed Envoy:
+
+   ```bash
+   docker compose logs --since=5m envoy-org-b | grep triage_agent
+   ```
+
+   At least one JSON access-log entry should contain
+   `"upstream_cluster":"triage_agent"` and a 2xx `response_code`. The access
+   log deliberately excludes authorization and actor-token headers.
+
+Milestone 1 deliberately loads `allow-all.rego`: requests are expected to pass.
+Identity-aware allow/deny behavior is part of the next milestone; a denial test
+is therefore not an acceptance criterion for this PR.
+
+If a port is already allocated, change the corresponding `ENVOY_*_PORT` value
+in `.env`. For startup failures, inspect `docker compose logs envoy-org-b` and
+`docker compose logs triage-agent gitea-gateway`.
+
+When finished, stop the stack without deleting its persistent data:
+
+```bash
+docker compose down
+```
+
+Use `docker compose down -v` only when intentionally resetting all demo data.
 
 ### Via the webapp (recommended)
 
