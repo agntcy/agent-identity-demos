@@ -92,6 +92,9 @@ class MintRequest(BaseModel):
     # Optional acting agent chain, mirrored into the `act` claim.
     act_chain: list[str] | None = None
     scope: str | None = None
+    # Demo-private intended actions bound into the signed assertion. The
+    # receiving Envoy policy requires the requested action to appear here.
+    intent: list[str] | None = None
 
 
 @app.post("/mint")
@@ -112,6 +115,8 @@ def mint(body: MintRequest):
         claims["scope"] = body.scope
     if body.act_chain:
         claims["act"] = {"sub": body.act_chain[-1], "act_chain": body.act_chain}
+    if body.intent:
+        claims["intent"] = body.intent
 
     assertion = jwt.encode(
         claims,

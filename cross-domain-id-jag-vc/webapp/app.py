@@ -94,6 +94,7 @@ class KcBExchangeBody(BaseModel):
 
 class CreateTicketBody(BaseModel):
     triage_token: str
+    actor_token: str
     cve: str = "CVE-2024-12345"
     repo: str = SCAN_REPO
 
@@ -494,6 +495,7 @@ async def _mint_idjag(client: httpx.AsyncClient, sarah_email: str) -> dict:
         "client_id": TRIAGE_CLIENT_ID,
         "act_chain": [OPENCODE_CLIENT_ID],
         "scope": "openid triage:create",
+        "intent": ["create-pr-fix"],
     }
     try:
         r = await client.post(url, json=payload)
@@ -565,6 +567,7 @@ async def _kc_b_exchange(client: httpx.AsyncClient, assertion: str) -> dict:
 async def _create_ticket(
     client: httpx.AsyncClient,
     triage_token: str,
+    actor_token: str,
     cve: str,
     repo: str,
 ) -> list[dict]:
@@ -590,7 +593,10 @@ async def _create_ticket(
                 "delegating_agent": OPENCODE_CLIENT_ID,
                 "act_chain": [OPENCODE_CLIENT_ID],
             },
-            headers={"Authorization": f"Bearer {triage_token}"},
+            headers={
+                "Authorization": f"Bearer {triage_token}",
+                "X-AGNTCY-Actor-Token": f"Bearer {actor_token}",
+            },
             timeout=90,
         )
         if r.status_code in (200, 201):
@@ -677,19 +683,9 @@ async def run_all(body: RunBody) -> JSONResponse:
         steps.append(mint_step)
         if mint_step["status"] != "ok":
             return JSONResponse({"ok": False, "steps": steps})
-        # Retrieve full assertion (stored in result→assertion_preview is truncated; re-mint)
-        assertion = ""
-        try:
-            r2 = await client.post(f"{IDJAG_ISSUER_URL}/mint", json={
-                "sub": SARAH_EMAIL,
-                "aud": KC_B_ISSUER,
-                "client_id": TRIAGE_CLIENT_ID,
-                "act_chain": [OPENCODE_CLIENT_ID],
-                "scope": "openid triage:create",
-            })
-            assertion = r2.json().get("assertion", "")
-        except Exception:  # noqa: BLE001
-            pass
+        # Retain the same signed assertion for Keycloak redemption and Envoy's
+        # independent actor-token verification.
+        assertion = mint_step["result"].get("assertion", "")
 
         # 9. KC-B jwt-bearer exchange (assertions are single-use — one call only)
         exchange_step = await _kc_b_exchange(client, assertion)
@@ -699,7 +695,9 @@ async def run_all(body: RunBody) -> JSONResponse:
             return JSONResponse({"ok": False, "steps": steps})
 
         # 10+. Create ticket + all nested steps
-        ticket_steps = await _create_ticket(client, triage_token, body.cve, body.repo)
+        ticket_steps = await _create_ticket(
+            client, triage_token, assertion, body.cve, body.repo
+        )
         steps.extend(ticket_steps)
 
     all_ok = all(s.get("status") in ("ok", "denied") for s in steps)
@@ -762,7 +760,9 @@ async def step_dir_search(body: DirSearchBody) -> JSONResponse:
 @app.post("/api/step/create-ticket")
 async def step_create_ticket(body: CreateTicketBody) -> JSONResponse:
     async with httpx.AsyncClient(timeout=90) as client:
-        ticket_steps = await _create_ticket(client, body.triage_token, body.cve, body.repo)
+        ticket_steps = await _create_ticket(
+            client, body.triage_token, body.actor_token, body.cve, body.repo
+        )
     return JSONResponse({"steps": ticket_steps})
 
 

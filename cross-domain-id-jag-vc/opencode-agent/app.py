@@ -167,6 +167,7 @@ async def run(body: RunRequest | None = None):
                 "client_id": TRIAGE_CLIENT_ID,
                 "act_chain": [OPENCODE_CLIENT_ID],
                 "scope": "openid triage:create",
+                "intent": ["create-pr-fix"],
             })
             if r.status_code == 200:
                 assertion = r.json()["assertion"]
@@ -214,8 +215,11 @@ async def run(body: RunRequest | None = None):
         try:
             r = await client.post(
                 f"{TRIAGE_AGENT_URL}/api/ticket",
-                headers={"Authorization": f"Bearer {triage_token}",
-                         "Content-Type": "application/json"},
+                headers={
+                    "Authorization": f"Bearer {triage_token}",
+                    "X-AGNTCY-Actor-Token": f"Bearer {assertion}",
+                    "Content-Type": "application/json",
+                },
                 json={
                     "cve": cve,
                     "severity": "HIGH",
