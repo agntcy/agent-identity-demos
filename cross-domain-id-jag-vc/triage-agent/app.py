@@ -8,7 +8,8 @@ fix, requests a narrowed sub-badge, and spawns the Sub-Agent.
 
 Sequence steps handled here:
   13. Receive ticket (access token + badge + intent) — from OpenCode
-  14-15. Policy check — OPA (mocked: always ALLOW for valid act-chain + intent)
+  14-15. Policy check — Envoy verifies both JWTs and inline OPA enforces the
+         delegation scope, chain, signed intent, method, path, and repository
   16. Create ticket, plan remediation, decide sub-agent
   17-18. Request narrowed sub-badge (caps ⊆ parent, nested act-chain) → idjag-issuer
   19. Spawn sub-agent with narrowed badge + intent
@@ -87,28 +88,48 @@ def agent_card():
 async def receive_ticket(
     body: TicketRequest,
     authorization: str | None = Header(default=None),
+    policy_decision: str | None = Header(
+        default=None, alias="x-agntcy-policy-decision"
+    ),
+    policy_rule: str | None = Header(default=None, alias="x-agntcy-policy-rule"),
+    policy_enforcer: str | None = Header(
+        default=None, alias="x-agntcy-policy-enforcer"
+    ),
+    delegation_depth: str | None = Header(
+        default=None, alias="x-agntcy-delegation-depth"
+    ),
 ):
     """Receive a remediation ticket from OpenCode and drive the Org B side of the flow."""
     steps: list[dict] = []
 
-    # Minimal bearer check — real impl would verify against KC-B JWKS
+    # Envoy has already verified the bearer token against KC-B JWKS. Keep a
+    # minimal downstream guard so accidentally direct requests fail closed.
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="missing bearer token")
+    if policy_decision != "ALLOW":
+        raise HTTPException(
+            status_code=403,
+            detail="ticket requests must pass the Org B Envoy policy gateway",
+        )
 
-    # ── Steps 14-15: Policy check (OPA mocked — ALLOW) ────────────────────
+    # ── Steps 14-15: Policy check (real Envoy + inline OPA ALLOW) ─────────
     steps.append({
         "id": "opa-ingress",
-        "title": "14-15. OPA ingress: badge sig ✓  act-chain ✓  scope ⊆ ✓  action ∈ intent ✓  → ALLOW",
+        "title": "14-15. Envoy + OPA ingress: both JWTs ✓  chain ✓  scope ✓  action ∈ signed intent ✓  → ALLOW",
         "status": "ok",
         "result": {
-            "decision": "ALLOW",
+            "decision": policy_decision,
+            "enforced_by": policy_enforcer,
+            "rule": policy_rule,
+            "delegation_depth": int(delegation_depth or "0"),
             "checks": {
-                "badge_sig": True,
+                "access_token_signature": True,
+                "actor_token_signature": True,
                 "act_chain": body.act_chain,
-                "scope_subset": True,
+                "required_scope": "triage:create",
                 "action_in_intent": True,
             },
-            "note": "mocked — real impl: Envoy+OPA policy evaluation",
+            "note": "decision headers were injected by the Built On Envoy inline OPA filter",
         },
     })
 
@@ -149,6 +170,7 @@ async def receive_ticket(
                 "client_id": SUB_AGENT_CLIENT_ID,
                 "act_chain": parent_chain + [TRIAGE_CLIENT_ID],
                 "scope": sub_scope,
+                "intent": [body.intent],
             })
             if r.status_code == 200:
                 sub_badge = r.json()["assertion"]

@@ -331,8 +331,8 @@ services:
   # Org B gateway — Envoy + Built On Envoy inline OPA dynamic module
   #   - Listener 10000 proxies cross-domain ticket requests to Triage
   #   - Listener 10001 is provisioned for the resource boundary in Milestone 3
-  #   - Milestone 1 loads an explicit allow-all Rego policy to prove the image,
-  #     dynamic module, routing, and observability path before enforcement
+  #   - Milestone 2 verifies the Org B access token and ID-JAG actor token, then
+  #     enforces the signed delegation, scope, intent, and resource in Rego
   # ---------------------------------------------------------------------------
   envoy-org-b:
     build:
@@ -341,9 +341,13 @@ services:
       args:
         BOE_COMPOSER_IMAGE: ${BOE_COMPOSER_IMAGE:-ghcr.io/tetratelabs/built-on-envoy/composer:0.11.0-dev@sha256:842fca7db63af7385478380bf097c6e85eb16db7158a88778d6f2018b265d84f}
         ENVOY_IMAGE: ${ENVOY_BASE_IMAGE:-envoyproxy/envoy:v1.38.3@sha256:5f7c43e1147412fdb3af578c651c67478a3df818eae89d2261e707e06c209cdb}
-    image: cd-envoy-boe:${ENVOY_IMAGE_TAG:-milestone1}
+    image: cd-envoy-boe:${ENVOY_IMAGE_TAG:-milestone2}
     container_name: cd-envoy-org-b
     depends_on:
+      keycloak-b:
+        condition: service_healthy
+      idjag-issuer:
+        condition: service_healthy
       triage-agent:
         condition: service_healthy
       gitea-gateway:
@@ -365,7 +369,7 @@ services:
   # OpenCode Agent (mock) — Org A AI agent
   #   Phase A (steps 1-2): Sarah sign-in, mock CVE scan
   #   Discovery (steps 3-6): badge resolution (mocked → identity-node)
-  #   Phase B (steps 7-13): RFC 8693 exchange (mocked), mint ID-JAG, redeem at KC-B, create ticket
+  #   Phase B (steps 7-13): mint ID-JAG, redeem at KC-B, Envoy JWT + OPA enforcement, create ticket
   #
   # Trigger: POST http://localhost:8100/api/run
   # ---------------------------------------------------------------------------
@@ -417,9 +421,9 @@ services:
 
   # ---------------------------------------------------------------------------
   # Triage Agent (mock) — Org B remediation agent
-  #   Steps 13-19: receive ticket → mock OPA → plan → mint sub-badge → spawn sub-agent
+  #   Steps 13-19: receive policy-approved ticket → plan → mint sub-badge → spawn sub-agent
   #
-  # Called by OpenCode (step 13) with a Keycloak B access token.
+  # Reachable only on cd-net; OpenCode must enter through envoy-org-b.
   # ---------------------------------------------------------------------------
   triage-agent:
     build:
@@ -433,8 +437,6 @@ services:
         condition: service_healthy
       sub-agent:
         condition: service_started
-    ports:
-      - "${TRIAGE_PORT:-8200}:8200"
     environment:
       KC_B_URL: http://keycloak-b:8080
       KC_B_REALM: org-b

@@ -325,7 +325,7 @@
         <!-- ── Step 10: create-ticket (cascade) ── -->
         <g data-step="create-ticket" class="g">
           <text class="seq-num"   x="72"  y="560">10</text>
-          <text class="seq-label" x="92"  y="560">POST /api/ticket  Bearer=triage_token  cve=…  intent=create-pr-fix</text>
+          <text class="seq-label" x="92"  y="560">POST /api/ticket  access + actor tokens  cve=…  intent=create-pr-fix</text>
           <line class="seq-msg"      x1="62" y1="566" x2="916" y2="566" marker-end="url(#arr)"/>
         </g>
 
@@ -431,7 +431,8 @@ POST /v1alpha1/id/resolve
     <h3>Cross-domain token exchange (steps 7–10)</h3>
     <p>OpenCode mints an ID-JAG assertion at <code>idjag-issuer</code>:
     a short-lived RS256 JWT with <code>sub=sarah@org-a.example</code>, <code>act_chain=[opencode-agent]</code>,
-    <code>aud=KC-B org-b realm</code>, and <code>scope=triage:create</code>.
+    <code>aud=KC-B org-b realm</code>, <code>scope=triage:create</code>, and
+    <code>intent=[create-pr-fix]</code>.
     Org B's Keycloak validates the assertion against the issuer's JWKS, maps Sarah's identity,
     and issues a scoped access token.</p>
     <pre><code>POST /mint   # idjag-issuer
@@ -440,7 +441,8 @@ POST /v1alpha1/id/resolve
   "aud": "http://keycloak-b:8080/realms/org-b",
   "client_id": "triage-agent",
   "act_chain": ["opencode-agent"],
-  "scope": "openid triage:create"
+  "scope": "openid triage:create",
+  "intent": ["create-pr-fix"]
 }
 → {"assertion": "eyJ…"}
 
@@ -452,8 +454,10 @@ POST /realms/org-b/protocol/openid-connect/token
 → {"access_token": "eyJ…", "scope": "triage:create"}</code></pre>
 
     <h3>Org B — Triage agent &amp; bounded sub-agent (steps 11+)</h3>
-    <p>OpenCode calls <code>POST /api/ticket</code> on the Triage agent with the scoped token.
-    Triage runs an OPA policy check, plans the fix, then mints a <b>narrowed sub-badge</b> for Sub-Agent:
+    <p>OpenCode calls <code>POST /api/ticket</code> through Envoy with the scoped
+    access token and signed actor token. Envoy validates both signatures and
+    runs the inline OPA delegation policy before Triage plans the fix and mints
+    a <b>narrowed sub-badge</b> for Sub-Agent:
     caps ⊆ parent — only <code>gitea:write gitea:pr</code> (no <code>triage:create</code>),
     with a nested act-chain: <code>Sarah → OpenCode → Triage → Sub-Agent</code>.
     Sub-Agent redeems the sub-badge at Keycloak B, pushes the fix file to a feature branch,
@@ -576,8 +580,8 @@ POST /realms/org-b/protocol/openid-connect/token
     'kc-a-exchange': "(Mocked) OpenCode would exchange Sarah's token for its own actor token via RFC 8693, formally recording 'OpenCode acting on Sarah's behalf' in the token.",
     'mint-idjag': "OpenCode mints a signed ID-JAG assertion — a portable, cryptographically-signed statement that Sarah authorizes OpenCode to act as triage-agent in Org B, scoped to only triage:create.",
     'kc-b-exchange': "Org B's Keycloak verifies the assertion's signature and issues a scoped local access token. This is where the cross-domain trust boundary is actually crossed.",
-    'create-ticket': "OpenCode hands the remediation ticket to Triage using the scoped token. That token can't do anything beyond triage:create.",
-    'opa-ingress': "(Mocked) Org B's policy layer would check the badge signature, delegation chain, and scope before letting Triage process the ticket.",
+    'create-ticket': "OpenCode sends both the Org B access token and original actor token through Envoy. Both signatures must verify before the inline OPA policy checks their subject, scope, chain, signed intent, and target repo.",
+    'opa-ingress': "Org B's Envoy gateway validates the access token and signed actor token, then inline OPA checks the delegation chain, scope, intent, method, path, and repository before Triage receives the ticket.",
     'plan': "Triage plans the fix and decides the actual code change should be delegated to a bounded sub-agent, not done itself.",
     'mint-sub-badge': "Triage mints a narrower sub-badge for Sub-Agent — scoped only to gitea:write and gitea:pr, deliberately excluding triage:create. The delegation chain now has 3 links: Sarah → OpenCode → Triage → Sub-Agent.",
     'spawn-sub-agent': "Triage spawns Sub-Agent with the narrowed badge. Even though Triage launched it, Sub-Agent can't exceed what that badge grants.",

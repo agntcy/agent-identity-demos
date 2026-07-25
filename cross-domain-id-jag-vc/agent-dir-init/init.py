@@ -77,26 +77,34 @@ AGENTS = [
 
 
 def wait_for_directory(max_tries=30, interval=3.0):
-    """Poll until dir-apiserver gRPC port responds."""
+    """Poll until dir-apiserver accepts an RPC, not merely a TCP connection."""
     print(f"Waiting for directory at {DIR_APISERVER_URL}...")
     for i in range(max_tries):
+        channel = grpc.insecure_channel(DIR_APISERVER_URL)
         try:
-            channel = grpc.insecure_channel(DIR_APISERVER_URL)
             stub = store_service_pb2_grpc.StoreServiceStub(channel)
-            # Test with empty push (will return immediately or error on stream)
+            # An empty stream is side-effect free and exercises the real
+            # service. UNAVAILABLE means the container has started but gRPC is
+            # not ready yet.
             list(stub.Push(iter([])))
-            channel.close()
             print("Directory is ready.")
             return True
-        except grpc.RpcError:
-            # Any RPC error (including server-side stream termination) means port is open
-            channel.close()
-            print("Directory is ready.")
-            return True
+        except grpc.RpcError as exc:
+            if exc.code() != grpc.StatusCode.UNAVAILABLE:
+                print("Directory is ready.")
+                return True
+            if i < max_tries - 1:
+                print(
+                    f"  attempt {i+1}/{max_tries}: {exc.code().name}"
+                    f" — retrying in {interval}s"
+                )
+                time.sleep(interval)
         except Exception as e:
             if i < max_tries - 1:
                 print(f"  attempt {i+1}/{max_tries}: {e} — retrying in {interval}s")
                 time.sleep(interval)
+        finally:
+            channel.close()
     print("ERROR: Directory not ready after all retries.", file=sys.stderr)
     return False
 

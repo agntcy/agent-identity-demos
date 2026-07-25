@@ -47,6 +47,52 @@ static_resources:
                             cluster: triage_agent
                             timeout: 90s
                 http_filters:
+                  - name: envoy.filters.http.jwt_authn
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                      providers:
+                        org_b_access_token:
+                          issuer: http://keycloak-b:8080/realms/org-b
+                          from_headers:
+                            - name: Authorization
+                              value_prefix: "Bearer "
+                          remote_jwks:
+                            http_uri:
+                              uri: http://keycloak-b:8080/realms/org-b/protocol/openid-connect/certs
+                              cluster: keycloak_b_jwks
+                              timeout: 5s
+                            cache_duration: 300s
+                          forward: true
+                          forward_payload_header: x-verified-access-token-payload
+                        idjag_actor_token:
+                          issuer: http://idjag-issuer:9000
+                          audiences:
+                            - http://keycloak-b:8080/realms/org-b
+                          from_headers:
+                            - name: X-AGNTCY-Actor-Token
+                              value_prefix: "Bearer "
+                          remote_jwks:
+                            http_uri:
+                              uri: http://idjag-issuer:9000/jwks
+                              cluster: idjag_issuer_jwks
+                              timeout: 5s
+                            cache_duration: 300s
+                          forward: false
+                          forward_payload_header: x-verified-actor-token-payload
+                      rules:
+                        - match:
+                            path: "/health"
+                        - match:
+                            prefix: "/"
+                          requires:
+                            requires_all:
+                              requirements:
+                                - provider_name: org_b_access_token
+                                - provider_name: idjag_actor_token
+                  - name: envoy.filters.http.buffer
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.buffer.v3.Buffer
+                      max_request_bytes: 65536
                   - name: io.builtonenvoy.opa
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.dynamic_modules.v3.DynamicModuleFilter
@@ -55,7 +101,7 @@ static_resources:
                       filter_name: opa
                       filter_config:
                         "@type": type.googleapis.com/google.protobuf.StringValue
-                        value: '{"policies":[{"file":"/etc/envoy/policies/allow-all.rego"}],"fail_open":false}'
+                        value: '{"policies":[{"file":"/etc/envoy/policies/ticket-ingress.rego"}],"with_body":true,"fail_open":false}'
                   - name: envoy.filters.http.router
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
@@ -112,6 +158,32 @@ static_resources:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
   clusters:
+    - name: keycloak_b_jwks
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: keycloak_b_jwks
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: keycloak-b
+                      port_value: 8080
+
+    - name: idjag_issuer_jwks
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: idjag_issuer_jwks
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: idjag-issuer
+                      port_value: 9000
+
     - name: triage_agent
       type: STRICT_DNS
       connect_timeout: 5s

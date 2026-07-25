@@ -28,15 +28,17 @@ It also wires in two AGNTCY components for real:
 | 5–6 | CIMD generate/resolve id (Vault-signed proof JWT → identity-node) | **Real** |
 | 7 | RFC 8693 token exchange at Keycloak A | Mocked |
 | 8–9 | ID-JAG mint + Keycloak B `jwt-bearer` redemption | **Real** |
-| 10–13 | Envoy ingress, ticket creation, OPA check, plan, sub-badge mint | Envoy + inline OPA real (allow-only); delegation policy output mocked |
+| 10–13 | Envoy ingress, ticket creation, OPA check, plan, sub-badge mint | **Real** two-token JWT verification + inline delegation-aware OPA policy |
 | 14 | Sub-Agent spawned with the narrowed badge | **Real** |
 | 15–18 | Sub-Agent `jwt-bearer` exchange, push file, open PR (via gitea-gateway) | **Real** |
 | 19 | OPA egress check | Mocked |
 | 20 | PR created, causal act-chain audit | **Real** |
 
-Milestone 1 provisions a real Built On Envoy gateway and loads the inline OPA
-dynamic module with an explicit allow-all policy. Delegation-aware enforcement
-and the Sub-Agent resource path remain later milestones.
+Milestone 1 provisioned the Built On Envoy gateway and inline OPA module.
+Milestone 2 protects ticket ingress by verifying the Keycloak B access token
+and the original ID-JAG actor token, then enforcing signed scope, delegation
+chain, intent, and repository constraints. The Sub-Agent resource path remains
+for Milestone 3.
 
 ## Architecture
 
@@ -72,7 +74,7 @@ flowchart TB
     OC -->|"mint assertion"| IDJAG
     OC -->|"jwt-bearer exchange"| KCB
     OC -->|"POST /api/ticket"| Envoy
-    Envoy -->|"allow-only → proxy"| Triage
+    Envoy -->|"verify both JWTs + enforce delegation"| Triage
     Triage -->|"mint narrowed sub-badge"| IDJAG
     Triage -->|"spawn"| Sub
     Sub -->|"jwt-bearer exchange"| KCB
@@ -107,9 +109,9 @@ flowchart TB
 | `gitea` | `gitea/gitea:1.22` | `3002` (HTTP), `2223` (SSH) | Protected resource (repo server) |
 | `gitea-init` | `gitea/gitea:1.22` | _(one-shot)_ | Seeds the Gitea admin + demo repo |
 | `gitea-gateway` | built from `../archive/single-org-id-jag-app-access/gitea-gateway` | `9103` | Enforces narrow scope + deny-list in front of Gitea |
-| `envoy-org-b` | built from `./envoy` (Envoy + Built On Envoy Composer) | `10000`, `10001`; admin `127.0.0.1:9901` | Org B gateway; inline OPA allow-only policy for Milestone 1 |
+| `envoy-org-b` | built from `./envoy` (Envoy + Built On Envoy Composer) | `10000`, `10001`; admin `127.0.0.1:9901` | Org B gateway; JWT verification + inline OPA ticket-ingress policy |
 | `opencode-agent` | built from `./opencode-agent` | `8101` | Org A mock agent (Phase A/B driver) |
-| `triage-agent` | built from `./triage-agent` | `8200` | Org B mock agent (ticket → sub-badge → spawn) |
+| `triage-agent` | built from `./triage-agent` | _(internal only)_ | Org B mock agent; reachable from outside `cd-net` only through Envoy |
 | `sub-agent` | built from `./sub-agent` | `8300` | Org B bounded-privilege mock agent (push + PR) |
 | `webapp` | built from `./webapp` | `8090` | Animated sequence-diagram demo UI |
 
@@ -117,9 +119,9 @@ flowchart TB
 
 Every hop below actually happens against the real services in this stack
 (Keycloak, Vault, identity-node, dir-apiserver, Gitea) — the only mocked
-steps are the CVE scan itself and the two OPA policy checkpoints, called out
-explicitly in the diagram. This is the same flow the webapp's UI animates
-step by step.
+steps are the CVE scan, RFC 8693 exchange at Keycloak A, and the egress OPA
+checkpoint, called out explicitly in the diagram. Ticket-ingress enforcement
+is real. This is the same flow the webapp's UI animates step by step.
 
 ```mermaid
 sequenceDiagram
@@ -132,6 +134,7 @@ sequenceDiagram
     participant Vault
     participant IDJAG as ID-JAG Issuer
     participant KCB as Keycloak B
+    participant Envoy as Built On Envoy + OPA
     participant Triage as Triage (Org B)
     participant Sub as Sub-Agent (Org B)
     participant GW as Gitea Gateway
@@ -155,13 +158,16 @@ sequenceDiagram
     IdNode-->>OC: ResolverMetadata + public key
 
     Note over OC,KCA: RFC 8693 token exchange (mocked)
-    OC->>IDJAG: mint ID-JAG assertion (sub=Sarah, aud=Org B, scope=triage:create)
+    OC->>IDJAG: mint assertion (sub=Sarah, scope=triage:create, intent=create-pr-fix)
     IDJAG-->>OC: signed assertion (RS256)
     OC->>KCB: jwt-bearer grant
     KCB-->>OC: scoped access token
 
-    OC->>Triage: POST /api/ticket
-    Note over Triage: OPA ingress + plan (mocked)
+    OC->>Envoy: POST /api/ticket (access token + actor token)
+    Envoy->>KCB: fetch/cached JWKS
+    Envoy->>IDJAG: fetch/cached JWKS
+    Note over Envoy: verify both JWTs; enforce scope, chain, signed intent, repo
+    Envoy->>Triage: ALLOW + policy decision headers
     Triage->>IDJAG: mint narrowed sub-badge (gitea:write, gitea:pr only)
     IDJAG-->>Triage: sub-badge (act_chain: Sarah→OpenCode→Triage→Sub-Agent)
     Triage->>Sub: spawn with sub-badge
@@ -219,23 +225,39 @@ Wait until these one-shot containers exit 0: `kc-a-init`, `kc-b-init`,
 
 ## Testing
 
-### Envoy Milestone 1 reviewer verification
+### Envoy Milestone 2 reviewer verification
 
-The following procedure verifies the image build, both proxy listeners, the
-Built On Envoy OPA module, the end-to-end demo path, and Envoy access logs.
-Run it from the repository root with Docker and Docker Compose available.
+This procedure is self-contained for reviewers. It verifies the Rego policy,
+the image and Envoy configuration, both proxy listeners, a successful
+delegation, two independent denial cases, metrics, and access logs. Run it
+from the repository root with Docker, Docker Compose, `curl`, and `jq`.
 
-1. Create the local environment file if one does not already exist, then build
-   the gateway from its digest-pinned multi-architecture inputs:
+1. Run the policy unit tests without starting the stack:
+
+   ```bash
+   docker run --rm \
+     -v "$PWD/cross-domain-id-jag-vc/envoy/policies:/policies:ro" \
+     openpolicyagent/opa:1.8.0 \
+     test /policies/ticket-ingress.rego \
+          /policies/ticket-ingress_test.rego -v
+   ```
+
+   All nine tests should pass, including missing actor token, actor/access
+   subject mismatch, unsigned and unsupported intent changes, insufficient
+   scope, chain mismatch, and repository-boundary denies.
+
+2. Create the local environment file, validate Compose interpolation, and
+   build the gateway from its digest-pinned multi-architecture inputs:
 
    ```bash
    cd cross-domain-id-jag-vc
    test -f .env || cp .env.example .env
+   docker compose config --quiet
    docker compose build --pull envoy-org-b
    docker compose up -d --build
    ```
 
-2. Allow 3–5 minutes for the first startup, then inspect the stack:
+3. Allow 3–5 minutes for the first startup, then inspect the stack:
 
    ```bash
    docker compose ps -a
@@ -246,7 +268,7 @@ Run it from the repository root with Docker and Docker Compose available.
    `kc-a-init`, `kc-b-init`, `gitea-init`, `identity-node-init`, and
    `agent-dir-init` one-shot services should exit with status 0.
 
-3. Exercise both Envoy listeners and the admin readiness endpoint:
+4. Exercise both Envoy listeners and the admin readiness endpoint:
 
    ```bash
    curl --fail --silent --show-error http://localhost:10000/health | jq .
@@ -258,51 +280,81 @@ Run it from the repository root with Docker and Docker Compose available.
    proxied to `triage-agent`; the second is proxied to `gitea-gateway`. Envoy
    readiness should print `LIVE`.
 
-4. Confirm that the inline OPA dynamic module evaluated both requests:
+5. Run the complete cross-domain remediation sequence and retain the two
+   credentials needed for the negative tests:
 
    ```bash
-   curl --fail --silent --show-error \
-     'http://127.0.0.1:9901/stats?filter=opa_requests_total'
-   ```
-
-   The allowed counter should be at least 2 and resemble:
-
-   ```text
-   dynamicmodulescustom.opa_requests_total.decision.allowed: 2
-   ```
-
-5. Run the complete cross-domain remediation sequence:
-
-   ```bash
+   RUN_OUTPUT="$(mktemp)"
    curl --fail --silent --show-error \
      -X POST http://localhost:8090/api/run \
      -H 'Content-Type: application/json' \
      -d '{"cve":"CVE-2024-12345","repo":"demo-admin/payments-service"}' \
-     | jq '{ok, failed_steps: [.steps[] | select(.status == "error") | .id]}'
+     -o "$RUN_OUTPUT"
+
+   jq '{ok, failed_steps: [.steps[] | select(.status == "error") | .id],
+        ingress: [.steps[] | select(.id == "opa-ingress") |
+          .result | {decision, enforced_by, rule, delegation_depth}]}' \
+     "$RUN_OUTPUT"
+   ACCESS_TOKEN="$(jq -r 'first(.steps[] |
+     select(.id == "kc-b-exchange")) | .result.token' "$RUN_OUTPUT")"
+   ACTOR_TOKEN="$(jq -r 'first(.steps[] |
+     select(.id == "mint-idjag")) | .result.assertion' "$RUN_OUTPUT")"
    ```
 
-   The expected summary is:
+   Expected: `"ok": true`, no failed steps, and an ingress decision containing
+   `ALLOW`, `built-on-envoy-opa`, `org-b-ticket-delegation`, and depth `1`.
 
-   ```json
-   {
-     "ok": true,
-     "failed_steps": []
-   }
-   ```
-
-6. Verify that the ticket request traversed Envoy:
+6. Prove that a caller cannot alter the requested intent after the actor token
+   has been signed:
 
    ```bash
-   docker compose logs --since=5m envoy-org-b | grep triage_agent
+   curl --silent --show-error --include \
+     -X POST http://localhost:10000/api/ticket \
+     -H "Authorization: Bearer $ACCESS_TOKEN" \
+     -H "X-AGNTCY-Actor-Token: Bearer $ACTOR_TOKEN" \
+     -H 'Content-Type: application/json' \
+     -d '{"cve":"CVE-2024-12345","severity":"HIGH",
+          "repo":"demo-admin/payments-service",
+          "intent":"delete-repository",
+          "delegating_agent":"opencode-agent",
+          "act_chain":["opencode-agent"]}'
    ```
 
-   At least one JSON access-log entry should contain
-   `"upstream_cluster":"triage_agent"` and a 2xx `response_code`. The access
-   log deliberately excludes authorization and actor-token headers.
+   Expected: HTTP 403 with `error=policy_denied`. The request is rejected by
+   inline OPA and never reaches `triage-agent`.
 
-Milestone 1 deliberately loads `allow-all.rego`: requests are expected to pass.
-Identity-aware allow/deny behavior is part of the next milestone; a denial test
-is therefore not an acceptance criterion for this PR.
+7. Prove that the independent ID-JAG actor token is mandatory:
+
+   ```bash
+   curl --silent --show-error --include \
+     -X POST http://localhost:10000/api/ticket \
+     -H "Authorization: Bearer $ACCESS_TOKEN" \
+     -H 'Content-Type: application/json' \
+     -d '{"cve":"CVE-2024-12345","severity":"HIGH",
+          "repo":"demo-admin/payments-service",
+          "intent":"create-pr-fix",
+          "delegating_agent":"opencode-agent",
+          "act_chain":["opencode-agent"]}'
+   ```
+
+   Expected: HTTP 401 from Envoy's JWT authentication filter.
+
+8. Confirm the allow/deny metrics and access log:
+
+   ```bash
+   curl --fail --silent --show-error \
+     'http://127.0.0.1:9901/stats?filter=opa_requests_total'
+   docker compose logs --since=5m envoy-org-b | grep triage_agent
+   rm "$RUN_OUTPUT"
+   ```
+
+   The OPA counters should show allowed and denied decisions. The access log
+   should contain one successful `triage_agent` upstream request; policy
+   denials have no upstream cluster. Authorization, actor-token, and verified
+   payload headers are deliberately excluded from the access log.
+
+Listener `10001` still uses the explicit allow-only policy. Routing Sub-Agent
+resource access through that listener is Milestone 3, not part of this change.
 
 If a port is already allocated, change the corresponding `ENVOY_*_PORT` value
 in `.env`. For startup failures, inspect `docker compose logs envoy-org-b` and
@@ -352,8 +404,6 @@ curl http://localhost:9103/healthz
 curl http://localhost:10000/health
 curl http://127.0.0.1:9901/ready
 curl 'http://127.0.0.1:9901/stats?filter=opa_requests_total'
-curl http://localhost:8200/health
-curl http://localhost:8200/.well-known/agent.json | jq .name
 grpcurl -plaintext localhost:8888 list   # Directory gRPC services (needs `brew install grpcurl`)
 ```
 
@@ -394,6 +444,11 @@ omit either and you'll get an opaque failure with no useful error message.
 - **CIMD steps return `ERROR_REASON_INVALID_PROOF` / `INVALID_ISSUER`** — the
   proof JWT's `iss` common name must exactly match a *registered* issuer's
   common name, and the JWK must include a `kid` (see above).
+  If this appears after recreating containers while retaining old volumes,
+  the persisted identity-node registration may refer to the previous
+  ephemeral Vault key. Intentionally reset the demo with
+  `docker compose down -v`, then start it again. This deletes all local demo
+  data, including seeded Gitea state.
 - **Directory push fails with an OASF schema validation error** — the real
   `schema.oasf.agntcy.org` may not resolve from your network; the compose
   file points `DIRECTORY_SERVER_OASF_API_VALIDATION_SCHEMA_URL` at
@@ -414,7 +469,7 @@ omit either and you'll get an opaque failure with no useful error message.
 cross-domain-id-jag-vc/
 ├── docker-compose.yaml        # the 21-service stack (source of truth)
 ├── .env.example
-├── envoy/                     # Built On Envoy image, listeners, allow-only Rego policy
+├── envoy/                     # Built On Envoy image, JWT filters, and Rego policies/tests
 ├── identity-node-init.py      # Vault Transit bootstrap + org-a issuer registration
 ├── keycloak-a/, keycloak-b/   # realm import JSON + scope bootstrap scripts
 ├── gitea/                     # Gitea admin/repo seed script
