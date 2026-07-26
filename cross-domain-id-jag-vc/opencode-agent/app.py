@@ -10,13 +10,13 @@ Drives Phase A + Discovery + Phase B of the cross-domain remediation sequence:
   Discovery + Identity:
     3-6. Resolve + verify a VC badge from vc-issuer (real signed vc+jwt)
   Phase B (cross-domain begins):
-    7. RFC 8693 exchange (subject=Sarah, actor_token=badge) → Keycloak A (mocked)
+    7. RFC 8693 exchange (subject=Sarah, actor_token=badge) → Keycloak A
+       (real call; Keycloak validates subject_token but does not itself
+       process actor_token into an "act" claim — see the inline note)
     8. Mint ID-JAG assertion for Org B triage-agent → idjag-issuer
   9-10. Egress PDP check — may Sarah delegate this scope to Org B? → Envoy A + OPA
    11. Redeem ID-JAG at Keycloak B → scoped access token (triage:create)
    13. Create remediation ticket → Triage agent (Org B)
-
-Step 7 (RFC 8693 exchange) remains mocked per demo scope.
 """
 
 from __future__ import annotations
@@ -168,17 +168,50 @@ async def run(body: RunRequest | None = None):
             return JSONResponse({"ok": False, "steps": steps})
         steps.append(s)
 
-        # ── Step 7: RFC 8693 token exchange at Keycloak A (mocked) ─────────
-        # Real impl: POST KC_A_TOKEN_EP with grant_type=token-exchange,
-        # subject_token=sarah_token, actor_token=<opencode badge JWT>
+        # ── Step 7: RFC 8693 token exchange at Keycloak A ───────────────────
+        # NOTE: Keycloak 26.7's standard token exchange (standard.token.
+        # exchange.enabled) validates subject_token for real, but does not
+        # itself verify actor_token or emit an RFC 8693 "act" claim — this
+        # was confirmed by testing live: passing a garbage or absent
+        # actor_token produces a byte-identical response, and keycloak-a
+        # logs nothing either way. That's a real platform behavior, not a
+        # shortcut here. The actor_token (badge) was already independently,
+        # cryptographically verified against vc-issuer in the previous step,
+        # and delegation semantics continue to be carried by the (real)
+        # act_chain claim on the ID-JAG minted in the next step.
         s = _s("kc-a-exchange",
-               "7. RFC 8693 exchange (subject=Sarah, actor_token=badge) → Keycloak A (mocked)",
-               f"POST {KC_A_TOKEN_EP}  grant_type=token-exchange  (mocked)")
-        s.update(status="ok", result={
-            "note": "mocked — real: grant_type=urn:ietf:params:oauth:grant-type:token-exchange in KC-A",
-            "subject": SARAH_EMAIL,
-            "actor": OPENCODE_CLIENT_ID,
-        })
+               "7. RFC 8693 exchange (subject=Sarah, actor_token=badge) → Keycloak A",
+               f"POST {KC_A_TOKEN_EP}  grant_type=token-exchange")
+        try:
+            r = await client.post(KC_A_TOKEN_EP, data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+                "client_id": OPENCODE_CLIENT_ID,
+                "client_secret": OPENCODE_CLIENT_SECRET,
+                "subject_token": sarah_token,
+                "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                "actor_token": badge,
+                "actor_token_type": "urn:ietf:params:oauth:token-type:jwt",
+            })
+            if r.status_code == 200:
+                exchanged_token = r.json()["access_token"]
+                s.update(status="ok", token_preview=exchanged_token[:48] + "…", result={
+                    "subject": SARAH_EMAIL,
+                    "actor": OPENCODE_CLIENT_ID,
+                    "note": (
+                        "Keycloak validated subject_token and issued this token for "
+                        "real; it does not itself process actor_token into an act "
+                        "claim (see README) — the verified badge's delegation claims "
+                        "are carried forward via the ID-JAG's act_chain next"
+                    ),
+                })
+            else:
+                s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
+                steps.append(s)
+                return JSONResponse({"ok": False, "steps": steps})
+        except Exception as exc:  # noqa: BLE001
+            s.update(status="error", error=str(exc))
+            steps.append(s)
+            return JSONResponse({"ok": False, "steps": steps})
         steps.append(s)
 
         # ── Step 8: Mint ID-JAG assertion for Org B triage-agent ───────────
