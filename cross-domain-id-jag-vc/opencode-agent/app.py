@@ -26,7 +26,10 @@ import os
 import httpx
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from pydantic import BaseModel
+
+from tracing import current_trace_id, setup_tracing
 
 KC_A_URL = os.environ.get("KC_A_URL", "http://keycloak-a:8080").rstrip("/")
 KC_A_REALM = os.environ.get("KC_A_REALM", "org-a")
@@ -51,6 +54,8 @@ KC_B_TOKEN_EP = f"{KC_B_URL}/realms/{KC_B_REALM}/protocol/openid-connect/token"
 KC_B_ISSUER = f"{KC_B_URL}/realms/{KC_B_REALM}"
 
 app = FastAPI(title="OpenCode Agent (mock)", version="0.1.0")
+setup_tracing("opencode-agent")
+FastAPIInstrumentor.instrument_app(app)
 
 
 class RunRequest(BaseModel):
@@ -114,11 +119,11 @@ async def run(body: RunRequest | None = None):
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)
-                return JSONResponse({"ok": False, "steps": steps})
+                return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
         except Exception as exc:  # noqa: BLE001
             s.update(status="error", error=str(exc))
             steps.append(s)
-            return JSONResponse({"ok": False, "steps": steps})
+            return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
         steps.append(s)
 
         # ── Step 2: Mock scan ───────────────────────────────────────────────
@@ -234,11 +239,11 @@ async def run(body: RunRequest | None = None):
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)
-                return JSONResponse({"ok": False, "steps": steps})
+                return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
         except Exception as exc:  # noqa: BLE001
             s.update(status="error", error=str(exc))
             steps.append(s)
-            return JSONResponse({"ok": False, "steps": steps})
+            return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
         steps.append(s)
 
         # ── Steps 9-10: Org A egress PDP check (Envoy + OPA) ────────────────
@@ -283,11 +288,11 @@ async def run(body: RunRequest | None = None):
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)
-                return JSONResponse({"ok": False, "steps": steps})
+                return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
         except Exception as exc:  # noqa: BLE001
             s.update(status="error", error=str(exc))
             steps.append(s)
-            return JSONResponse({"ok": False, "steps": steps})
+            return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
         steps.append(s)
 
         # ── Step 13: Create ticket at Triage agent ──────────────────────────
@@ -323,4 +328,5 @@ async def run(body: RunRequest | None = None):
     return JSONResponse({
         "ok": all(_ok(s.get("status", "error")) for s in steps),
         "steps": steps,
+        "trace_id": current_trace_id(),
     })

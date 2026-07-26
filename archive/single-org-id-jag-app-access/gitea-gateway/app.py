@@ -28,6 +28,9 @@ import secrets
 import httpx
 import jwt as pyjwt
 from fastapi import Depends, FastAPI, Header, HTTPException
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+from tracing import setup_tracing
 from pydantic import BaseModel
 
 KEYCLOAK_URL = os.environ.get("KEYCLOAK_URL", "http://keycloak:8080").rstrip("/")
@@ -54,6 +57,8 @@ DENY_LIST: frozenset[str] = frozenset(
 )
 
 app = FastAPI(title="CNCF Demo — Gitea Gateway", version="0.1.0")
+setup_tracing("gitea-gateway")
+FastAPIInstrumentor.instrument_app(app)
 
 # PyJWKClient caches keys and refreshes on unknown kid.
 _jwks = pyjwt.PyJWKClient(JWKS_URL)
