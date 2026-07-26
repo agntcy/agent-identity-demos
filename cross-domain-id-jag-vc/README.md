@@ -784,9 +784,14 @@ imports cleanly.
 
 ### Via the webapp (recommended)
 
-Open **http://localhost:8090**. Click **Run (animated)** to watch all 20
-steps execute with live sequence-diagram highlighting and a step-by-step
-explainer toast, or **Next step ▶** to step through manually.
+Open **http://localhost:8090**. Click **Run (animated)** to watch all 22
+steps execute — including the real VC badge issuance, the real Keycloak A
+exchange, and the Org A egress check — with the active step highlighted and
+auto-zoomed in the sequence diagram, a traveling pulse along the live arrow,
+an overall progress bar, and a step-by-step explainer toast. A **View trace
+in Jaeger** link appears once the run finishes (set `JAEGER_UI_URL` in
+`.env` to enable it). Use **Next step ▶** to step through manually, or
+uncheck **Auto-zoom to active step** to keep the full diagram in view.
 
 ### Via the API directly
 

@@ -40,19 +40,20 @@
       display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 3px 18px; }
     .config b { color: var(--text); }
     .diagram { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-      padding: 12px; margin-bottom: 18px; overflow-x: auto; }
+      padding: 12px; margin-bottom: 18px; overflow-x: auto; position: relative; }
     .diagram svg { width: 100%; min-width: 900px; height: auto; display: block; }
+    .diagram svg#seqSvg { transition: none; }
     /* actor boxes */
-    .seq-actor-box { fill: #21262d; stroke: var(--border); }
+    .seq-actor-box { fill: #21262d; stroke: var(--border); transition: stroke .3s ease, fill .3s ease; }
     .seq-actor { fill: var(--text); font-size: 11px; font-weight: 700; text-anchor: middle; }
     .seq-actor-sub { fill: var(--muted); font-size: 9px; text-anchor: middle; }
     .seq-life { stroke: var(--border); stroke-dasharray: 4 4; stroke-width: 1; }
     /* step groups — color driven by status class */
-    .g .seq-msg { stroke: #30363d; stroke-width: 1.6; fill: none; }
+    .g .seq-msg { stroke: #30363d; stroke-width: 1.6; fill: none; transition: stroke .25s ease, stroke-width .25s ease; }
     .g .seq-msg.ret { stroke-dasharray: 6 4; }
     .g .seq-msg.alt { stroke-dasharray: 3 3; }
-    .g .seq-label { fill: var(--muted); font-size: 10.5px; }
-    .g .seq-num { fill: var(--muted); font-size: 11px; font-weight: 700; }
+    .g .seq-label { fill: var(--muted); font-size: 10.5px; transition: fill .25s ease; }
+    .g .seq-num { fill: var(--muted); font-size: 11px; font-weight: 700; transition: fill .25s ease; }
     .g.running .seq-msg { stroke: var(--run); }
     .g.running .seq-label, .g.running .seq-num { fill: var(--run); }
     .g.ok .seq-msg { stroke: var(--ok); }
@@ -61,6 +62,20 @@
     .g.error .seq-label, .g.error .seq-num { fill: var(--err); }
     .g.denied .seq-msg { stroke: var(--denied); }
     .g.denied .seq-label, .g.denied .seq-num { fill: var(--denied); }
+    /* active step — the one currently being explained, before it settles into
+       its final ok/error color. A pulsing glow + thicker stroke draws the eye
+       to exactly what the side toast is talking about right now. */
+    .g.active .seq-msg { stroke: var(--run); stroke-width: 2.6;
+      filter: drop-shadow(0 0 4px rgba(210,153,34,.75)); animation: pulse-msg 1.1s ease-in-out infinite; }
+    .g.active .seq-label, .g.active .seq-num { fill: var(--run); font-weight: 700; }
+    @keyframes pulse-msg { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+    .seq-actor-box.active-actor { stroke: var(--run); stroke-width: 2; }
+    /* traveling pulse dot — a little "packet" flying along the active message */
+    #travelDot { fill: var(--run); filter: drop-shadow(0 0 5px rgba(210,153,34,.9)); opacity: 0; }
+    /* overall run progress bar, above the diagram */
+    .run-progress { height: 4px; border-radius: 2px; background: #21262d; margin-bottom: 10px; overflow: hidden; }
+    .run-progress > div { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--teal));
+      transition: width .3s ease; }
     /* static doc diagrams */
     .diagram.doc .seq-msg { stroke: var(--accent); stroke-width: 1.6; fill: none; }
     .diagram.doc .seq-msg.ret { stroke: var(--muted); stroke-dasharray: 6 4; }
@@ -108,6 +123,8 @@
     .tag.agntcy { background: rgba(188,140,255,.15); color: var(--purple); }
     [hidden] { display: none !important; }
     .status-bar { font-size: 12px; color: var(--muted); padding: 6px 0; margin-bottom: 4px; min-height: 22px; }
+    #traceLink a { color: var(--teal); text-decoration: none; font-weight: 600; }
+    #traceLink a:hover { text-decoration: underline; }
     /* Right-side step explainer toast */
     .side-toast {
       position: fixed; top: 96px; right: 24px; width: 300px; max-width: calc(100vw - 48px);
@@ -178,187 +195,198 @@
       <div class="field"><label>CVE:</label><input id="cve" value="CVE-2024-12345" /></div>
       <div class="field"><label>Repo:</label><input id="repo" value="demo-admin/payments-service" /></div>
       <div class="field"><label>Step delay (ms):</label><input id="stepDelay" type="number" min="200" max="10000" step="100" value="2200" style="width:90px" /></div>
+      <div class="field"><label><input id="autoZoom" type="checkbox" checked style="width:auto" /> Auto-zoom to active step</label></div>
     </div>
 
     <div class="config" id="config"><div><i>Loading config…</i></div></div>
     <div class="status-bar" id="status"></div>
+    <div class="status-bar" id="traceLink" style="margin-top:-8px"></div>
+    <div class="run-progress"><div id="runProgressBar"></div></div>
 
     <!-- ── Sequence diagram ── -->
     <div class="diagram">
-      <svg viewBox="0 0 1140 800" role="img" aria-label="Cross-domain remediation sequence diagram">
+      <svg id="seqSvg" viewBox="0 0 1432 1040" role="img" aria-label="Cross-domain remediation sequence diagram">
         <defs>
           <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="context-stroke" />
           </marker>
         </defs>
 
-        <!-- Actor boxes — 9 columns -->
-        <!-- col 1: OpenCode x=62 -->
-        <rect class="seq-actor-box" x="10"  y="10" width="104" height="36" rx="5"/>
-        <text class="seq-actor"     x="62"  y="28">OpenCode</text>
-        <text class="seq-actor-sub" x="62"  y="41">Org A agent</text>
-        <!-- col 2: KC-A x=180 -->
-        <rect class="seq-actor-box" x="128" y="10" width="104" height="36" rx="5"/>
-        <text class="seq-actor"     x="180" y="28">Keycloak A</text>
-        <text class="seq-actor-sub" x="180" y="41">org-a realm</text>
-        <!-- col 3: Directory x=300 -->
-        <rect class="seq-actor-box" x="248" y="10" width="104" height="36" rx="5"/>
-        <text class="seq-actor"     x="300" y="28">AGNTCY Dir</text>
-        <text class="seq-actor-sub" x="300" y="41">dir-apiserver</text>
-        <!-- col 4: Identity Node x=420 -->
-        <rect class="seq-actor-box" x="368" y="10" width="104" height="36" rx="5"/>
-        <text class="seq-actor"     x="420" y="28">Identity Node</text>
-        <text class="seq-actor-sub" x="420" y="41">badge / VC</text>
-        <!-- col 5: Vault x=540 -->
-        <rect class="seq-actor-box" x="488" y="10" width="104" height="36" rx="5"/>
-        <text class="seq-actor"     x="540" y="28">Vault</text>
-        <text class="seq-actor-sub" x="540" y="41">transit engine</text>
-        <!-- col 6: ID-JAG x=660 -->
-        <rect class="seq-actor-box" x="608" y="10" width="104" height="36" rx="5"/>
-        <text class="seq-actor"     x="660" y="28">ID-JAG Issuer</text>
-        <text class="seq-actor-sub" x="660" y="41">idjag-issuer</text>
-        <!-- col 7: KC-B x=780 -->
-        <rect class="seq-actor-box" x="728" y="10" width="104" height="36" rx="5"/>
-        <text class="seq-actor"     x="780" y="28">Keycloak B</text>
-        <text class="seq-actor-sub" x="780" y="41">org-b realm</text>
-        <!-- col 8: Triage x=922 -->
-        <rect class="seq-actor-box" x="864" y="10" width="116" height="36" rx="5"/>
-        <text class="seq-actor"     x="922" y="28">Triage + Sub</text>
-        <text class="seq-actor-sub" x="922" y="41">Org B agents</text>
-        <!-- col 9: Gitea x=1062 -->
-        <rect class="seq-actor-box" x="1010" y="10" width="104" height="36" rx="5"/>
-        <text class="seq-actor"     x="1062" y="28">Gitea</text>
-        <text class="seq-actor-sub" x="1062" y="41">via gateway</text>
+        <!-- Actor boxes — 11 columns -->
+        <rect class="seq-actor-box" x="10" y="10" width="104" height="36" rx="5"/>
+        <text class="seq-actor" x="62" y="28">OpenCode</text>
+        <text class="seq-actor-sub" x="62" y="41">Org A agent</text>
+        <rect class="seq-actor-box" x="132" y="10" width="104" height="36" rx="5"/>
+        <text class="seq-actor" x="184" y="28">Keycloak A</text>
+        <text class="seq-actor-sub" x="184" y="41">org-a realm</text>
+        <rect class="seq-actor-box" x="254" y="10" width="104" height="36" rx="5"/>
+        <text class="seq-actor" x="306" y="28">AGNTCY Dir</text>
+        <text class="seq-actor-sub" x="306" y="41">dir-apiserver</text>
+        <rect class="seq-actor-box" x="370" y="10" width="116" height="36" rx="5"/>
+        <text class="seq-actor" x="428" y="28">Identity Node</text>
+        <text class="seq-actor-sub" x="428" y="41">CIMD id gen/resolve</text>
+        <rect class="seq-actor-box" x="498" y="10" width="104" height="36" rx="5"/>
+        <text class="seq-actor" x="550" y="28">Vault</text>
+        <text class="seq-actor-sub" x="550" y="41">transit engine</text>
+        <rect class="seq-actor-box" x="612" y="10" width="120" height="36" rx="5"/>
+        <text class="seq-actor" x="672" y="28">VC Badge Issuer</text>
+        <text class="seq-actor-sub" x="672" y="41">vc-issuer</text>
+        <rect class="seq-actor-box" x="742" y="10" width="104" height="36" rx="5"/>
+        <text class="seq-actor" x="794" y="28">ID-JAG Issuer</text>
+        <text class="seq-actor-sub" x="794" y="41">idjag-issuer</text>
+        <rect class="seq-actor-box" x="864" y="10" width="104" height="36" rx="5"/>
+        <text class="seq-actor" x="916" y="28">Envoy A</text>
+        <text class="seq-actor-sub" x="916" y="41">egress OPA</text>
+        <rect class="seq-actor-box" x="986" y="10" width="104" height="36" rx="5"/>
+        <text class="seq-actor" x="1038" y="28">Keycloak B</text>
+        <text class="seq-actor-sub" x="1038" y="41">org-b realm</text>
+        <rect class="seq-actor-box" x="1102" y="10" width="116" height="36" rx="5"/>
+        <text class="seq-actor" x="1160" y="28">Triage + Sub</text>
+        <text class="seq-actor-sub" x="1160" y="41">Org B agents</text>
+        <rect class="seq-actor-box" x="1230" y="10" width="104" height="36" rx="5"/>
+        <text class="seq-actor" x="1282" y="28">Gitea</text>
+        <text class="seq-actor-sub" x="1282" y="41">via gateway</text>
 
         <!-- Lifelines -->
-        <line class="seq-life" x1="62"  y1="46" x2="62"  y2="790"/>
-        <line class="seq-life" x1="180" y1="46" x2="180" y2="790"/>
-        <line class="seq-life" x1="300" y1="46" x2="300" y2="790"/>
-        <line class="seq-life" x1="420" y1="46" x2="420" y2="790"/>
-        <line class="seq-life" x1="540" y1="46" x2="540" y2="790"/>
-        <line class="seq-life" x1="660" y1="46" x2="660" y2="790"/>
-        <line class="seq-life" x1="780" y1="46" x2="780" y2="790"/>
-        <line class="seq-life" x1="922" y1="46" x2="922" y2="790"/>
-        <line class="seq-life" x1="1062" y1="46" x2="1062" y2="790"/>
+        <line class="seq-life" x1="62" y1="46" x2="62" y2="1010"/>
+        <line class="seq-life" x1="184" y1="46" x2="184" y2="1010"/>
+        <line class="seq-life" x1="306" y1="46" x2="306" y2="1010"/>
+        <line class="seq-life" x1="428" y1="46" x2="428" y2="1010"/>
+        <line class="seq-life" x1="550" y1="46" x2="550" y2="1010"/>
+        <line class="seq-life" x1="672" y1="46" x2="672" y2="1010"/>
+        <line class="seq-life" x1="794" y1="46" x2="794" y2="1010"/>
+        <line class="seq-life" x1="916" y1="46" x2="916" y2="1010"/>
+        <line class="seq-life" x1="1038" y1="46" x2="1038" y2="1010"/>
+        <line class="seq-life" x1="1160" y1="46" x2="1160" y2="1010"/>
+        <line class="seq-life" x1="1282" y1="46" x2="1282" y2="1010"/>
 
-        <!-- ── Step 1: sarah-login ── -->
         <g data-step="sarah-login" class="g">
-          <text class="seq-num"   x="72"  y="64">1</text>
-          <text class="seq-label" x="90"  y="64">OIDC password grant (Sarah)</text>
-          <line class="seq-msg"      x1="62" y1="70" x2="174" y2="70" marker-end="url(#arr)"/>
-          <text class="seq-label" x="172" y="90" text-anchor="end">access token (opencode-agent client)</text>
-          <line class="seq-msg ret"  x1="174" y1="96" x2="68"  y2="96" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="64">1</text>
+          <text class="seq-label" x="90" y="64">OIDC password grant (Sarah)</text>
+          <line class="seq-msg" x1="62" y1="70" x2="184" y2="70" marker-end="url(#arr)"/>
+          <text class="seq-label" x="182" y="90" text-anchor="end">access token</text>
+          <line class="seq-msg ret" x1="184" y1="96" x2="66" y2="96" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 2: scan ── -->
         <g data-step="scan" class="g">
-          <text class="seq-num"   x="72"  y="116">2</text>
-          <text class="seq-label" x="90"  y="116">scan repo → CVE found (HIGH) → decide cross-domain remediation</text>
+          <text class="seq-num" x="72" y="116">2</text>
+          <text class="seq-label" x="90" y="116">scan repo &#8594; CVE found (HIGH) &#8594; decide cross-domain remediation</text>
           <path class="seq-msg" d="M62,122 Q46,128 46,134 Q46,140 62,140" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 3: dir-push ── -->
         <g data-step="dir-push" class="g">
-          <text class="seq-num"   x="72"  y="158">3</text>
-          <text class="seq-label" x="90"  y="158">push turn record (OASF, schema_version=1.1.0)</text>
-          <line class="seq-msg"      x1="62" y1="164" x2="294" y2="164" marker-end="url(#arr)"/>
-          <text class="seq-label" x="292" y="182" text-anchor="end">CID (content-addressed)</text>
-          <line class="seq-msg ret"  x1="294" y1="188" x2="68"  y2="188" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="158">3</text>
+          <text class="seq-label" x="90" y="158">push turn record (OASF, schema_version=1.1.0)</text>
+          <line class="seq-msg" x1="62" y1="164" x2="306" y2="164" marker-end="url(#arr)"/>
+          <text class="seq-label" x="304" y="182" text-anchor="end">CID (content-addressed)</text>
+          <line class="seq-msg ret" x1="306" y1="188" x2="66" y2="188" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 4: dir-search ── -->
         <g data-step="dir-search" class="g">
-          <text class="seq-num"   x="72"  y="206">4</text>
-          <text class="seq-label" x="90"  y="206">search: name=triage-agent</text>
-          <line class="seq-msg"      x1="62" y1="212" x2="294" y2="212" marker-end="url(#arr)"/>
-          <text class="seq-label" x="292" y="230" text-anchor="end">agent record + CID</text>
-          <line class="seq-msg ret"  x1="294" y1="236" x2="68"  y2="236" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="210">4</text>
+          <text class="seq-label" x="90" y="210">search: name=triage-agent</text>
+          <line class="seq-msg" x1="62" y1="216" x2="306" y2="216" marker-end="url(#arr)"/>
+          <text class="seq-label" x="304" y="234" text-anchor="end">agent record + CID</text>
+          <line class="seq-msg ret" x1="306" y1="240" x2="66" y2="240" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 5: cimd-generate-id (real: Vault-signed proof JWT) ── -->
         <g data-step="cimd-generate-id" class="g">
-          <text class="seq-num"   x="72"  y="254">5</text>
-          <text class="seq-label" x="90"  y="254">generate id for triage-agent (Vault-signed proof, org-a authority)</text>
-          <text class="seq-label" x="90"  y="272">sign self-issued proof JWT (iss=agntcy:org-a) via Vault transit/sign</text>
-          <line class="seq-msg"      x1="62" y1="278" x2="540" y2="278" marker-end="url(#arr)"/>
-          <text class="seq-label" x="538" y="296" text-anchor="end">RS256 signature (private key stays in Vault)</text>
-          <line class="seq-msg ret"  x1="540" y1="302" x2="68"  y2="302" marker-end="url(#arr)"/>
-          <line class="seq-msg"      x1="62" y1="316" x2="414" y2="316" marker-end="url(#arr)"/>
-          <text class="seq-label" x="412" y="334" text-anchor="end">id = AGNTCY-triage-agent</text>
-          <line class="seq-msg ret"  x1="414" y1="340" x2="68"  y2="340" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="262">5</text>
+          <text class="seq-label" x="90" y="262">generate id for triage-agent (Vault-signed proof, org-a authority)</text>
+          <text class="seq-label" x="90" y="280">sign self-issued proof JWT (iss=agntcy:org-a) via Vault transit/sign</text>
+          <line class="seq-msg" x1="62" y1="286" x2="550" y2="286" marker-end="url(#arr)"/>
+          <text class="seq-label" x="548" y="304" text-anchor="end">RS256 signature (private key stays in Vault)</text>
+          <line class="seq-msg ret" x1="550" y1="310" x2="66" y2="310" marker-end="url(#arr)"/>
+          <line class="seq-msg" x1="62" y1="324" x2="428" y2="324" marker-end="url(#arr)"/>
+          <text class="seq-label" x="426" y="342" text-anchor="end">id = AGNTCY-triage-agent</text>
+          <line class="seq-msg ret" x1="428" y1="348" x2="66" y2="348" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 6: cimd-resolve-id ── -->
         <g data-step="cimd-resolve-id" class="g">
-          <text class="seq-num"   x="72"  y="384">6</text>
-          <text class="seq-label" x="90"  y="384">resolve id → ResolverMetadata (verification method + public key)</text>
-          <line class="seq-msg"      x1="62" y1="390" x2="414" y2="390" marker-end="url(#arr)"/>
-          <text class="seq-label" x="412" y="408" text-anchor="end">ResolverMetadata + JWK</text>
-          <line class="seq-msg ret"  x1="414" y1="414" x2="68"  y2="414" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="392">6</text>
+          <text class="seq-label" x="90" y="392">resolve id &#8594; ResolverMetadata (verification method + public key)</text>
+          <line class="seq-msg" x1="62" y1="398" x2="428" y2="398" marker-end="url(#arr)"/>
+          <text class="seq-label" x="426" y="416" text-anchor="end">ResolverMetadata + JWK</text>
+          <line class="seq-msg ret" x1="428" y1="422" x2="66" y2="422" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 7: kc-a-exchange (mocked) ── -->
+        <g data-step="resolve-badge" class="g">
+          <text class="seq-num" x="72" y="444">6b</text>
+          <text class="seq-label" x="90" y="444">issue + verify OpenCode's VC delegation badge (real signed vc+jwt)</text>
+          <line class="seq-msg" x1="62" y1="450" x2="672" y2="450" marker-end="url(#arr)"/>
+          <text class="seq-label" x="670" y="468" text-anchor="end">signed badge (vc+jwt)</text>
+          <line class="seq-msg ret" x1="672" y1="474" x2="66" y2="474" marker-end="url(#arr)"/>
+          <line class="seq-msg" x1="62" y1="488" x2="672" y2="488" marker-end="url(#arr)"/>
+          <text class="seq-label" x="670" y="506" text-anchor="end">valid=true + claims</text>
+          <line class="seq-msg ret" x1="672" y1="512" x2="66" y2="512" marker-end="url(#arr)"/>
+        </g>
+
         <g data-step="kc-a-exchange" class="g">
-          <text class="seq-num"   x="72"  y="434">7</text>
-          <text class="seq-label" x="90"  y="434">RFC 8693 token exchange — subject=Sarah, actor=opencode (mocked)</text>
-          <line class="seq-msg"      x1="62" y1="440" x2="174" y2="440" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="534">7</text>
+          <text class="seq-label" x="90" y="534">RFC 8693 token exchange &#8212; subject=Sarah, actor_token=verified badge</text>
+          <line class="seq-msg" x1="62" y1="540" x2="184" y2="540" marker-end="url(#arr)"/>
+          <text class="seq-label" x="182" y="558" text-anchor="end">exchanged access token</text>
+          <line class="seq-msg ret" x1="184" y1="564" x2="66" y2="564" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 8: mint-idjag ── -->
         <g data-step="mint-idjag" class="g">
-          <text class="seq-num"   x="72"  y="460">8</text>
-          <text class="seq-label" x="92"  y="460">mint ID-JAG  sub=sarah  act_chain=[opencode]  aud=KC-B  scope=triage:create</text>
-          <line class="seq-msg"      x1="62" y1="466" x2="654" y2="466" marker-end="url(#arr)"/>
-          <text class="seq-label" x="652" y="484" text-anchor="end">signed assertion (RS256)</text>
-          <line class="seq-msg ret"  x1="654" y1="490" x2="68"  y2="490" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="586">8</text>
+          <text class="seq-label" x="90" y="586">mint ID-JAG  sub=sarah  act_chain=[opencode]  aud=KC-B  scope=triage:create</text>
+          <line class="seq-msg" x1="62" y1="592" x2="794" y2="592" marker-end="url(#arr)"/>
+          <text class="seq-label" x="792" y="610" text-anchor="end">signed assertion (RS256)</text>
+          <line class="seq-msg ret" x1="794" y1="616" x2="66" y2="616" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 9: kc-b-exchange ── -->
+        <g data-step="egress-check" class="g">
+          <text class="seq-num" x="72" y="638">8b</text>
+          <text class="seq-label" x="90" y="638">Org A egress PDP &#8212; may Sarah delegate this scope to Org B?</text>
+          <line class="seq-msg" x1="62" y1="644" x2="916" y2="644" marker-end="url(#arr)"/>
+          <text class="seq-label" x="914" y="662" text-anchor="end">ALLOW + policy decision headers</text>
+          <line class="seq-msg ret" x1="916" y1="668" x2="66" y2="668" marker-end="url(#arr)"/>
+        </g>
+
         <g data-step="kc-b-exchange" class="g">
-          <text class="seq-num"   x="72"  y="510">9</text>
-          <text class="seq-label" x="92"  y="510">jwt-bearer grant  assertion=…  scope=triage:create</text>
-          <line class="seq-msg"      x1="62" y1="516" x2="774" y2="516" marker-end="url(#arr)"/>
-          <text class="seq-label" x="772" y="534" text-anchor="end">access token (triage:create, act=opencode)</text>
-          <line class="seq-msg ret"  x1="774" y1="540" x2="68"  y2="540" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="690">9</text>
+          <text class="seq-label" x="90" y="690">jwt-bearer grant  assertion=&#8230;  scope=triage:create</text>
+          <line class="seq-msg" x1="62" y1="696" x2="1038" y2="696" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1036" y="714" text-anchor="end">access token (triage:create, act=opencode)</text>
+          <line class="seq-msg ret" x1="1038" y1="720" x2="66" y2="720" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 10: create-ticket (cascade) ── -->
         <g data-step="create-ticket" class="g">
-          <text class="seq-num"   x="72"  y="560">10</text>
-          <text class="seq-label" x="92"  y="560">POST /api/ticket  access + actor tokens  cve=…  intent=create-pr-fix</text>
-          <line class="seq-msg"      x1="62" y1="566" x2="916" y2="566" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="742">10</text>
+          <text class="seq-label" x="90" y="742">POST /api/ticket  access + actor tokens  cve=&#8230;  intent=create-pr-fix</text>
+          <line class="seq-msg" x1="62" y1="748" x2="1160" y2="748" marker-end="url(#arr)"/>
         </g>
 
-        <!-- Triage: OPA + plan + mint sub-badge — lights up once mint-sub-badge (step 13) is revealed -->
         <g data-step="mint-sub-badge" class="g">
-          <text class="seq-label" x="924" y="586">OPA ingress ✓  mint repo-bound sub-badge (gitea:write gitea:pr)</text>
-          <line class="seq-msg"      x1="922" y1="592" x2="654" y2="592" marker-end="url(#arr)"/>
-          <text class="seq-label" x="652" y="610" text-anchor="end">sub-badge (act_chain: sarah→opencode→triage→sub)</text>
-          <line class="seq-msg ret"  x1="654" y1="616" x2="928" y2="616" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1168" y="796">OPA ingress &#10003;  mint narrowed sub-badge</text>
+          <line class="seq-msg" x1="1160" y1="802" x2="794" y2="802" marker-end="url(#arr)"/>
+          <text class="seq-label" x="796" y="820">sub-badge (act_chain: sarah&#8594;opencode&#8594;triage&#8594;sub)</text>
+          <line class="seq-msg ret" x1="794" y1="826" x2="1156" y2="826" marker-end="url(#arr)"/>
         </g>
 
-        <!-- Sub-agent: KC-B exchange — lights up once idjag-gitea (step 16) is revealed -->
         <g data-step="idjag-gitea" class="g">
-          <text class="seq-label" x="924" y="636">Sub-Agent: jwt-bearer (sub-badge) → KC-B → gitea:write gitea:pr token</text>
-          <line class="seq-msg"      x1="922" y1="642" x2="774" y2="642" marker-end="url(#arr)"/>
-          <line class="seq-msg ret"  x1="774" y1="652" x2="928" y2="652" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1168" y="848">Sub-Agent: jwt-bearer &#8594; gitea:write/pr token</text>
+          <line class="seq-msg" x1="1160" y1="854" x2="1038" y2="854" marker-end="url(#arr)"/>
+          <line class="seq-msg ret" x1="1038" y1="864" x2="1156" y2="864" marker-end="url(#arr)"/>
         </g>
 
-        <!-- resource Envoy + push + PR — lights up once open-pr is revealed -->
         <g data-step="open-pr" class="g">
-          <text class="seq-label" x="924" y="672">Envoy resource OPA ✓  push fix file + open PR</text>
-          <line class="seq-msg"      x1="922" y1="678" x2="1056" y2="678" marker-end="url(#arr)"/>
-          <text class="seq-label" x="1054" y="696" text-anchor="end">PR created ✓</text>
-          <line class="seq-msg ret"  x1="1056" y1="702" x2="928" y2="702" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1168" y="888">Envoy OPA &#10003;  push fix + open PR</text>
+          <line class="seq-msg" x1="1160" y1="894" x2="1282" y2="894" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1280" y="912" text-anchor="end">PR created &#10003;</text>
+          <line class="seq-msg ret" x1="1282" y1="918" x2="1156" y2="918" marker-end="url(#arr)"/>
         </g>
 
-        <!-- resource decision + final return — lights up once pr-created is revealed -->
         <g data-step="pr-created" class="g">
-          <text class="seq-label" x="924" y="722">OPA egress: delegation depth ✓ sub-scope ⊆ parent ✓ → ALLOW</text>
-          <path class="seq-msg" d="M922,728 L950,728 L950,738 L924,738" marker-end="url(#arr)"/>
-          <text class="seq-label" x="918" y="764" text-anchor="end">PR created ✓ — Sarah → OpenCode → Triage → Sub-Agent</text>
-          <line class="seq-msg ret"  x1="916" y1="770" x2="68"  y2="770" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1168" y="940">OPA egress: depth &#10003; scope &#8838; parent &#10003; &#8594; ALLOW</text>
+          <path class="seq-msg" d="M1160,946 L1188,946 L1188,956 L1162,956" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1154" y="984" text-anchor="end">PR created &#10003; &#8212; Sarah &#8594; OpenCode &#8594; Triage &#8594; Sub-Agent</text>
+          <line class="seq-msg ret" x1="1152" y1="990" x2="66" y2="990" marker-end="url(#arr)"/>
         </g>
+
+        <circle id="travelDot" r="5"/>
 
       </svg>
     </div><!-- /diagram -->
@@ -545,9 +573,12 @@ POST /realms/org-b/protocol/openid-connect/token
   }));
 
   // ── Config ─────────────────────────────────────────────────────────────────
+  let CONFIG = {};
+
   async function loadConfig() {
     try {
       const c = await (await fetch('/api/config')).json();
+      CONFIG = c;
       document.getElementById('config').innerHTML =
         `<div><b>KC-A:</b> ${esc(c.kc_a_url)} / ${esc(c.kc_a_realm)}</div>
          <div><b>KC-B:</b> ${esc(c.kc_b_url)} / ${esc(c.kc_b_realm)}</div>
@@ -556,6 +587,8 @@ POST /realms/org-b/protocol/openid-connect/token
          <div><b>User:</b> ${esc(c.sarah_user)} (${esc(c.sarah_email)})</div>
          <div><b>ID-JAG issuer:</b> ${esc(c.idjag_issuer_url)}</div>
          <div><b>Identity node:</b> ${esc(c.identity_node_url)}</div>
+         <div><b>VC badge issuer:</b> ${esc(c.vc_issuer_url)}</div>
+         <div><b>Egress PDP:</b> ${esc(c.egress_pdp_url)}</div>
          <div><b>Directory:</b> ${esc(c.dir_apiserver_url)}</div>
          <div><b>Trust authority:</b> ${esc(c.org_a_common_name)} (Vault key: ${esc(c.vault_key_name)})</div>
          <div><b>Scan repo:</b> ${esc(c.scan_repo)}</div>`;
@@ -580,7 +613,9 @@ POST /realms/org-b/protocol/openid-connect/token
     'dir-search': "OpenCode looks up triage-agent in the Directory by name, discovering it before delegating any authority.",
     'cimd-generate-id': "OpenCode asks identity-node to mint a cryptographic id for triage-agent. The request is proven with a JWT self-signed by a key held in Vault — the private key never leaves Vault.",
     'cimd-resolve-id': "OpenCode resolves the id back to its ResolverMetadata, confirming the identity and public key are correctly registered before trusting triage-agent.",
-    'kc-a-exchange': "(Mocked) OpenCode would exchange Sarah's token for its own actor token via RFC 8693, formally recording 'OpenCode acting on Sarah's behalf' in the token.",
+    'resolve-badge': "OpenCode issues and verifies its own VC delegation badge at vc-issuer — a real signed vc+jwt (caps, delegating_user, intent, act_chain), not a hardcoded mock. This badge becomes the actor_token in the next step.",
+    'kc-a-exchange': "OpenCode exchanges Sarah's token for its own via RFC 8693 at Keycloak A — a real network call. Keycloak validates subject_token for real; it doesn't itself verify actor_token into an act claim (a real Keycloak platform behavior, documented in the README) — delegation semantics are carried forward via the ID-JAG's act_chain instead.",
+    'egress-check': "Before the ID-JAG ever leaves Org A, Envoy A + inline OPA ask: may Sarah actually delegate this scope to Org B? The assertion is verified against idjag-issuer's JWKS and checked for scope, intent, and delegation depth — a policy violation is denied right here.",
     'mint-idjag': "OpenCode mints a signed ID-JAG assertion — a portable, cryptographically-signed statement that Sarah authorizes OpenCode to act as triage-agent in Org B, scoped to only triage:create.",
     'kc-b-exchange': "Org B's Keycloak verifies the assertion's signature and issues a scoped local access token. This is where the cross-domain trust boundary is actually crossed.",
     'create-ticket': "OpenCode sends both the Org B access token and original actor token through Envoy. Both signatures must verify before the inline OPA policy checks their subject, scope, chain, signed intent, and target repo.",
@@ -734,8 +769,8 @@ POST /realms/org-b/protocol/openid-connect/token
   // real Vault-backed identity-node calls, not mocks).
   const SVG_STEPS = [
     'sarah-login', 'scan', 'dir-push', 'dir-search',
-    'cimd-generate-id', 'cimd-resolve-id',
-    'kc-a-exchange', 'mint-idjag', 'kc-b-exchange', 'create-ticket',
+    'cimd-generate-id', 'cimd-resolve-id', 'resolve-badge',
+    'kc-a-exchange', 'mint-idjag', 'egress-check', 'kc-b-exchange', 'create-ticket',
     // The create-ticket cascade is split into sub-groups so the diagram lights
     // up at the same pace as the nested step cards reveal, instead of jumping
     // to fully-green the instant step 10 (the outer POST) completes.
@@ -745,6 +780,8 @@ POST /realms/org-b/protocol/openid-connect/token
   let allSteps  = [];   // full list from /api/run
   let cursor    = 0;    // how many steps have been revealed
   let busy      = false;
+  let activeStepId = null;  // the step currently being explained (pulsing highlight)
+  let lastTraceId  = null;
   const animated = new Set();
 
   const stepsEl  = document.getElementById('steps');
@@ -752,6 +789,8 @@ POST /realms/org-b/protocol/openid-connect/token
   const runBtn   = document.getElementById('run');
   const stepBtn  = document.getElementById('step');
   const resetBtn = document.getElementById('reset');
+  const autoZoomEl = document.getElementById('autoZoom');
+  const progressBarEl = document.getElementById('runProgressBar');
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -770,9 +809,140 @@ POST /realms/org-b/protocol/openid-connect/token
     SVG_STEPS.forEach(id => {
       const g = document.querySelector(`[data-step="${id}"]`);
       if (!g) return;
-      const st = statusMap[id] || 'pending';
-      g.setAttribute('class', 'g ' + st);
+      if (id === activeStepId) {
+        g.setAttribute('class', 'g active');
+      } else {
+        const st = statusMap[id] || 'pending';
+        g.setAttribute('class', 'g ' + st);
+      }
     });
+  }
+
+  function updateProgressBar() {
+    const total = allSteps.length || 0;
+    const pct = total ? Math.round((cursor / total) * 100) : 0;
+    progressBarEl.style.width = pct + '%';
+  }
+
+  // Settle an "active" (pulsing) step back to its real ok/error color after a
+  // beat — guarded so a stale timeout from a superseded step can't clobber
+  // whatever became active in the meantime.
+  function scheduleSettle(stepId, ms) {
+    setTimeout(() => {
+      if (activeStepId === stepId) {
+        activeStepId = null;
+        updateDiagram();
+      }
+    }, ms);
+  }
+
+  // ── Zoom-to-active-step ──────────────────────────────────────────────────
+  // Narrows the vertical range to the active step (full width always stays
+  // visible — columns need to stay in view for context) via a small rAF
+  // tween on the SVG's viewBox. Toggle off with the "Auto-zoom" checkbox.
+  const seqSvg = document.getElementById('seqSvg');
+  const FULL_VB = seqSvg.getAttribute('viewBox').split(' ').map(Number);
+  let currentVB = FULL_VB.slice();
+  let vbAnimHandle = null;
+
+  function easeInOutQuad(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+
+  function animateViewBox(target, duration = 480) {
+    if (vbAnimHandle) cancelAnimationFrame(vbAnimHandle);
+    const start = currentVB.slice();
+    const t0 = performance.now();
+    function tick(now) {
+      const t = Math.min(1, (now - t0) / duration);
+      const eased = easeInOutQuad(t);
+      const vb = start.map((v, i) => v + (target[i] - v) * eased);
+      seqSvg.setAttribute('viewBox', vb.join(' '));
+      if (t < 1) {
+        vbAnimHandle = requestAnimationFrame(tick);
+      } else {
+        currentVB = target.slice();
+        vbAnimHandle = null;
+      }
+    }
+    vbAnimHandle = requestAnimationFrame(tick);
+  }
+
+  function focusOnStep(stepId) {
+    if (!autoZoomEl.checked) return;
+    const g = document.querySelector(`[data-step="${stepId}"]`);
+    if (!g) return;
+    const bbox = g.getBBox();
+    const padY = 70;
+    const minH = 280;
+    let y0 = Math.max(0, bbox.y - padY);
+    let y1 = Math.min(FULL_VB[3], bbox.y + bbox.height + padY);
+    if (y1 - y0 < minH) {
+      const mid = (y0 + y1) / 2;
+      y0 = Math.max(0, mid - minH / 2);
+      y1 = Math.min(FULL_VB[3], y0 + minH);
+    }
+    animateViewBox([FULL_VB[0], y0, FULL_VB[2], y1 - y0]);
+  }
+
+  function resetZoom() {
+    animateViewBox(FULL_VB, 500);
+  }
+
+  autoZoomEl.addEventListener('change', () => {
+    if (!autoZoomEl.checked) resetZoom();
+    else if (activeStepId) focusOnStep(activeStepId);
+  });
+
+  // ── Traveling pulse dot ──────────────────────────────────────────────────
+  // A little "packet" that actually flies from source to destination along
+  // the active step's primary message — reinforces which arrow is live right
+  // now, rather than just a color change.
+  const travelDot = document.getElementById('travelDot');
+
+  function animateTravelDot(stepId) {
+    const g = document.querySelector(`[data-step="${stepId}"]`);
+    const line = g && g.querySelector('.seq-msg:not(.ret)');
+    if (!line) { travelDot.setAttribute('opacity', '0'); return; }
+    let x1, y1, x2, y2;
+    if (line.tagName === 'line') {
+      x1 = +line.getAttribute('x1'); y1 = +line.getAttribute('y1');
+      x2 = +line.getAttribute('x2'); y2 = +line.getAttribute('y2');
+    } else {
+      const len = line.getTotalLength();
+      const p0 = line.getPointAtLength(0), p1 = line.getPointAtLength(len);
+      x1 = p0.x; y1 = p0.y; x2 = p1.x; y2 = p1.y;
+    }
+    const duration = 650;
+    const t0 = performance.now();
+    travelDot.setAttribute('opacity', '1');
+    function tick(now) {
+      const t = Math.min(1, (now - t0) / duration);
+      travelDot.setAttribute('cx', x1 + (x2 - x1) * t);
+      travelDot.setAttribute('cy', y1 + (y2 - y1) * t);
+      if (t < 1) requestAnimationFrame(tick);
+      else setTimeout(() => travelDot.setAttribute('opacity', '0'), 200);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  // Bundles everything that should happen the moment a step becomes "live".
+  function activateStep(stepId, settleMs) {
+    activeStepId = stepId;
+    updateDiagram();
+    focusOnStep(stepId);
+    animateTravelDot(stepId);
+    scheduleSettle(stepId, settleMs);
+  }
+
+  // ── Trace link ─────────────────────────────────────────────────────────────
+  function showTraceLink(traceId) {
+    lastTraceId = traceId || null;
+    const el = document.getElementById('traceLink');
+    if (!el) return;
+    if (traceId && CONFIG.jaeger_ui_url) {
+      el.innerHTML = `<a href="${esc(CONFIG.jaeger_ui_url)}/trace/${esc(traceId)}" target="_blank" rel="noopener">View trace in Jaeger &#8594;</a>`;
+    } else {
+      el.innerHTML = '';
+    }
   }
 
   // ── Step cards ─────────────────────────────────────────────────────────────
@@ -792,6 +962,7 @@ POST /realms/org-b/protocol/openid-connect/token
         </div>${detail}${body}</div>`;
     }).join('');
     updateDiagram();
+    updateProgressBar();
   }
 
   function updateButtons() {
@@ -849,10 +1020,16 @@ POST /realms/org-b/protocol/openid-connect/token
         setStatus(`Step ${cursor}/${allSteps.length}: ${allSteps[i].id}`);
         render();
         showToast(allSteps[i], i, allSteps.length, delay);
+        // Pulse+zoom+fly for most of the dwell time, then settle to the real
+        // status color for the last beat before the next step takes over.
+        const settleAt = Math.max(300, delay - 400);
+        activateStep(allSteps[i].id, settleAt);
         if (i < allSteps.length - 1) await sleep(delay);
       }
+      resetZoom();
       const ok = data.ok;
       setStatus(ok ? `✓ All ${allSteps.length} steps complete.` : `⚠ Sequence finished with errors.`);
+      showTraceLink(data.trace_id);
     } catch(e) {
       setStatus(`Error: ${e.message}`);
     }
@@ -869,10 +1046,15 @@ POST /realms/org-b/protocol/openid-connect/token
       try {
         const data = await fetchAllSteps();
         allSteps = data.steps || [];
+        lastTraceId = data.trace_id || null;
         cursor = 1;
         setStatus(`Step 1/${allSteps.length}: ${allSteps[0]?.id || ''}`);
         render();
-        if (allSteps[0]) showToast(allSteps[0], 0, allSteps.length);
+        if (allSteps[0]) {
+          showToast(allSteps[0], 0, allSteps.length);
+          activateStep(allSteps[0].id, 1400);
+        }
+        if (cursor >= allSteps.length) showTraceLink(lastTraceId);
       } catch(e) {
         setStatus(`Error: ${e.message}`);
       }
@@ -884,15 +1066,20 @@ POST /realms/org-b/protocol/openid-connect/token
     setStatus(`Step ${cursor}/${allSteps.length}: ${allSteps[cursor-1]?.id || ''}`);
     render();
     showToast(allSteps[cursor - 1], cursor - 1, allSteps.length);
+    activateStep(allSteps[cursor - 1].id, 1400);
+    if (cursor >= allSteps.length) { resetZoom(); showTraceLink(lastTraceId); }
     updateButtons();
   });
 
   // ── Reset ──────────────────────────────────────────────────────────────────
   function resetState() {
-    allSteps = []; cursor = 0; animated.clear();
+    allSteps = []; cursor = 0; animated.clear(); activeStepId = null;
     stepsEl.innerHTML = '';
     setStatus('');
     hideToast();
+    resetZoom();
+    updateProgressBar();
+    showTraceLink(null);
     SVG_STEPS.forEach(id => {
       const g = document.querySelector(`[data-step="${id}"]`);
       if (g) g.setAttribute('class', 'g');
