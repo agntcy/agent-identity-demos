@@ -10,7 +10,7 @@ name: cross-domain-stack
 # Actors from the diagram:
 #   Sarah          → demo user (Org A), signs in via Keycloak A
 #   OpenCode       → Org A AI agent (mock), phases A+B steps 1-13
-#   AGNTCY         → identity node (badge/VC registry) + idjag-issuer (assertion mint)
+#   AGNTCY         → identity node (CIMD) + vc-issuer (badge mint) + idjag-issuer (assertion mint)
 #   Keycloak A     → Org A IdP (org-a realm), authenticates Sarah
 #   Envoy+OPA A    → SKIPPED (future Org A egress milestone)
 #   Keycloak B     → Org B IdP (org-b realm), receives cross-domain ID-JAG assertion
@@ -22,6 +22,7 @@ name: cross-domain-stack
 # Ports (non-conflicting with single-org-id-jag-app-access defaults):
 #   keycloak-a      → host:8082  (Org A IdP)
 #   keycloak-b      → host:8083  (Org B IdP)
+#   vc-issuer       → host:9003  (AGNTCY badge minter, stand-in for identity-node's badge API)
 #   idjag-issuer    → host:9002  (AGNTCY assertion minter)
 #   identity-node   → host:4005 (REST) / 4006 (gRPC)
 #   gitea           → host:3002
@@ -135,6 +136,33 @@ services:
     networks:
       - cd-net
     restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # VC badge issuer — stand-in for identity-node's (nonexistent) badge API
+  #   - Generates ephemeral RSA key pair at startup; publishes JWKS at /jwks
+  #   - Steps 3-6: OpenCode calls POST /vc/issue then POST /vc/verify to
+  #     resolve and self-check its own delegation badge
+  #   - identity-node (below) only does CIMD id generate/resolve; it has no
+  #     badge concept, so this stays a separate demo helper
+  # ---------------------------------------------------------------------------
+  vc-issuer:
+    build:
+      context: ./vc-issuer
+    image: cd-vc-issuer
+    container_name: cd-vc-issuer
+    environment:
+      ISSUER_URL: http://vc-issuer:9003
+      BADGE_TTL: ${BADGE_TTL:-3600}
+    ports:
+      - "${VC_ISSUER_PORT:-9003}:9003"
+    networks:
+      - cd-net
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9003/healthz').status==200 else 1)\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
   # ---------------------------------------------------------------------------
   # ID-JAG issuer — AGNTCY assertion minter (trusted by both Keycloak A and B)
@@ -384,6 +412,8 @@ services:
         condition: service_healthy
       keycloak-b:
         condition: service_healthy
+      vc-issuer:
+        condition: service_healthy
       idjag-issuer:
         condition: service_healthy
       envoy-org-b:
@@ -405,6 +435,7 @@ services:
       TRIAGE_CLIENT_ID: triage-agent
       TRIAGE_CLIENT_SECRET: ${TRIAGE_CLIENT_SECRET:-demo-triage-secret-change-me}
       # AGNTCY services
+      VC_ISSUER_URL: http://vc-issuer:9003
       IDJAG_ISSUER_URL: http://idjag-issuer:9000
       IDENTITY_NODE_URL: http://identity-node:4000
       # Org B trust boundary; Envoy proxies the request to Triage.

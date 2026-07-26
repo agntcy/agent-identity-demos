@@ -25,7 +25,7 @@ It also wires in two AGNTCY components for real:
 | 1 | Sarah's OIDC login at Keycloak A | **Real** |
 | 2 | CVE scan | Mocked (no scanner integration) |
 | 3–4 | AGNTCY Directory push + search (gRPC) | **Real** |
-| 5–6 | CIMD generate/resolve id (Vault-signed proof JWT → identity-node) | **Real** |
+| 5–6 | CIMD generate/resolve id (Vault-signed proof JWT → identity-node) + VC badge issue/verify (signed `vc+jwt` → vc-issuer) | **Real** |
 | 7 | RFC 8693 token exchange at Keycloak A | Mocked |
 | 8–9 | ID-JAG mint + Keycloak B `jwt-bearer` redemption | **Real** |
 | 10–13 | Envoy ingress, ticket creation, OPA check, plan, sub-badge mint | **Real** two-token JWT verification + inline delegation-aware OPA policy |
@@ -57,6 +57,7 @@ flowchart TB
         Dir["Directory Node\ngRPC, OASF records"]
         IdNode["Identity Node\nCIMD"]
         Vault[("Vault\ntransit engine")]
+        VC["VC Badge Issuer"]
         IDJAG["ID-JAG Issuer"]
     end
 
@@ -73,6 +74,7 @@ flowchart TB
     OC -->|"push / search records"| Dir
     OC -->|"generate / resolve id"| IdNode
     IdNode -.->|"proof JWT signing"| Vault
+    OC -->|"issue + verify badge"| VC
     OC -->|"mint assertion"| IDJAG
     OC -->|"jwt-bearer exchange"| KCB
     OC -->|"POST /api/ticket"| Envoy
@@ -89,10 +91,10 @@ flowchart TB
     classDef shared fill:#f1e4ff,stroke:#8250df,color:#0d1117;
     class KCA,OC orgA;
     class KCB,Triage,Sub,GW,Gitea orgB;
-    class Dir,IdNode,Vault,IDJAG shared;
+    class Dir,IdNode,Vault,VC,IDJAG shared;
 ```
 
-21 services on one Docker network (`cd-net`):
+22 services on one Docker network (`cd-net`):
 
 | Service | Image | Host port(s) | Purpose |
 |---|---|---|---|
@@ -100,6 +102,7 @@ flowchart TB
 | `kc-a-init` | `quay.io/keycloak/keycloak:26.7` | _(one-shot)_ | Registers `triage:create` optional scope |
 | `keycloak-b` | `quay.io/keycloak/keycloak:26.7` | `8083` | Org B IdP (`org-b` realm), redeems ID-JAG assertions |
 | `kc-b-init` | `quay.io/keycloak/keycloak:26.7` | _(one-shot)_ | Registers `triage:create`/`gitea:*` optional scopes |
+| `vc-issuer` | built from `./vc-issuer` | `9003` | Issues + verifies signed VC badges (stand-in — identity-node has no badge API) |
 | `idjag-issuer` | built from `../archive/single-org-id-jag-app-access/idjag-issuer` | `9002` | Mints ID-JAG assertions (stand-in issuer) |
 | `identity-postgres` | `postgres:16` | _(internal)_ | DB for identity-node |
 | `identity-vault` | `hashicorp/vault:1.17` | _(internal)_ | Holds the org-a trust-authority signing key (Transit engine) |
@@ -134,6 +137,7 @@ sequenceDiagram
     participant Dir as AGNTCY Directory
     participant IdNode as Identity Node
     participant Vault
+    participant VC as VC Badge Issuer
     participant IDJAG as ID-JAG Issuer
     participant KCB as Keycloak B
     participant Envoy as Built On Envoy + OPA
@@ -158,6 +162,11 @@ sequenceDiagram
     IdNode-->>OC: id = AGNTCY-triage-agent
     OC->>IdNode: resolve id
     IdNode-->>OC: ResolverMetadata + public key
+
+    OC->>VC: POST /vc/issue (id, caps, delegating_user, intent, act_chain)
+    VC-->>OC: signed badge (vc+jwt)
+    OC->>VC: POST /vc/verify (badge)
+    VC-->>OC: valid=true + claims
 
     Note over OC,KCA: RFC 8693 token exchange (mocked)
     OC->>IDJAG: mint assertion (sub=Sarah, scope=triage:create, intent=create-pr-fix)
@@ -421,6 +430,72 @@ If a port is allocated, change the corresponding `ENVOY_*_PORT` value in
 When finished, `docker compose down` preserves demo data. Use
 `docker compose down -v` only when intentionally deleting all demo data.
 
+### VC badge issuer reviewer verification
+
+Verifies the badge issuer's own test suite, that it builds and starts
+cleanly, and that `opencode-agent`'s badge-resolution step now issues and
+verifies a real signed badge instead of returning a hardcoded mock.
+
+1. Run the badge issuer's unit tests:
+
+   ```bash
+   docker run --rm -e PYTHONDONTWRITEBYTECODE=1 \
+     -v "$PWD/cross-domain-id-jag-vc/vc-issuer:/src" \
+     -w /src python:3.12-slim sh -c \
+     'pip install -q -r requirements-dev.txt && pytest -q -p no:cacheprovider'
+   ```
+
+   Expected: 9/9 tests pass.
+
+2. Validate Compose and start the stack:
+
+   ```bash
+   cd cross-domain-id-jag-vc
+   docker compose config --quiet
+   docker compose up -d --build
+   ```
+
+3. Confirm the issuer is healthy and its JWKS is well-formed:
+
+   ```bash
+   curl --fail --silent --show-error http://localhost:9003/healthz | jq .
+   curl --fail --silent --show-error http://localhost:9003/jwks | jq .
+   ```
+
+4. Issue and verify a badge directly, confirming it is a real signed `vc+jwt`
+   (not the old hardcoded mock):
+
+   ```bash
+   BADGE="$(curl --silent --show-error -X POST http://localhost:9003/vc/issue \
+     -H 'Content-Type: application/json' \
+     -d '{"id":"opencode-agent","caps":["scan","remediate","delegate"],
+          "delegating_user":"sarah@org-a.example",
+          "intent":"cross-domain-remediation","act_chain":["opencode-agent"]}' \
+     | jq -r .badge)"
+
+   curl --silent --show-error -X POST http://localhost:9003/vc/verify \
+     -H 'Content-Type: application/json' \
+     -d "{\"badge\":\"$BADGE\"}" | jq .
+   ```
+
+   Expected: `valid: true`, claims matching the request, and a `typ: vc+jwt`
+   header (`echo "$BADGE" | cut -d. -f1 | base64 -d`).
+
+5. Run the full sequence and confirm the badge step used the real issuer:
+
+   ```bash
+   RUN_OUTPUT="$(mktemp)"
+   curl --fail --silent --show-error -X POST http://localhost:8100/api/run \
+     -H 'Content-Type: application/json' \
+     -d '{"repo":"demo-admin/payments-service"}' -o "$RUN_OUTPUT"
+
+   jq '{ok, badge: [.steps[] | select(.id == "resolve-badge")][0]}' "$RUN_OUTPUT"
+   rm "$RUN_OUTPUT"
+   ```
+
+   Expected: `ok=true`, the `resolve-badge` step has `status=ok` and a
+   `token_preview` (the real signed badge), not the old static mock claims.
+
 ### Via the webapp (recommended)
 
 Open **http://localhost:8090**. Click **Run (animated)** to watch all 20
@@ -520,9 +595,10 @@ omit either and you'll get an opaque failure with no useful error message.
 
 ```
 cross-domain-id-jag-vc/
-├── docker-compose.yaml        # the 21-service stack (source of truth)
+├── docker-compose.yaml        # the 22-service stack (source of truth)
 ├── .env.example
 ├── envoy/                     # Built On Envoy image, JWT filters, and Rego policies/tests
+├── vc-issuer/                  # VC badge issuer (stand-in for identity-node's badge API)
 ├── identity-node-init.py      # Vault Transit bootstrap + org-a issuer registration
 ├── keycloak-a/, keycloak-b/   # realm import JSON + scope bootstrap scripts
 ├── gitea/                     # Gitea admin/repo seed script
