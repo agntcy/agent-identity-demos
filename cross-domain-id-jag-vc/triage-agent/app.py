@@ -21,6 +21,9 @@ import os
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+from tracing import setup_tracing
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -35,6 +38,8 @@ SUB_AGENT_URL = os.environ.get("SUB_AGENT_URL", "http://sub-agent:8300").rstrip(
 KC_B_ISSUER = f"{KC_B_URL}/realms/{KC_B_REALM}"
 
 app = FastAPI(title="Triage Agent (mock)", version="0.1.0")
+setup_tracing("triage-agent")
+FastAPIInstrumentor.instrument_app(app)
 
 
 class TicketRequest(BaseModel):

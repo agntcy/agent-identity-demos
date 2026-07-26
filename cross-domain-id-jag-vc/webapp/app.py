@@ -24,6 +24,9 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+from tracing import setup_tracing
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -64,6 +67,8 @@ KC_B_TOKEN_URL = f"{KC_B_ISSUER}/protocol/openid-connect/token"
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Cross-Domain Demo", version="0.1.0")
+setup_tracing("webapp")
+FastAPIInstrumentor.instrument_app(app)
 
 
 # ── Pydantic models for step-through bodies ───────────────────────────────────

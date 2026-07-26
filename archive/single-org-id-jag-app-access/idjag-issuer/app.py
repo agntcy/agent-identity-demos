@@ -21,6 +21,9 @@ import uuid
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+from tracing import setup_tracing
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -34,6 +37,8 @@ _key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 _kid = str(uuid.uuid4())
 
 app = FastAPI(title="CNCF Demo ID-JAG Issuer", version="0.1.0")
+setup_tracing("idjag-issuer")
+FastAPIInstrumentor.instrument_app(app)
 
 
 def _int_to_b64url(value: int, length: int) -> str:
