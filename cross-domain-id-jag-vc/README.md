@@ -27,8 +27,10 @@ It also wires in two AGNTCY components for real:
 | 3–4 | AGNTCY Directory push + search (gRPC) | **Real** |
 | 5–6 | CIMD generate/resolve id (Vault-signed proof JWT → identity-node) | **Real** |
 | 7 | RFC 8693 token exchange at Keycloak A | Mocked |
-| 8–9 | ID-JAG mint + Keycloak B `jwt-bearer` redemption | **Real** |
-| 10–13 | Envoy ingress, ticket creation, OPA check, plan, sub-badge mint | **Real** two-token JWT verification + inline delegation-aware OPA policy |
+| 8 | ID-JAG mint for Org B triage-agent | **Real** |
+| 9–10 | Org A egress PDP — may Sarah delegate this scope to Org B? | **Real** single-token JWT verification + inline OPA policy |
+| 11 | Keycloak B `jwt-bearer` redemption | **Real** |
+| 12–13 | Envoy ingress, ticket creation, OPA check, plan, sub-badge mint | **Real** two-token JWT verification + inline delegation-aware OPA policy |
 | 14 | Sub-Agent spawned with the narrowed badge | **Real** |
 | 15–18 | Sub-Agent `jwt-bearer` exchange, Envoy resource enforcement, push file, open PR | **Real** |
 | 19 | Resource-boundary OPA decision | **Real** two-token JWT verification + repository-bound policy |
@@ -40,7 +42,11 @@ and the original ID-JAG actor token, then enforcing signed scope, delegation
 chain, intent, and repository constraints. Milestone 3 protects the resource
 path: the narrowed sub-badge is signed for one repository, Sub-Agent sends it
 with its access token through listener `10001`, and inline OPA allows only the
-specific push and pull-request operations.
+specific push and pull-request operations. Milestone 4 protects the Org A
+egress boundary: before OpenCode ever redeems the ID-JAG at Keycloak B, Envoy
+A verifies the freshly-minted assertion against idjag-issuer's JWKS and inline
+OPA checks its scope, intent, and delegation-chain depth — a policy violation
+never leaves Org A.
 
 ## Architecture
 
@@ -51,6 +57,7 @@ flowchart TB
     subgraph OrgA[" Org A "]
         KCA["Keycloak A\norg-a realm"]
         OC["OpenCode Agent"]
+        EnvoyA["Built On Envoy\ninline OPA — egress"]
     end
 
     subgraph AGNTCY[" AGNTCY shared infrastructure "]
@@ -74,6 +81,8 @@ flowchart TB
     OC -->|"generate / resolve id"| IdNode
     IdNode -.->|"proof JWT signing"| Vault
     OC -->|"mint assertion"| IDJAG
+    OC -->|"egress check: assertion"| EnvoyA
+    EnvoyA -->|"verify JWT + enforce scope, intent, chain"| OC
     OC -->|"jwt-bearer exchange"| KCB
     OC -->|"POST /api/ticket"| Envoy
     Envoy -->|"verify both JWTs + enforce delegation"| Triage
@@ -87,12 +96,12 @@ flowchart TB
     classDef orgA fill:#dbe9fe,stroke:#1f6feb,color:#0d1117;
     classDef orgB fill:#dafbe1,stroke:#1a7f37,color:#0d1117;
     classDef shared fill:#f1e4ff,stroke:#8250df,color:#0d1117;
-    class KCA,OC orgA;
+    class KCA,OC,EnvoyA orgA;
     class KCB,Triage,Sub,GW,Gitea orgB;
     class Dir,IdNode,Vault,IDJAG shared;
 ```
 
-21 services on one Docker network (`cd-net`):
+22 services on one Docker network (`cd-net`):
 
 | Service | Image | Host port(s) | Purpose |
 |---|---|---|---|
@@ -112,6 +121,7 @@ flowchart TB
 | `gitea` | `gitea/gitea:1.22` | `3002` (HTTP), `2223` (SSH) | Protected resource (repo server) |
 | `gitea-init` | `gitea/gitea:1.22` | _(one-shot)_ | Seeds the Gitea admin + demo repo |
 | `gitea-gateway` | built from `../archive/single-org-id-jag-app-access/gitea-gateway` | _(internal only)_ | Requires Envoy policy metadata, then rechecks token scope before using Gitea admin credentials |
+| `envoy-org-a` | built from `./envoy-org-a` (Envoy + Built On Envoy Composer) | `12000`; admin `127.0.0.1:9902` | Org A gateway; egress JWT + inline OPA policy (may Sarah delegate this scope to Org B?) |
 | `envoy-org-b` | built from `./envoy` (Envoy + Built On Envoy Composer) | `10000`, `10001`; admin `127.0.0.1:9901` | Org B gateway; separate ticket-ingress and resource-access JWT + inline OPA policies |
 | `opencode-agent` | built from `./opencode-agent` | `8101` | Org A mock agent (Phase A/B driver) |
 | `triage-agent` | built from `./triage-agent` | _(internal only)_ | Org B mock agent; reachable from outside `cd-net` only through Envoy |
@@ -122,8 +132,11 @@ flowchart TB
 
 Every hop below actually happens against the real services in this stack
 (Keycloak, Vault, identity-node, dir-apiserver, Gitea). Only the CVE scan and
-RFC 8693 exchange at Keycloak A are mocked. Both Envoy enforcement points are
-real. This is the same flow the webapp's UI animates step by step.
+RFC 8693 exchange at Keycloak A are mocked. All three Envoy enforcement points
+— egress, ticket ingress, and resource access — are real. This is the flow
+`opencode-agent`'s `/api/run` drives end to end; the webapp's animated UI
+currently covers everything except the new Org A egress step (tracked as a
+follow-up).
 
 ```mermaid
 sequenceDiagram
@@ -135,6 +148,7 @@ sequenceDiagram
     participant IdNode as Identity Node
     participant Vault
     participant IDJAG as ID-JAG Issuer
+    participant EnvoyA as Envoy A + OPA (egress)
     participant KCB as Keycloak B
     participant Envoy as Built On Envoy + OPA
     participant Triage as Triage (Org B)
@@ -162,6 +176,12 @@ sequenceDiagram
     Note over OC,KCA: RFC 8693 token exchange (mocked)
     OC->>IDJAG: mint assertion (sub=Sarah, scope=triage:create, intent=create-pr-fix)
     IDJAG-->>OC: signed assertion (RS256)
+
+    OC->>EnvoyA: POST /api/egress-check (assertion as Bearer)
+    EnvoyA->>IDJAG: fetch/cached JWKS
+    Note over EnvoyA: verify JWT; enforce scope, intent, act-chain depth
+    EnvoyA-->>OC: ALLOW + policy decision headers
+
     OC->>KCB: jwt-bearer grant
     KCB-->>OC: scoped access token
 
@@ -214,8 +234,8 @@ The first build pulls the pinned Envoy base image and Built On Envoy Composer
 artifact. To deliberately refresh those pinned inputs:
 
 ```bash
-docker compose build --pull envoy-org-b
-docker compose up -d envoy-org-b
+docker compose build --pull envoy-org-a envoy-org-b
+docker compose up -d envoy-org-a envoy-org-b
 ```
 
 First boot takes ~3–5 minutes (Keycloak + identity-node + Directory cold
@@ -421,6 +441,82 @@ If a port is allocated, change the corresponding `ENVOY_*_PORT` value in
 When finished, `docker compose down` preserves demo data. Use
 `docker compose down -v` only when intentionally deleting all demo data.
 
+### Envoy Milestone 4 reviewer verification
+
+Verifies the egress Rego policy, the digest-pinned image, the egress
+listener, a full successful run through the egress check, and an
+independent egress-denial case. Run it from the repository root with
+Docker, Docker Compose, `curl`, and `jq`.
+
+1. Run the egress policy suite:
+
+   ```bash
+   docker run --rm \
+     -v "$PWD/cross-domain-id-jag-vc/envoy-org-a/policies:/policies:ro" \
+     openpolicyagent/opa:1.8.0 \
+     test /policies/egress.rego /policies/egress_test.rego -v
+   ```
+
+   Expected: 10/10 tests pass.
+
+2. Validate Compose, build the gateway, and validate its native config:
+
+   ```bash
+   cd cross-domain-id-jag-vc
+   docker compose config --quiet
+   docker compose build --pull envoy-org-a
+   docker run --rm cd-envoy-boe-a:milestone4 \
+     envoy --mode validate -c /etc/envoy/envoy.yaml
+   docker compose up -d --build
+   ```
+
+3. Confirm the listener and admin port are healthy:
+
+   ```bash
+   curl --fail --silent --show-error http://localhost:12000/health | jq .
+   curl --fail --silent --show-error http://127.0.0.1:9902/ready
+   ```
+
+4. Run the full sequence and confirm the egress check passed:
+
+   ```bash
+   RUN_OUTPUT="$(mktemp)"
+   curl --fail --silent --show-error -X POST http://localhost:8100/api/run \
+     -H 'Content-Type: application/json' \
+     -d '{"repo":"demo-admin/payments-service"}' -o "$RUN_OUTPUT"
+
+   jq '{ok, egress: [.steps[] | select(.id == "egress-check")][0]}' "$RUN_OUTPUT"
+   rm "$RUN_OUTPUT"
+   ```
+
+   Expected: `ok=true`, the `egress-check` step has `status=ok`.
+
+5. Prove a policy violation never leaves Org A — mint an assertion with an
+   unsupported intent directly via `idjag-issuer` and present it straight to
+   the egress listener:
+
+   ```bash
+   BAD_ASSERTION="$(curl --silent --show-error -X POST http://localhost:9002/mint \
+     -H 'Content-Type: application/json' \
+     -d '{"sub":"sarah@org-a.example","aud":"http://keycloak-b:8080/realms/org-b",
+          "client_id":"triage-agent","act_chain":["opencode-agent"],
+          "scope":"openid","intent":["delete-repository"]}' | jq -r .assertion)"
+
+   curl --silent --show-error --include -X POST http://localhost:12000/api/egress-check \
+     -H "Authorization: Bearer $BAD_ASSERTION"
+   ```
+
+   Expected: HTTP 403 with `error=policy_denied`. This is a policy denial, not
+   a JWT-signature failure — the assertion is validly signed by idjag-issuer,
+   it just doesn't carry an allowed scope/intent.
+
+6. Confirm metrics show both decisions:
+
+   ```bash
+   curl --fail --silent --show-error \
+     'http://127.0.0.1:9902/stats?filter=opa_requests_total'
+   ```
+
 ### Via the webapp (recommended)
 
 Open **http://localhost:8090**. Click **Run (animated)** to watch all 20
@@ -520,8 +616,9 @@ omit either and you'll get an opaque failure with no useful error message.
 
 ```
 cross-domain-id-jag-vc/
-├── docker-compose.yaml        # the 21-service stack (source of truth)
+├── docker-compose.yaml        # the 22-service stack (source of truth)
 ├── .env.example
+├── envoy-org-a/                # Org A egress gateway: Built On Envoy image + egress.rego
 ├── envoy/                     # Built On Envoy image, JWT filters, and Rego policies/tests
 ├── identity-node-init.py      # Vault Transit bootstrap + org-a issuer registration
 ├── keycloak-a/, keycloak-b/   # realm import JSON + scope bootstrap scripts
