@@ -8,7 +8,7 @@ Drives Phase A + Discovery + Phase B of the cross-domain remediation sequence:
     1. Sarah signs in via OIDC password grant → Keycloak A (org-a realm)
     2. Mock: scan repo, find CVE, decide to remediate cross-domain
   Discovery + Identity:
-    3-6. Resolve VC badge from AGNTCY identity node (mocked for now)
+    3-6. Resolve + verify a VC badge from vc-issuer (real signed vc+jwt)
   Phase B (cross-domain begins):
     7. RFC 8693 exchange (subject=Sarah, actor_token=badge) → Keycloak A (mocked)
     8. Mint ID-JAG assertion for Org B triage-agent → idjag-issuer
@@ -39,6 +39,7 @@ TRIAGE_CLIENT_SECRET = os.environ.get("TRIAGE_CLIENT_SECRET", "")
 SARAH_USER = os.environ.get("SARAH_USER", "sarah")
 SARAH_PASSWORD = os.environ.get("SARAH_PASSWORD", "")
 SARAH_EMAIL = os.environ.get("SARAH_EMAIL", "sarah@org-a.example")
+VC_ISSUER_URL = os.environ.get("VC_ISSUER_URL", "http://vc-issuer:9003").rstrip("/")
 IDJAG_ISSUER_URL = os.environ.get("IDJAG_ISSUER_URL", "http://idjag-issuer:9000").rstrip("/")
 IDENTITY_NODE_URL = os.environ.get("IDENTITY_NODE_URL", "http://identity-node:4000").rstrip("/")
 EGRESS_PDP_URL = os.environ.get("EGRESS_PDP_URL", "http://envoy-org-a:12000").rstrip("/")
@@ -77,6 +78,7 @@ def config():
         "kc_b": KC_B_URL, "kc_b_realm": KC_B_REALM,
         "opencode_client": OPENCODE_CLIENT_ID,
         "triage_client": TRIAGE_CLIENT_ID,
+        "vc_issuer": VC_ISSUER_URL,
         "idjag_issuer": IDJAG_ISSUER_URL,
         "identity_node": IDENTITY_NODE_URL,
         "egress_pdp": EGRESS_PDP_URL,
@@ -130,20 +132,40 @@ async def run(body: RunRequest | None = None):
         })
         steps.append(s)
 
-        # ── Steps 3-6: Badge resolution (mocked — real: call identity-node) ─
+        # ── Steps 3-6: Resolve + verify VC badge from vc-issuer ─────────────
+        # identity-node's real REST API has no badge concept (CIMD id
+        # generate/resolve only — see README's "How CIMD actually works"),
+        # so vc-issuer plays this role the same way idjag-issuer stands in
+        # for the ID-JAG issuer: a real signed vc+jwt, really verified.
         s = _s("resolve-badge",
-               "3-6. Resolve VC badge from AGNTCY identity node (mocked)",
-               f"GET {IDENTITY_NODE_URL}/vc/{OPENCODE_CLIENT_ID}/.well-known/vcs.json  +  /vc/verify")
-        s.update(status="ok", result={
-            "badge": {
+               "3-6. Resolve + verify VC badge from vc-issuer",
+               f"POST {VC_ISSUER_URL}/vc/issue  +  POST {VC_ISSUER_URL}/vc/verify")
+        try:
+            r = await client.post(f"{VC_ISSUER_URL}/vc/issue", json={
                 "id": OPENCODE_CLIENT_ID,
                 "caps": ["scan", "remediate", "delegate"],
                 "delegating_user": SARAH_EMAIL,
                 "intent": "cross-domain-remediation",
                 "act_chain": [OPENCODE_CLIENT_ID],
-            },
-            "note": "mocked — real impl: POST /vc/verify against identity-node",
-        })
+            })
+            if r.status_code != 200:
+                s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
+                steps.append(s)
+                return JSONResponse({"ok": False, "steps": steps})
+            badge = r.json()["badge"]
+
+            r = await client.post(f"{VC_ISSUER_URL}/vc/verify", json={"badge": badge})
+            if r.status_code == 200 and r.json().get("valid"):
+                s.update(status="ok", token_preview=badge[:48] + "…",
+                         result={"badge_claims": r.json()["claims"]})
+            else:
+                s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
+                steps.append(s)
+                return JSONResponse({"ok": False, "steps": steps})
+        except Exception as exc:  # noqa: BLE001
+            s.update(status="error", error=str(exc))
+            steps.append(s)
+            return JSONResponse({"ok": False, "steps": steps})
         steps.append(s)
 
         # ── Step 7: RFC 8693 token exchange at Keycloak A (mocked) ─────────
