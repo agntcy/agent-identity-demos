@@ -180,9 +180,13 @@ services:
       context: ./vc-issuer
     image: cd-vc-issuer
     container_name: cd-vc-issuer
+    depends_on:
+      jaeger:
+        condition: service_healthy
     environment:
       ISSUER_URL: http://vc-issuer:9003
       BADGE_TTL: ${BADGE_TTL:-3600}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     ports:
       - "${VC_ISSUER_PORT:-9003}:9003"
     networks:

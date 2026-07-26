@@ -26,6 +26,9 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+from tracing import setup_tracing
 from pydantic import BaseModel
 
 ISSUER_URL = os.environ.get("ISSUER_URL", "http://vc-issuer:9003")
@@ -36,6 +39,8 @@ _key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 _kid = str(uuid.uuid4())
 
 app = FastAPI(title="VC Badge Issuer (demo stand-in)", version="0.1.0")
+setup_tracing("vc-issuer")
+FastAPIInstrumentor.instrument_app(app)
 
 
 def _int_to_b64url(value: int, length: int) -> str:
