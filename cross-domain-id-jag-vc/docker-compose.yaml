@@ -63,7 +63,7 @@ services:
       - cd-net
       - resource-net
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/16686 && echo OK || exit 1"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:14269/"]
       interval: 5s
       timeout: 3s
       retries: 20
