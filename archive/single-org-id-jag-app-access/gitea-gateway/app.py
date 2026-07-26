@@ -3,13 +3,15 @@
 The Receiving App presents the access token it obtained from Keycloak's ID-JAG
 (jwt-bearer) exchange. This gateway:
 
-  1. verifies the token (RS256 signature via Keycloak JWKS, issuer, expiry),
-  2. enforces the required *narrow* scope for the operation
+  1. optionally requires a matching upstream Envoy inline-policy decision,
+  2. verifies the token again (RS256 signature via Keycloak JWKS, issuer,
+     expiry),
+  3. enforces the required *narrow* scope for the operation
      (``gitea:read`` to list, ``gitea:write`` to create/push, ``gitea:pr`` to
      open pull requests),
-  3. enforces a policy-level deny-list (GITEA_DENY_LIST) that blocks PR
+  4. enforces a policy-level deny-list (GITEA_DENY_LIST) that blocks PR
      creation against certain repos regardless of scope — policy beats token,
-  4. only then proxies to Gitea, using a server-side admin credential the
+  5. only then proxies to Gitea, using a server-side admin credential the
      caller never sees.
 
 This is the "the token actually grants access to something" moment: a
@@ -40,6 +42,11 @@ GITEA_ADMIN_PASSWORD = os.environ.get("GITEA_ADMIN_PASSWORD", "")
 READ_SCOPE = os.environ.get("GITEA_READ_SCOPE", "gitea:read")
 WRITE_SCOPE = os.environ.get("GITEA_WRITE_SCOPE", "gitea:write")
 PR_SCOPE = os.environ.get("GITEA_PR_SCOPE", "gitea:pr")
+REQUIRE_ENVOY_POLICY = os.environ.get(
+    "REQUIRE_ENVOY_POLICY", "false"
+).lower() in {"1", "true", "yes"}
+RESOURCE_POLICY_RULE = "org-b-resource-delegation"
+RESOURCE_POLICY_ACTIONS = frozenset({"push-file", "open-pr"})
 
 # Repos the gateway denies PR creation for regardless of token scope.
 DENY_LIST: frozenset[str] = frozenset(
@@ -72,8 +79,57 @@ def _verify_token(authorization: str | None) -> dict:
     return claims
 
 
-def require_token(authorization: str | None = Header(default=None)) -> dict:
-    return _verify_token(authorization)
+def require_token(
+    authorization: str | None = Header(default=None),
+    policy_decision: str | None = Header(
+        default=None, alias="x-agntcy-policy-decision"
+    ),
+    policy_rule: str | None = Header(default=None, alias="x-agntcy-policy-rule"),
+    policy_enforcer: str | None = Header(
+        default=None, alias="x-agntcy-policy-enforcer"
+    ),
+    policy_action: str | None = Header(
+        default=None, alias="x-agntcy-policy-action"
+    ),
+    policy_repository: str | None = Header(
+        default=None, alias="x-agntcy-policy-repository"
+    ),
+    delegation_depth: str | None = Header(
+        default=None, alias="x-agntcy-delegation-depth"
+    ),
+) -> dict:
+    claims = _verify_token(authorization)
+    policy_depth = (
+        int(delegation_depth)
+        if delegation_depth is not None and delegation_depth.isdecimal()
+        else 0
+    )
+    if REQUIRE_ENVOY_POLICY:
+        valid_policy = (
+            policy_decision == "ALLOW"
+            and policy_rule == RESOURCE_POLICY_RULE
+            and policy_enforcer == "built-on-envoy-opa"
+            and policy_action in RESOURCE_POLICY_ACTIONS
+            and bool(policy_repository)
+            and policy_depth == 2
+        )
+        if not valid_policy:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "envoy_policy_required",
+                    "message": "resource requests must pass the Org B Envoy policy gateway",
+                },
+            )
+    claims["_envoy_policy"] = {
+        "decision": policy_decision,
+        "rule": policy_rule,
+        "enforced_by": policy_enforcer,
+        "action": policy_action,
+        "repository": policy_repository,
+        "delegation_depth": policy_depth,
+    }
+    return claims
 
 
 def _scopes(claims: dict) -> set[str]:
@@ -104,7 +160,13 @@ class CreateRepo(BaseModel):
     private: bool = False
 
 
-class OpenPR(BaseModel):
+class ResourceContext(BaseModel):
+    intent: str = ""
+    act_chain: list[str] = []
+    ticket_id: str = ""
+
+
+class OpenPR(ResourceContext):
     head: str = "agent/feature-1"
     base: str = "main"
     title: str = "feat: agent-initiated changes via ID-JAG"
@@ -123,9 +185,45 @@ def healthz():
     return {"status": "ok"}
 
 
+def require_policy_context(
+    claims: dict,
+    *,
+    action: str,
+    repository: str,
+    context: ResourceContext | None = None,
+) -> dict:
+    policy = claims.get("_envoy_policy", {})
+    if not REQUIRE_ENVOY_POLICY:
+        return policy
+    if policy.get("action") != action or policy.get("repository") != repository:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "envoy_policy_context_mismatch",
+                "expected_action": action,
+                "expected_repository": repository,
+            },
+        )
+    if (
+        context is None
+        or context.intent != "create-pr-fix"
+        or context.act_chain != ["opencode-agent", "triage-agent", "sub-agent"]
+        or not context.ticket_id.startswith("TRIAGE-")
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "invalid_delegation_context",
+                "message": "intent, act-chain, or ticket binding is invalid",
+            },
+        )
+    return policy
+
+
 @app.get("/api/gitea/repos")
 async def list_repos(claims: dict = Depends(require_token)):
     """List Gitea repositories. Requires the narrow ``gitea:read`` scope."""
+    require_policy_context(claims, action="list-repos", repository="")
     require_scope(claims, READ_SCOPE)
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(
@@ -150,6 +248,7 @@ async def list_repos(claims: dict = Depends(require_token)):
 @app.post("/api/gitea/repos")
 async def create_repo(body: CreateRepo, claims: dict = Depends(require_token)):
     """Create a Gitea repository. Requires the ``gitea:write`` scope."""
+    require_policy_context(claims, action="create-repo", repository="")
     require_scope(claims, WRITE_SCOPE)
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(
@@ -169,9 +268,20 @@ async def create_repo(body: CreateRepo, claims: dict = Depends(require_token)):
 
 
 @app.post("/api/gitea/push/{owner}/{repo}")
-async def push_file(owner: str, repo: str, claims: dict = Depends(require_token)):
+async def push_file(
+    owner: str,
+    repo: str,
+    body: ResourceContext | None = None,
+    claims: dict = Depends(require_token),
+):
     """Push AGENTS.md to a new feature branch. Requires ``gitea:write`` scope."""
     require_scope(claims, WRITE_SCOPE)
+    policy = require_policy_context(
+        claims,
+        action="push-file",
+        repository=f"{owner}/{repo}",
+        context=body,
+    )
     # Randomized per push so repeat demo runs never collide with an existing branch.
     branch = f"agent/feature-{secrets.token_hex(3)}"
     async with httpx.AsyncClient(timeout=15) as client:
@@ -190,6 +300,7 @@ async def push_file(owner: str, repo: str, claims: dict = Depends(require_token)
     return {
         "subject": claims.get("sub"),
         "scope": sorted(_scopes(claims)),
+        "policy": policy,
         "pushed": {"branch": branch, "file": "AGENTS.md", "repo": f"{owner}/{repo}"},
     }
 
@@ -198,6 +309,12 @@ async def push_file(owner: str, repo: str, claims: dict = Depends(require_token)
 async def open_pr(owner: str, repo: str, body: OpenPR, claims: dict = Depends(require_token)):
     """Open a pull request. Requires ``gitea:pr`` scope; deny-listed repos are always blocked."""
     require_scope(claims, PR_SCOPE)
+    policy = require_policy_context(
+        claims,
+        action="open-pr",
+        repository=f"{owner}/{repo}",
+        context=body,
+    )
     # Policy layer: deny-list blocks PRs to protected repos regardless of scope.
     if repo in DENY_LIST:
         raise HTTPException(
@@ -220,6 +337,7 @@ async def open_pr(owner: str, repo: str, body: OpenPR, claims: dict = Depends(re
     return {
         "subject": claims.get("sub"),
         "scope": sorted(_scopes(claims)),
+        "policy": policy,
         "pull_request": {
             "number": item.get("number"),
             "title": item.get("title"),

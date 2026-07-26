@@ -76,6 +76,7 @@ def test_mint_minimal_claims_and_header():
     assert "scope" not in claims
     assert "act" not in claims
     assert "intent" not in claims
+    assert "resource" not in claims
 
 
 def test_mint_signature_verifies_against_jwks():
@@ -98,7 +99,7 @@ def test_mint_with_client_id_sets_azp():
     assert claims["azp"] == "receiving-app"
 
 
-def test_mint_with_scope_act_chain_and_intent():
+def test_mint_with_scope_act_chain_intent_and_resource():
     claims = client.post(
         "/mint",
         json={
@@ -107,11 +108,13 @@ def test_mint_with_scope_act_chain_and_intent():
             "scope": "openid",
             "act_chain": ["user", "receiving-app"],
             "intent": ["create-pr-fix"],
+            "resource": ["demo-admin/payments-service"],
         },
     ).json()["claims"]
     assert claims["scope"] == "openid"
     assert claims["act"] == {"sub": "receiving-app", "act_chain": ["user", "receiving-app"]}
     assert claims["intent"] == ["create-pr-fix"]
+    assert claims["resource"] == ["demo-admin/payments-service"]
 
 
 def test_mint_requires_sub_and_aud():

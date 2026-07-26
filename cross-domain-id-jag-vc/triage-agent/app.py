@@ -159,6 +159,7 @@ async def receive_ticket(
         "detail": (
             f"POST {IDJAG_ISSUER_URL}/mint  sub=sarah@org-a.example"
             f"  act_chain={parent_chain + [TRIAGE_CLIENT_ID]}  scope={sub_scope}"
+            f"  resource={body.repo}"
         ),
     }
     sub_badge = ""
@@ -171,6 +172,7 @@ async def receive_ticket(
                 "act_chain": parent_chain + [TRIAGE_CLIENT_ID],
                 "scope": sub_scope,
                 "intent": [body.intent],
+                "resource": [body.repo],
             })
             if r.status_code == 200:
                 sub_badge = r.json()["assertion"]

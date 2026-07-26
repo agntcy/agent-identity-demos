@@ -95,6 +95,9 @@ class MintRequest(BaseModel):
     # Demo-private intended actions bound into the signed assertion. The
     # receiving Envoy policy requires the requested action to appear here.
     intent: list[str] | None = None
+    # Demo-private resource constraints. Milestone 3 binds a narrowed
+    # sub-badge to the exact repository the Sub-Agent may modify.
+    resource: list[str] | None = None
 
 
 @app.post("/mint")
@@ -117,6 +120,8 @@ def mint(body: MintRequest):
         claims["act"] = {"sub": body.act_chain[-1], "act_chain": body.act_chain}
     if body.intent:
         claims["intent"] = body.intent
+    if body.resource:
+        claims["resource"] = body.resource
 
     assertion = jwt.encode(
         claims,

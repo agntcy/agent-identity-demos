@@ -56,6 +56,26 @@ def _auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+def _policy_headers(token: str, action: str, repository: str) -> dict:
+    return {
+        **_auth(token),
+        "X-AGNTCY-Policy-Decision": "ALLOW",
+        "X-AGNTCY-Policy-Rule": gw.RESOURCE_POLICY_RULE,
+        "X-AGNTCY-Policy-Enforcer": "built-on-envoy-opa",
+        "X-AGNTCY-Policy-Action": action,
+        "X-AGNTCY-Policy-Repository": repository,
+        "X-AGNTCY-Delegation-Depth": "2",
+    }
+
+
+def _resource_context() -> dict:
+    return {
+        "intent": "create-pr-fix",
+        "act_chain": ["opencode-agent", "triage-agent", "sub-agent"],
+        "ticket_id": "TRIAGE-2024-12345",
+    }
+
+
 def test_healthz():
     assert client.get("/healthz").json() == {"status": "ok"}
 
@@ -117,4 +137,115 @@ def test_create_ok_with_write_scope():
     r = client.post("/api/gitea/repos", headers=_auth(tok), json={"name": "new"})
     assert r.status_code == 200
     assert r.json()["created"]["full_name"] == "demo/new"
+    assert route.called
+
+
+def test_resource_request_requires_envoy_policy_when_enabled(monkeypatch):
+    monkeypatch.setattr(gw, "REQUIRE_ENVOY_POLICY", True)
+    tok = _token(scope="gitea:write")
+    r = client.post(
+        "/api/gitea/push/demo-admin/payments-service",
+        headers=_auth(tok),
+        json=_resource_context(),
+    )
+    assert r.status_code == 403
+    assert r.json()["detail"]["error"] == "envoy_policy_required"
+
+
+def test_resource_request_rejects_policy_context_mismatch(monkeypatch):
+    monkeypatch.setattr(gw, "REQUIRE_ENVOY_POLICY", True)
+    tok = _token(scope="gitea:write")
+    r = client.post(
+        "/api/gitea/push/demo-admin/payments-service",
+        headers=_policy_headers(
+            tok, action="open-pr", repository="demo-admin/payments-service"
+        ),
+        json=_resource_context(),
+    )
+    assert r.status_code == 403
+    assert r.json()["detail"]["error"] == "envoy_policy_context_mismatch"
+
+
+def test_resource_request_rejects_wrong_policy_depth(monkeypatch):
+    monkeypatch.setattr(gw, "REQUIRE_ENVOY_POLICY", True)
+    tok = _token(scope="gitea:write")
+    headers = _policy_headers(
+        tok, action="push-file", repository="demo-admin/payments-service"
+    )
+    headers["X-AGNTCY-Delegation-Depth"] = "1"
+    r = client.post(
+        "/api/gitea/push/demo-admin/payments-service",
+        headers=headers,
+        json=_resource_context(),
+    )
+    assert r.status_code == 403
+    assert r.json()["detail"]["error"] == "envoy_policy_required"
+
+
+def test_resource_request_rejects_incomplete_audit_chain(monkeypatch):
+    monkeypatch.setattr(gw, "REQUIRE_ENVOY_POLICY", True)
+    tok = _token(scope="gitea:write")
+    context = _resource_context()
+    context["act_chain"] = ["opencode-agent", "triage-agent"]
+    r = client.post(
+        "/api/gitea/push/demo-admin/payments-service",
+        headers=_policy_headers(
+            tok, action="push-file", repository="demo-admin/payments-service"
+        ),
+        json=context,
+    )
+    assert r.status_code == 403
+    assert r.json()["detail"]["error"] == "invalid_delegation_context"
+
+
+@respx.mock
+def test_resource_push_accepts_matching_envoy_policy(monkeypatch):
+    monkeypatch.setattr(gw, "REQUIRE_ENVOY_POLICY", True)
+    route = respx.post(
+        f"{gw.GITEA_URL}/api/v1/repos/demo-admin/payments-service/contents/AGENTS.md"
+    ).mock(return_value=httpx.Response(201, json={}))
+    tok = _token(scope="gitea:write gitea:pr")
+    r = client.post(
+        "/api/gitea/push/demo-admin/payments-service",
+        headers=_policy_headers(
+            tok, action="push-file", repository="demo-admin/payments-service"
+        ),
+        json=_resource_context(),
+    )
+    assert r.status_code == 200
+    assert r.json()["policy"]["decision"] == "ALLOW"
+    assert r.json()["policy"]["delegation_depth"] == 2
+    assert route.called
+
+
+@respx.mock
+def test_resource_pr_accepts_matching_envoy_policy(monkeypatch):
+    monkeypatch.setattr(gw, "REQUIRE_ENVOY_POLICY", True)
+    route = respx.post(
+        f"{gw.GITEA_URL}/api/v1/repos/demo-admin/payments-service/pulls"
+    ).mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "number": 1,
+                "title": "fix",
+                "html_url": "http://gitea/pr/1",
+            },
+        )
+    )
+    tok = _token(scope="gitea:write gitea:pr")
+    r = client.post(
+        "/api/gitea/pulls/demo-admin/payments-service",
+        headers=_policy_headers(
+            tok, action="open-pr", repository="demo-admin/payments-service"
+        ),
+        json={
+            **_resource_context(),
+            "head": "agent/feature-a1b2c3",
+            "base": "main",
+            "title": "fix: remediate create-pr-fix",
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["policy"]["action"] == "open-pr"
     assert route.called
