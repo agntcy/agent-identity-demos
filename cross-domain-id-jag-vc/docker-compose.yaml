@@ -57,6 +57,10 @@ services:
     container_name: cd-jaeger
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
+      # Only needed when reverse-proxying the UI under a subpath (e.g. a
+      # deployment that fronts everything with its own TLS/auth gate);
+      # leave unset for local use, where Jaeger is reached directly at "/".
+      QUERY_BASE_PATH: ${JAEGER_QUERY_BASE_PATH:-}
     ports:
       - "${JAEGER_UI_PORT:-16686}:16686"
     networks:

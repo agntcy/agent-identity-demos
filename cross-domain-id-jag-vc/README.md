@@ -308,6 +308,24 @@ other header, so the trace stays continuous through them, but Envoy itself
 doesn't emit its own spans (no Envoy-side tracing filter is configured) —
 the fan-out is visible per-service, just not per-Envoy-hop.
 
+### Reverse-proxying the Jaeger UI under a subpath
+
+If your deployment fronts everything with its own TLS/auth gate (e.g. nginx
++ OAuth) rather than exposing `16686` directly, set `JAEGER_QUERY_BASE_PATH`
+(e.g. `/jaeger`) so Jaeger's UI generates asset URLs under that prefix, and
+point `JAEGER_UI_URL` at the same public path. An nginx location for this,
+gated behind the same auth as the rest of the site:
+
+```nginx
+location /jaeger/ {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/sign_in?rd=$scheme://$host$request_uri;
+    proxy_pass http://127.0.0.1:16686;  # no trailing slash — Jaeger already
+                                         # expects the /jaeger prefix itself
+    proxy_set_header Host $host;
+}
+```
+
 ## Testing
 
 ### Envoy Milestones 2–3 reviewer verification
