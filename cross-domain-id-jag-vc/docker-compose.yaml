@@ -86,6 +86,7 @@ services:
       start-dev --import-realm
       --features=identity-assertion-jwt,token-exchange-delegation,parameterized-scopes
       --http-relative-path=${KC_A_RELATIVE_PATH:-/}
+      --proxy-headers=xforwarded
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_A_ADMIN:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_A_ADMIN_PASSWORD:?set KC_A_ADMIN_PASSWORD in .env}
@@ -136,6 +137,7 @@ services:
       start-dev --import-realm
       --features=identity-assertion-jwt,token-exchange-delegation,parameterized-scopes
       --http-relative-path=${KC_B_RELATIVE_PATH:-/}
+      --proxy-headers=xforwarded
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_B_ADMIN:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_B_ADMIN_PASSWORD:?set KC_B_ADMIN_PASSWORD in .env}
