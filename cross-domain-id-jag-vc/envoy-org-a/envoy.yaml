@@ -68,8 +68,12 @@ static_resources:
                       providers:
                         idjag_actor_token:
                           issuer: http://idjag-issuer:9000
+                          # /keycloak-b matches KC_B_RELATIVE_PATH on the
+                          # keycloak-b service (docker-compose.yaml) — this
+                          # must equal the "aud" the ID-JAG was minted with
+                          # (KC_B_ISSUER, derived from KC_B_URL there).
                           audiences:
-                            - http://keycloak-b:8080/realms/org-b
+                            - http://keycloak-b:8080/keycloak-b/realms/org-b
                           from_headers:
                             - name: Authorization
                               value_prefix: "Bearer "

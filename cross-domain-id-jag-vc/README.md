@@ -335,6 +335,55 @@ location /jaeger/ {
 }
 ```
 
+### Exposing Gitea and Keycloak A/B directly
+
+The webapp's "Access these services" legend links straight to Gitea and both
+Keycloak realms, for anyone who wants to click around instead of just
+watching the animated run. Each entry is opt-in via its own `*_UI_URL` env
+var (blank hides it):
+
+- **Gitea**: set `GITEA_ROOT_URL` to the public URL (e.g.
+  `https://your-domain/gitea/`) and `GITEA_UI_URL` to match. Gitea generates
+  its own links from `ROOT_URL`, so this works the same non-stripping way as
+  Jaeger above.
+- **Keycloak A/B**: set `KC_A_RELATIVE_PATH`/`KC_B_RELATIVE_PATH` (e.g.
+  `/keycloak-a`, `/keycloak-b`) — Keycloak's own `--http-relative-path`
+  option, so it's aware of the prefix for every link/redirect it generates —
+  and `KC_A_INTERNAL_URL`/`KC_B_INTERNAL_URL` to the same path so every
+  *other* service (webapp, opencode-agent, triage-agent, sub-agent) keeps
+  reaching Keycloak at a URL that matches what it now actually issues as the
+  token `iss`/`aud`. Set `KC_A_UI_URL`/`KC_B_UI_URL` for the legend links.
+
+**This changes the issuer/audience baked into every token these Keycloaks
+mint** — if you enable it, `envoy` and `envoy-org-a`'s hardcoded
+`issuer`/`remote_jwks`/`audiences` fields (built into the image, not
+env-driven) must be rebuilt to match, and a full `/api/run` should be
+re-verified end to end before trusting the deployment.
+
+```nginx
+location /gitea/ {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/sign_in?rd=$scheme://$host$request_uri;
+    proxy_pass http://127.0.0.1:3002;  # no trailing slash — matches GITEA_ROOT_URL's /gitea/ prefix
+    proxy_set_header Host $host;
+    client_max_body_size 50m;
+}
+
+location /keycloak-a/ {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/sign_in?rd=$scheme://$host$request_uri;
+    proxy_pass http://127.0.0.1:8082;  # no trailing slash — matches KC_A_RELATIVE_PATH
+    proxy_set_header Host $host;
+}
+
+location /keycloak-b/ {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/sign_in?rd=$scheme://$host$request_uri;
+    proxy_pass http://127.0.0.1:8083;  # no trailing slash — matches KC_B_RELATIVE_PATH
+    proxy_set_header Host $host;
+}
+```
+
 ## Testing
 
 ### Envoy Milestones 2–3 reviewer verification

@@ -54,6 +54,14 @@ VC_ISSUER_URL = os.environ.get("VC_ISSUER_URL", "http://vc-issuer:9003").rstrip(
 EGRESS_PDP_URL = os.environ.get("EGRESS_PDP_URL", "http://envoy-org-a:12000").rstrip("/")
 JAEGER_UI_URL = os.environ.get("JAEGER_UI_URL", "")  # e.g. "http://localhost:16686" — blank hides the trace link
 
+# Public reference links for the "Access these services" legend — separate
+# from KC_A_URL/KC_B_URL above (those are for internal token calls). Blank
+# hides the corresponding legend entry.
+GITEA_UI_URL = os.environ.get("GITEA_UI_URL", "")
+GITEA_ADMIN_USER = os.environ.get("GITEA_ADMIN_USER", "demo-admin")
+KC_A_UI_URL = os.environ.get("KC_A_UI_URL", "")
+KC_B_UI_URL = os.environ.get("KC_B_UI_URL", "")
+
 # CIMD — org-a's local trust authority, backed by a Vault transit signing key
 # (see identity-node-init.py for the registration bootstrap this depends on).
 VAULT_ADDR = os.environ.get("VAULT_ADDR", "http://identity-vault:8200").rstrip("/")
@@ -937,6 +945,10 @@ def config() -> JSONResponse:
         "vault_key_name": VAULT_KEY_NAME,
         "scan_repo": SCAN_REPO,
         "jaeger_ui_url": JAEGER_UI_URL,
+        "gitea_ui_url": GITEA_UI_URL,
+        "gitea_admin_user": GITEA_ADMIN_USER,
+        "kc_a_ui_url": KC_A_UI_URL,
+        "kc_b_ui_url": KC_B_UI_URL,
     })
 
 

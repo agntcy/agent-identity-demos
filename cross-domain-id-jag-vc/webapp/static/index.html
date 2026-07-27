@@ -129,6 +129,8 @@
     .status-bar { font-size: 12px; color: var(--muted); padding: 6px 0; margin-bottom: 4px; min-height: 22px; }
     #traceLink a { color: var(--teal); text-decoration: none; font-weight: 600; }
     #traceLink a:hover { text-decoration: underline; }
+    #legend a { color: var(--accent); text-decoration: none; font-weight: 600; }
+    #legend a:hover { text-decoration: underline; }
     /* Right-side step explainer toast */
     .side-toast {
       position: fixed; top: 96px; right: 24px; width: 300px; max-width: calc(100vw - 48px);
@@ -203,6 +205,7 @@
     </div>
 
     <div class="config" id="config"><div><i>Loading config…</i></div></div>
+    <div class="status-bar" id="legend" style="margin-top:-8px"></div>
     <div class="status-bar" id="status"></div>
     <div class="status-bar" id="traceLink" style="margin-top:-8px"></div>
     <div class="run-progress"><div id="runProgressBar"></div></div>
@@ -596,9 +599,28 @@ POST /realms/org-b/protocol/openid-connect/token
          <div><b>Directory:</b> ${esc(c.dir_apiserver_url)}</div>
          <div><b>Trust authority:</b> ${esc(c.org_a_common_name)} (Vault key: ${esc(c.vault_key_name)})</div>
          <div><b>Scan repo:</b> ${esc(c.scan_repo)}</div>`;
+      renderLegend(c);
     } catch(e) {
       document.getElementById('config').innerHTML = '<div style="color:var(--err)">Could not reach /api/config — is the webapp running?</div>';
     }
+  }
+
+  // "Access these services" legend — direct links to the real services
+  // behind this demo, for anyone who wants to click around themselves
+  // instead of just watching the animated run. Each entry only appears if
+  // its *_UI_URL env var is set (blank hides it, e.g. when a UI's port
+  // isn't publicly reachable in a given deployment).
+  function renderLegend(c) {
+    const entries = [
+      { label: 'Gitea', url: c.gitea_ui_url, note: `admin: ${c.gitea_admin_user || 'demo-admin'}` },
+      { label: 'Keycloak A (org-a)', url: c.kc_a_ui_url, note: `users: ${esc(c.sarah_user)}, admin` },
+      { label: 'Keycloak B (org-b)', url: c.kc_b_ui_url, note: 'user: admin' },
+    ].filter(e => e.url);
+    const el = document.getElementById('legend');
+    if (!entries.length) { el.innerHTML = ''; return; }
+    el.innerHTML = 'Access these services directly: ' + entries.map(e =>
+      `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.label)}</a> <span style="color:var(--muted)">(${esc(e.note)})</span>`
+    ).join('&nbsp;&nbsp;|&nbsp;&nbsp;');
   }
 
   // ── Story overview (shown once, before the animated run starts) ───────────

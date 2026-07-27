@@ -50,15 +50,20 @@ static_resources:
                   - name: envoy.filters.http.jwt_authn
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                      # The /keycloak-b path segment below is baked in at build
+                      # time to match KC_B_RELATIVE_PATH on the keycloak-b
+                      # service (docker-compose.yaml) — Keycloak's own
+                      # --http-relative-path setting, used to reverse-proxy its
+                      # UI under a subpath. Keep both in sync.
                       providers:
                         org_b_access_token:
-                          issuer: http://keycloak-b:8080/realms/org-b
+                          issuer: http://keycloak-b:8080/keycloak-b/realms/org-b
                           from_headers:
                             - name: Authorization
                               value_prefix: "Bearer "
                           remote_jwks:
                             http_uri:
-                              uri: http://keycloak-b:8080/realms/org-b/protocol/openid-connect/certs
+                              uri: http://keycloak-b:8080/keycloak-b/realms/org-b/protocol/openid-connect/certs
                               cluster: keycloak_b_jwks
                               timeout: 5s
                             cache_duration: 300s
@@ -67,7 +72,7 @@ static_resources:
                         idjag_actor_token:
                           issuer: http://idjag-issuer:9000
                           audiences:
-                            - http://keycloak-b:8080/realms/org-b
+                            - http://keycloak-b:8080/keycloak-b/realms/org-b
                           from_headers:
                             - name: X-AGNTCY-Actor-Token
                               value_prefix: "Bearer "
@@ -149,13 +154,13 @@ static_resources:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
                       providers:
                         org_b_resource_token:
-                          issuer: http://keycloak-b:8080/realms/org-b
+                          issuer: http://keycloak-b:8080/keycloak-b/realms/org-b
                           from_headers:
                             - name: Authorization
                               value_prefix: "Bearer "
                           remote_jwks:
                             http_uri:
-                              uri: http://keycloak-b:8080/realms/org-b/protocol/openid-connect/certs
+                              uri: http://keycloak-b:8080/keycloak-b/realms/org-b/protocol/openid-connect/certs
                               cluster: keycloak_b_jwks
                               timeout: 5s
                             cache_duration: 300s
@@ -164,7 +169,7 @@ static_resources:
                         idjag_sub_badge:
                           issuer: http://idjag-issuer:9000
                           audiences:
-                            - http://keycloak-b:8080/realms/org-b
+                            - http://keycloak-b:8080/keycloak-b/realms/org-b
                           from_headers:
                             - name: X-AGNTCY-Actor-Token
                               value_prefix: "Bearer "
