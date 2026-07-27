@@ -49,10 +49,20 @@
       border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-top: 6px;
       display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 3px 18px; }
     .config b { color: var(--text); }
+    /* No overflow-x here — an overflow-x on this element would make it its
+       own scroll container, which would make the sticky actor-box header
+       stick relative to THIS container (which never itself scrolls, so
+       nothing would visibly stick) instead of the page's scroll. On very
+       narrow viewports where the diagram's min-width exceeds the
+       container, the whole page scrolls horizontally instead — keeps the
+       header and body in perfect sync since neither has its own
+       independent horizontal scroll to fall out of sync with the other. */
     .diagram { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-      padding: 12px; margin-bottom: 18px; overflow-x: auto; position: relative; }
+      padding: 12px; margin-bottom: 18px; position: relative; }
     .diagram svg { width: 100%; min-width: 900px; height: auto; display: block; }
     .diagram svg#seqSvg { transition: none; }
+    .diagram-header-sticky { position: sticky; top: 0; z-index: 6; background: var(--panel);
+      margin: -12px -12px 0; padding: 12px 12px 0; border-bottom: 1px solid var(--border); }
     /* actor boxes */
     .seq-actor-box { fill: #21262d; stroke: var(--border); transition: stroke .3s ease, fill .3s ease; }
     .seq-actor { fill: var(--text); font-size: 11px; font-weight: 700; text-anchor: middle; }
@@ -225,7 +235,13 @@
 
     <!-- ── Sequence diagram ── -->
     <div class="diagram">
-      <svg id="seqSvg" viewBox="0 0 1432 1040" role="img" aria-label="Cross-domain remediation sequence diagram">
+      <!-- Actor-box header lives in its own small SVG, sticky-pinned above
+           the scrolling body SVG below, so column labels stay visible while
+           scrolling through a long run. Both share the same viewBox width
+           (1432) and are scaled via the same `.diagram svg { width:100% }`
+           rule, so their columns stay pixel-aligned at any container width. -->
+      <div class="diagram-header-sticky">
+        <svg viewBox="0 0 1432 50" role="img" aria-label="Sequence diagram actors">
         <defs>
           <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="context-stroke" />
@@ -324,7 +340,10 @@
         <use href="#ico-gitea" class="actor-icon" x="1257.80" y="21.5" width="14" height="14"/>
         <text class="seq-actor" x="1276.80" y="28" style="text-anchor:start">Gitea</text>
         <text class="seq-actor-sub" x="1282" y="41">via gateway</text>
+        </svg>
+      </div><!-- /diagram-header-sticky -->
 
+      <svg id="seqSvg" viewBox="0 46 1432 994" role="img" aria-label="Cross-domain remediation sequence diagram">
         <!-- Lifelines -->
         <line class="seq-life" x1="62" y1="46" x2="62" y2="1010"/>
         <line class="seq-life" x1="184" y1="46" x2="184" y2="1010"/>
@@ -970,12 +989,17 @@ POST /realms/org-b/protocol/openid-connect/token
     const bbox = g.getBBox();
     const padY = 70;
     const minH = 280;
-    let y0 = Math.max(0, bbox.y - padY);
-    let y1 = Math.min(FULL_VB[3], bbox.y + bbox.height + padY);
+    // FULL_VB[1] is the body SVG's viewBox minY (46, since the actor-box
+    // header now lives in its own separate SVG) — NOT 0, so clamp against
+    // that instead of a hardcoded 0.
+    const minY = FULL_VB[1];
+    const maxY = FULL_VB[1] + FULL_VB[3];
+    let y0 = Math.max(minY, bbox.y - padY);
+    let y1 = Math.min(maxY, bbox.y + bbox.height + padY);
     if (y1 - y0 < minH) {
       const mid = (y0 + y1) / 2;
-      y0 = Math.max(0, mid - minH / 2);
-      y1 = Math.min(FULL_VB[3], y0 + minH);
+      y0 = Math.max(minY, mid - minH / 2);
+      y1 = Math.min(maxY, y0 + minH);
     }
     animateViewBox([FULL_VB[0], y0, FULL_VB[2], y1 - y0]);
   }
