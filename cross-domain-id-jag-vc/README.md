@@ -25,8 +25,8 @@ It also wires in two AGNTCY components for real:
 | 1 | Sarah's OIDC login at Keycloak A | **Real** |
 | 2 | CVE scan | Mocked (no scanner integration) |
 | 3–4 | AGNTCY Directory push + search (gRPC) | **Real** |
-| 5–6 | CIMD generate/resolve id (Vault-signed proof JWT → identity-node) | **Real** |
-| 7 | RFC 8693 token exchange at Keycloak A | Mocked |
+| 5–6 | CIMD generate/resolve id (Vault-signed proof JWT → identity-node) + VC badge issue/verify (signed `vc+jwt` → vc-issuer) | **Real** |
+| 7 | RFC 8693 token exchange at Keycloak A | **Real** call; see note below on `act` claims |
 | 8 | ID-JAG mint for Org B triage-agent | **Real** |
 | 9–10 | Org A egress PDP — may Sarah delegate this scope to Org B? | **Real** single-token JWT verification + inline OPA policy |
 | 11 | Keycloak B `jwt-bearer` redemption | **Real** |
@@ -46,7 +46,26 @@ specific push and pull-request operations. Milestone 4 protects the Org A
 egress boundary: before OpenCode ever redeems the ID-JAG at Keycloak B, Envoy
 A verifies the freshly-minted assertion against idjag-issuer's JWKS and inline
 OPA checks its scope, intent, and delegation-chain depth — a policy violation
-never leaves Org A.
+never leaves Org A. Milestone 5 replaces the hardcoded
+VC badge mock with vc-issuer, a real signed-`vc+jwt` issuer/verifier standing
+in for identity-node's (nonexistent) badge API. Milestone 6 makes the RFC
+8693 exchange at Keycloak A a real network call instead of a static mock —
+see the note below on what Keycloak's standard token exchange does and does
+not do with the `actor_token`.
+
+**A note on `actor_token` and the `act` claim**: Keycloak 26.7's standard
+token exchange (`standard.token.exchange.enabled`) validates `subject_token`
+for real, but this was confirmed live (garbage or absent `actor_token`
+produces a byte-identical response, and keycloak-a logs nothing either way)
+to not itself verify `actor_token` or emit an RFC 8693 `act` claim — that is
+a genuine platform behavior in this configuration, not a shortcut taken
+here. Getting Keycloak to emit its own `act` claim would require a custom
+protocol-mapper SPI (compiled Java, mounted into the container) — a much
+larger, riskier undertaking than closing the "no HTTP call was ever made"
+gap this milestone addresses. The badge (`actor_token`) is independently,
+cryptographically verified against vc-issuer one step earlier, and
+delegation semantics continue to be carried forward for real via the
+ID-JAG's `act_chain` claim, unaffected by this limitation.
 
 ## Architecture
 
@@ -64,6 +83,7 @@ flowchart TB
         Dir["Directory Node\ngRPC, OASF records"]
         IdNode["Identity Node\nCIMD"]
         Vault[("Vault\ntransit engine")]
+        VC["VC Badge Issuer"]
         IDJAG["ID-JAG Issuer"]
     end
 
@@ -80,6 +100,7 @@ flowchart TB
     OC -->|"push / search records"| Dir
     OC -->|"generate / resolve id"| IdNode
     IdNode -.->|"proof JWT signing"| Vault
+    OC -->|"issue + verify badge"| VC
     OC -->|"mint assertion"| IDJAG
     OC -->|"egress check: assertion"| EnvoyA
     EnvoyA -->|"verify JWT + enforce scope, intent, chain"| OC
@@ -98,7 +119,7 @@ flowchart TB
     classDef shared fill:#f1e4ff,stroke:#8250df,color:#0d1117;
     class KCA,OC,EnvoyA orgA;
     class KCB,Triage,Sub,GW,Gitea orgB;
-    class Dir,IdNode,Vault,IDJAG shared;
+    class Dir,IdNode,Vault,VC,IDJAG shared;
 ```
 
 22 services on one Docker network (`cd-net`):
@@ -109,6 +130,7 @@ flowchart TB
 | `kc-a-init` | `quay.io/keycloak/keycloak:26.7` | _(one-shot)_ | Registers `triage:create` optional scope |
 | `keycloak-b` | `quay.io/keycloak/keycloak:26.7` | `8083` | Org B IdP (`org-b` realm), redeems ID-JAG assertions |
 | `kc-b-init` | `quay.io/keycloak/keycloak:26.7` | _(one-shot)_ | Registers `triage:create`/`gitea:*` optional scopes |
+| `vc-issuer` | built from `./vc-issuer` | `9003` | Issues + verifies signed VC badges (stand-in — identity-node has no badge API) |
 | `idjag-issuer` | built from `../archive/single-org-id-jag-app-access/idjag-issuer` | `9002` | Mints ID-JAG assertions (stand-in issuer) |
 | `identity-postgres` | `postgres:16` | _(internal)_ | DB for identity-node |
 | `identity-vault` | `hashicorp/vault:1.17` | _(internal)_ | Holds the org-a trust-authority signing key (Transit engine) |
@@ -131,12 +153,10 @@ flowchart TB
 ## Sequence flow
 
 Every hop below actually happens against the real services in this stack
-(Keycloak, Vault, identity-node, dir-apiserver, Gitea). Only the CVE scan and
-RFC 8693 exchange at Keycloak A are mocked. All three Envoy enforcement points
-— egress, ticket ingress, and resource access — are real. This is the flow
-`opencode-agent`'s `/api/run` drives end to end; the webapp's animated UI
-currently covers everything except the new Org A egress step (tracked as a
-follow-up).
+(Keycloak, Vault, identity-node, vc-issuer, dir-apiserver, Gitea). Only the
+CVE scan is mocked. All three Envoy enforcement points — egress, ticket
+ingress, and resource access — are real. This is the same
+flow the webapp's UI animates step by step.
 
 ```mermaid
 sequenceDiagram
@@ -147,6 +167,7 @@ sequenceDiagram
     participant Dir as AGNTCY Directory
     participant IdNode as Identity Node
     participant Vault
+    participant VC as VC Badge Issuer
     participant IDJAG as ID-JAG Issuer
     participant EnvoyA as Envoy A + OPA (egress)
     participant KCB as Keycloak B
@@ -173,7 +194,14 @@ sequenceDiagram
     OC->>IdNode: resolve id
     IdNode-->>OC: ResolverMetadata + public key
 
-    Note over OC,KCA: RFC 8693 token exchange (mocked)
+    OC->>VC: POST /vc/issue (id, caps, delegating_user, intent, act_chain)
+    VC-->>OC: signed badge (vc+jwt)
+    OC->>VC: POST /vc/verify (badge)
+    VC-->>OC: valid=true + claims
+
+    OC->>KCA: token-exchange (subject_token=Sarah, actor_token=badge)
+    Note over KCA: validates subject_token; does not process actor_token<br/>into an act claim (real Keycloak behavior, see README note)
+    KCA-->>OC: exchanged access token
     OC->>IDJAG: mint assertion (sub=Sarah, scope=triage:create, intent=create-pr-fix)
     IDJAG-->>OC: signed assertion (RS256)
 
@@ -441,6 +469,7 @@ If a port is allocated, change the corresponding `ENVOY_*_PORT` value in
 When finished, `docker compose down` preserves demo data. Use
 `docker compose down -v` only when intentionally deleting all demo data.
 
+
 ### Envoy Milestone 4 reviewer verification
 
 Verifies the egress Rego policy, the digest-pinned image, the egress
@@ -503,7 +532,7 @@ Docker, Docker Compose, `curl`, and `jq`.
           "scope":"openid","intent":["delete-repository"]}' | jq -r .assertion)"
 
    curl --silent --show-error --include -X POST http://localhost:12000/api/egress-check \
-     -H "Authorization: Bearer $BAD_ASSERTION"
+     -H "Authorization: ******"
    ```
 
    Expected: HTTP 403 with `error=policy_denied`. This is a policy denial, not
@@ -517,7 +546,145 @@ Docker, Docker Compose, `curl`, and `jq`.
      'http://127.0.0.1:9902/stats?filter=opa_requests_total'
    ```
 
-### Via the webapp (recommended)
+### VC badge issuer reviewer verification
+
+Verifies the badge issuer's own test suite, that it builds and starts
+cleanly, and that `opencode-agent`'s badge-resolution step now issues and
+verifies a real signed badge instead of returning a hardcoded mock.
+
+1. Run the badge issuer's unit tests:
+
+   ```bash
+   docker run --rm -e PYTHONDONTWRITEBYTECODE=1 \
+     -v "$PWD/cross-domain-id-jag-vc/vc-issuer:/src" \
+     -w /src python:3.12-slim sh -c \
+     'pip install -q -r requirements-dev.txt && pytest -q -p no:cacheprovider'
+   ```
+
+   Expected: 9/9 tests pass.
+
+2. Validate Compose and start the stack:
+
+   ```bash
+   cd cross-domain-id-jag-vc
+   docker compose config --quiet
+   docker compose up -d --build
+   ```
+
+3. Confirm the issuer is healthy and its JWKS is well-formed:
+
+   ```bash
+   curl --fail --silent --show-error http://localhost:9003/healthz | jq .
+   curl --fail --silent --show-error http://localhost:9003/jwks | jq .
+   ```
+
+4. Issue and verify a badge directly, confirming it is a real signed `vc+jwt`
+   (not the old hardcoded mock):
+
+   ```bash
+   BADGE="$(curl --silent --show-error -X POST http://localhost:9003/vc/issue \
+     -H 'Content-Type: application/json' \
+     -d '{"id":"opencode-agent","caps":["scan","remediate","delegate"],
+          "delegating_user":"sarah@org-a.example",
+          "intent":"cross-domain-remediation","act_chain":["opencode-agent"]}' \
+     | jq -r .badge)"
+
+   curl --silent --show-error -X POST http://localhost:9003/vc/verify \
+     -H 'Content-Type: application/json' \
+     -d "{\"badge\":\"$BADGE\"}" | jq .
+   ```
+
+   Expected: `valid: true`, claims matching the request, and a `typ: vc+jwt`
+   header (`echo "$BADGE" | cut -d. -f1 | base64 -d`).
+
+5. Run the full sequence and confirm the badge step used the real issuer:
+
+   ```bash
+   RUN_OUTPUT="$(mktemp)"
+   curl --fail --silent --show-error -X POST http://localhost:8100/api/run \
+     -H 'Content-Type: application/json' \
+     -d '{"repo":"demo-admin/payments-service"}' -o "$RUN_OUTPUT"
+
+   jq '{ok, badge: [.steps[] | select(.id == "resolve-badge")][0]}' "$RUN_OUTPUT"
+   rm "$RUN_OUTPUT"
+   ```
+
+   Expected: `ok=true`, the `resolve-badge` step has `status=ok` and a
+   `token_preview` (the real signed badge), not the old static mock claims.
+
+### Keycloak A token exchange reviewer verification
+
+Verifies the RFC 8693 exchange at Keycloak A is a real network call, and
+transparently demonstrates the real Keycloak platform behavior documented
+above: `subject_token` is validated, `actor_token` is not.
+
+1. Run the full sequence and confirm the exchange step is real:
+
+   ```bash
+   cd cross-domain-id-jag-vc
+   docker compose up -d --build
+
+   RUN_OUTPUT="$(mktemp)"
+   curl --fail --silent --show-error -X POST http://localhost:8100/api/run \
+     -H 'Content-Type: application/json' \
+     -d '{"repo":"demo-admin/payments-service"}' -o "$RUN_OUTPUT"
+
+   jq '{ok, kc_a_exchange: [.steps[] | select(.id == "kc-a-exchange")][0]}' "$RUN_OUTPUT"
+   rm "$RUN_OUTPUT"
+   ```
+
+   Expected: `ok=true`, the `kc-a-exchange` step has `status=ok` and a
+   `token_preview` (a real Keycloak-issued access token, not a static mock).
+
+2. Confirm Keycloak validates `subject_token` for real — an invalid one is
+   rejected:
+
+   ```bash
+   curl --silent --show-error -o /dev/null -w '%{http_code}\n' \
+     -X POST http://localhost:8082/realms/org-a/protocol/openid-connect/token \
+     -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
+     -d client_id=opencode-agent \
+     -d client_secret=demo-opencode-secret-change-me \
+     -d subject_token=not-a-real-token \
+     -d subject_token_type=urn:ietf:params:oauth:token-type:access_token
+   ```
+
+   Expected: non-200 (Keycloak rejects the malformed subject token).
+
+3. Demonstrate the documented `actor_token` platform behavior directly —
+   run the same exchange with a garbage `actor_token` and with none at all,
+   using a real `subject_token` from step 1's Sarah login:
+
+   ```bash
+   SARAH_TOKEN="$(curl --silent --show-error -X POST \
+     http://localhost:8082/realms/org-a/protocol/openid-connect/token \
+     -d grant_type=password -d client_id=opencode-agent \
+     -d client_secret=demo-opencode-secret-change-me \
+     -d username=sarah -d ****** \
+     -d 'scope=openid profile email' | jq -r .access_token)"
+
+   curl --silent --show-error -o /dev/null -w 'with garbage actor_token: %{http_code}\n' \
+     -X POST http://localhost:8082/realms/org-a/protocol/openid-connect/token \
+     -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
+     -d client_id=opencode-agent -d client_secret=demo-opencode-secret-change-me \
+     -d "subject_token=$SARAH_TOKEN" \
+     -d subject_token_type=urn:ietf:params:oauth:token-type:access_token \
+     -d actor_token=not-a-real-jwt-at-all \
+     -d actor_token_type=urn:ietf:params:oauth:token-type:jwt
+
+   curl --silent --show-error -o /dev/null -w 'with no actor_token:      %{http_code}\n' \
+     -X POST http://localhost:8082/realms/org-a/protocol/openid-connect/token \
+     -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
+     -d client_id=opencode-agent -d client_secret=demo-opencode-secret-change-me \
+     -d "subject_token=$SARAH_TOKEN" \
+     -d subject_token_type=urn:ietf:params:oauth:token-type:access_token
+   ```
+
+   Expected: both return `200` — identical to a request with a real,
+   verified badge as `actor_token`. This is not a bug in this PR; it is the
+   real behavior of Keycloak 26.7's standard token exchange in this
+   configuration, documented above.
+
 
 Open **http://localhost:8090**. Click **Run (animated)** to watch all 20
 steps execute with live sequence-diagram highlighting and a step-by-step
@@ -620,6 +787,7 @@ cross-domain-id-jag-vc/
 ├── .env.example
 ├── envoy-org-a/                # Org A egress gateway: Built On Envoy image + egress.rego
 ├── envoy/                     # Built On Envoy image, JWT filters, and Rego policies/tests
+├── vc-issuer/                  # VC badge issuer (stand-in for identity-node's badge API)
 ├── identity-node-init.py      # Vault Transit bootstrap + org-a issuer registration
 ├── keycloak-a/, keycloak-b/   # realm import JSON + scope bootstrap scripts
 ├── gitea/                     # Gitea admin/repo seed script
