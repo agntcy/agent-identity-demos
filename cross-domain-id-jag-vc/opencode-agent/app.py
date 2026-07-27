@@ -13,7 +13,7 @@ Drives Phase A + Discovery + Phase B of the cross-domain remediation sequence:
     7. RFC 8693 exchange (subject=Sarah, actor_token=badge) → Keycloak A
        (real call; Keycloak validates subject_token but does not itself
        process actor_token into an "act" claim — see the inline note)
-    8. Mint ID-JAG assertion for Org B triage-agent → idjag-issuer
+    8. Mint ID-JAG assertion for Org B triage-agent → Keycloak A (native, keycloak-idjag-spi)
   9-10. Egress PDP check — may Sarah delegate this scope to Org B? → Envoy A + OPA
    11. Redeem ID-JAG at Keycloak B → scoped access token (triage:create)
    13. Create remediation ticket → Triage agent (Org B)
@@ -220,22 +220,32 @@ async def run(body: RunRequest | None = None):
         steps.append(s)
 
         # ── Step 8: Mint ID-JAG assertion for Org B triage-agent ───────────
+        # Keycloak A itself mints this now, via a real grant_type=
+        # token-exchange call (keycloak-idjag-spi), instead of the separate
+        # idjag-issuer mock — see
+        # https://github.com/agntcy/agent-identity-demos/discussions/18.
+        # subject_token is step 7's real exchanged token, not a client-
+        # supplied free-text email — Keycloak verifies its signature for
+        # real (session.tokens().decode(...)).
         s = _s("mint-idjag",
                "8. Mint ID-JAG assertion for Org B triage-agent (scoped to triage:create)",
-               f"POST {IDJAG_ISSUER_URL}/mint  sub={SARAH_EMAIL}  aud={KC_B_ISSUER}  scope=triage:create")
+               f"POST {KC_A_TOKEN_EP}  grant_type=token-exchange  requested_token_type=id-jag  aud={KC_B_ISSUER}  scope=triage:create")
         try:
-            r = await client.post(f"{IDJAG_ISSUER_URL}/mint", json={
-                "sub": SARAH_EMAIL,
-                "aud": KC_B_ISSUER,
-                "client_id": TRIAGE_CLIENT_ID,
-                "act_chain": [OPENCODE_CLIENT_ID],
+            r = await client.post(KC_A_TOKEN_EP, data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+                "client_id": OPENCODE_CLIENT_ID,
+                "client_secret": OPENCODE_CLIENT_SECRET,
+                "subject_token": exchanged_token,
+                "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                "requested_token_type": "urn:ietf:params:oauth:token-type:id-jag",
+                "audience": KC_B_ISSUER,
                 "scope": "openid triage:create",
-                "intent": ["create-pr-fix"],
+                "act_chain": OPENCODE_CLIENT_ID,
+                "intent": "create-pr-fix",
             })
             if r.status_code == 200:
-                assertion = r.json()["assertion"]
-                s.update(status="ok", token_preview=assertion[:48] + "…",
-                         claims=r.json().get("claims", {}))
+                assertion = r.json()["access_token"]
+                s.update(status="ok", token_preview=assertion[:48] + "…")
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)

@@ -70,7 +70,12 @@ static_resources:
                           forward: true
                           forward_payload_header: x-verified-access-token-payload
                         idjag_actor_token:
-                          issuer: http://idjag-issuer:9000
+                          # Keycloak A now mints this assertion (see
+                          # keycloak-idjag-spi/) instead of the separate
+                          # idjag-issuer mock. Assumes KC_A_RELATIVE_PATH is
+                          # unset (default "/") — see the same note in
+                          # envoy-org-a/envoy.yaml.
+                          issuer: http://keycloak-a:8080/realms/org-a
                           audiences:
                             - http://keycloak-b:8080/keycloak-b/realms/org-b
                           from_headers:
@@ -78,8 +83,8 @@ static_resources:
                               value_prefix: "Bearer "
                           remote_jwks:
                             http_uri:
-                              uri: http://idjag-issuer:9000/jwks
-                              cluster: idjag_issuer_jwks
+                              uri: http://keycloak-a:8080/realms/org-a/protocol/openid-connect/certs
+                              cluster: keycloak_a_jwks
                               timeout: 5s
                             cache_duration: 300s
                           forward: false
@@ -222,6 +227,22 @@ static_resources:
                       address: keycloak-b
                       port_value: 8080
 
+    - name: keycloak_a_jwks
+      type: STRICT_DNS
+      connect_timeout: 5s
+      load_assignment:
+        cluster_name: keycloak_a_jwks
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: keycloak-a
+                      port_value: 8080
+
+    # Still used by idjag_sub_badge above — triage-agent's narrowed
+    # sub-badge minting stays on idjag-issuer (out of scope for
+    # keycloak-idjag-spi; see DelegationAuthorization's javadoc).
     - name: idjag_issuer_jwks
       type: STRICT_DNS
       connect_timeout: 5s

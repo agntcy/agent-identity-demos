@@ -110,7 +110,7 @@ class EgressCheckBody(BaseModel):
 
 
 class MintIdjagBody(BaseModel):
-    sarah_email: str = SARAH_EMAIL
+    subject_token: str  # real KC-A access token (e.g. from the kc-a-exchange step)
 
 
 class KcBExchangeBody(BaseModel):
@@ -575,8 +575,8 @@ async def _kc_a_exchange(client: httpx.AsyncClient, sarah_token: str, badge: str
 async def _egress_check(client: httpx.AsyncClient, assertion: str) -> dict:
     """Step 8b — Org A egress PDP: may Sarah delegate this scope to Org B?
 
-    Envoy A verifies the freshly-minted ID-JAG against idjag-issuer's JWKS;
-    inline OPA checks its scope, intent, and delegation-chain depth. A
+    Envoy A verifies the freshly-minted ID-JAG against Keycloak A's own
+    JWKS; inline OPA checks its scope, intent, and delegation-chain depth. A
     policy violation is denied before ever reaching Keycloak B.
     """
     try:
@@ -598,31 +598,62 @@ async def _egress_check(client: httpx.AsyncClient, assertion: str) -> dict:
         return _step("egress-check", "8b. Org A egress PDP check", status="error", error=str(exc))
 
 
-async def _mint_idjag(client: httpx.AsyncClient, sarah_email: str) -> dict:
-    """Step 8 — Mint an ID-JAG assertion at idjag-issuer."""
-    url = f"{IDJAG_ISSUER_URL}/mint"
+def _decode_jwt_payload_unverified(token: str) -> dict:
+    """Decode a JWT's payload for display only — no signature check.
+
+    Keycloak's token-exchange response (unlike idjag-issuer's old /mint)
+    only returns the assertion string itself, not pre-decoded claims. This
+    reconstructs them purely so the webapp's "Decoded JWT claims" panel
+    still has something to show; it is never used for a trust decision.
+    """
+    import base64
+    import json as _json
+
+    try:
+        payload_b64 = token.split(".")[1]
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        return _json.loads(base64.urlsafe_b64decode(padded))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+async def _mint_idjag(client: httpx.AsyncClient, subject_token: str) -> dict:
+    """Step 8 — Mint an ID-JAG assertion via Keycloak A's native
+    grant_type=token-exchange (keycloak-idjag-spi), instead of the separate
+    idjag-issuer mock service — see
+    https://github.com/agntcy/agent-identity-demos/discussions/18.
+
+    subject_token is the real, live access token from step 7's exchange
+    (OpenCode acting as Sarah, verified via badge) — Keycloak A's provider
+    verifies its signature for real (session.tokens().decode(...)), it is
+    not a client-supplied free-text email like idjag-issuer accepted.
+    """
     payload = {
-        "sub": sarah_email,
-        "aud": KC_B_ISSUER,
-        "client_id": TRIAGE_CLIENT_ID,
-        "act_chain": [OPENCODE_CLIENT_ID],
+        "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+        "client_id": OPENCODE_CLIENT_ID,
+        "client_secret": OPENCODE_CLIENT_SECRET,
+        "subject_token": subject_token,
+        "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+        "requested_token_type": "urn:ietf:params:oauth:token-type:id-jag",
+        "audience": KC_B_ISSUER,
         "scope": "openid triage:create",
-        "intent": ["create-pr-fix"],
+        "act_chain": OPENCODE_CLIENT_ID,
+        "intent": "create-pr-fix",
     }
     try:
-        r = await client.post(url, json=payload)
+        r = await client.post(KC_A_TOKEN_URL, data=payload)
         if r.status_code == 200:
             data = r.json()
-            assertion: str = data.get("assertion", "")
+            assertion: str = data.get("access_token", "")
             return _step(
                 "mint-idjag",
-                "8. Mint ID-JAG assertion → idjag-issuer (act_chain: opencode-agent → triage-agent)",
-                detail=f"POST {url}  sub={sarah_email}  aud={KC_B_ISSUER}  scope=openid triage:create",
+                "8. Mint ID-JAG assertion → Keycloak A (native issuance, keycloak-idjag-spi) (act_chain: opencode-agent → triage-agent)",
+                detail=f"POST {KC_A_TOKEN_URL}  grant_type=token-exchange  requested_token_type=id-jag  aud={KC_B_ISSUER}  scope=openid triage:create",
                 status="ok",
                 result={
                     "assertion_preview": assertion[:48] + "…" if assertion else "",
                     "assertion": assertion,
-                    "claims": data.get("claims", {}),
+                    "claims": _decode_jwt_payload_unverified(assertion),
                 },
             )
         return _step(
@@ -804,10 +835,11 @@ async def run_all(body: RunBody) -> JSONResponse:
         with step_span("kc-a-exchange"):
             kc_a_step = await _kc_a_exchange(client, sarah_token, badge)
         steps.append(kc_a_step)
+        kc_a_exchanged_token = (kc_a_step.get("result") or {}).get("token", "")
 
         # 8. Mint ID-JAG assertion
         with step_span("mint-idjag"):
-            mint_step = await _mint_idjag(client, SARAH_EMAIL)
+            mint_step = await _mint_idjag(client, kc_a_exchanged_token)
         steps.append(mint_step)
         if mint_step["status"] != "ok":
             return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
@@ -887,7 +919,7 @@ async def step_egress_check(body: EgressCheckBody) -> JSONResponse:
 @app.post("/api/step/mint-idjag")
 async def step_mint_idjag(body: MintIdjagBody) -> JSONResponse:
     async with httpx.AsyncClient(timeout=30) as client:
-        return JSONResponse(await _mint_idjag(client, body.sarah_email))
+        return JSONResponse(await _mint_idjag(client, body.subject_token))
 
 
 @app.post("/api/step/kc-b-exchange")

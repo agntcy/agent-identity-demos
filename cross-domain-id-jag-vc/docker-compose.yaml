@@ -80,7 +80,15 @@ services:
   #   - standard.token.exchange enabled on opencode-agent (RFC 8693, step 7)
   # ---------------------------------------------------------------------------
   keycloak-a:
-    image: quay.io/keycloak/keycloak:26.7
+    # Keycloak 26.7 + the keycloak-idjag-spi provider baked in (native
+    # ID-JAG issuance via grant_type=token-exchange — see
+    # keycloak-idjag-spi/ and https://github.com/agntcy/agent-identity-demos/discussions/18).
+    # Build context is this whole directory (not keycloak-a/) so the
+    # Dockerfile can reach the sibling keycloak-idjag-spi/ Maven module.
+    build:
+      context: .
+      dockerfile: keycloak-a/Dockerfile
+    image: cd-keycloak-a-idjag
     container_name: cd-keycloak-a
     command: >
       start-dev --import-realm
