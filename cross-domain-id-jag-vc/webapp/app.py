@@ -26,7 +26,7 @@ import httpx
 from fastapi import FastAPI, Request
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-from tracing import current_trace_id, setup_tracing
+from tracing import current_trace_id, setup_tracing, step_span
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -737,7 +737,8 @@ async def run_all(body: RunBody) -> JSONResponse:
 
     async with httpx.AsyncClient(timeout=30) as client:
         # 1. Sarah login
-        login_step = await _login(client)
+        with step_span("sarah-login"):
+            login_step = await _login(client)
         steps.append(login_step)
         if login_step["status"] != "ok":
             return JSONResponse({"ok": False, "steps": steps})
@@ -761,34 +762,44 @@ async def run_all(body: RunBody) -> JSONResponse:
             pass
 
         # 2. Scan
-        steps.append(_scan(body.cve))
+        with step_span("scan"):
+            steps.append(_scan(body.cve))
 
         # 3. Push turn record to directory
-        dir_push_step = await _dir_push_turn(body.cve, body.repo)
+        with step_span("dir-push"):
+            dir_push_step = await _dir_push_turn(body.cve, body.repo)
         steps.append(dir_push_step)
 
         # 4. Search directory for triage-agent
-        dir_search_step = await _dir_search("triage-agent")
+        with step_span("dir-search"):
+            dir_search_step = await _dir_search("triage-agent")
         steps.append(dir_search_step)
 
         # 5. CIMD: generate id for triage-agent (Vault-signed proof, org-a trust authority)
-        generate_step = await _cimd_generate_id(client, "triage-agent")
+        with step_span("cimd-generate-id"):
+            generate_step = await _cimd_generate_id(client, "triage-agent")
         steps.append(generate_step)
         cimd_id: str = (generate_step.get("result") or {}).get("id", "AGNTCY-triage-agent")
 
         # 6. CIMD: resolve id back to its ResolverMetadata
-        steps.append(await _cimd_resolve_id(client, cimd_id))
+        with step_span("cimd-resolve-id"):
+            resolve_step = await _cimd_resolve_id(client, cimd_id)
+        steps.append(resolve_step)
 
         # 6b. Issue + verify OpenCode's VC delegation badge → vc-issuer
-        badge_step = await _resolve_badge(client, SARAH_EMAIL)
+        with step_span("resolve-badge"):
+            badge_step = await _resolve_badge(client, SARAH_EMAIL)
         steps.append(badge_step)
         badge = (badge_step.get("result") or {}).get("token", "")
 
         # 7. KC-A exchange (real — subject=Sarah, actor_token=verified badge)
-        steps.append(await _kc_a_exchange(client, sarah_token, badge))
+        with step_span("kc-a-exchange"):
+            kc_a_step = await _kc_a_exchange(client, sarah_token, badge)
+        steps.append(kc_a_step)
 
         # 8. Mint ID-JAG assertion
-        mint_step = await _mint_idjag(client, SARAH_EMAIL)
+        with step_span("mint-idjag"):
+            mint_step = await _mint_idjag(client, SARAH_EMAIL)
         steps.append(mint_step)
         if mint_step["status"] != "ok":
             return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
@@ -797,22 +808,25 @@ async def run_all(body: RunBody) -> JSONResponse:
         assertion = mint_step["result"].get("assertion", "")
 
         # 8b. Org A egress PDP — may Sarah delegate this scope to Org B?
-        egress_step = await _egress_check(client, assertion)
+        with step_span("egress-check"):
+            egress_step = await _egress_check(client, assertion)
         steps.append(egress_step)
         if egress_step["status"] != "ok":
             return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
 
         # 9. KC-B jwt-bearer exchange (assertions are single-use — one call only)
-        exchange_step = await _kc_b_exchange(client, assertion)
+        with step_span("kc-b-exchange"):
+            exchange_step = await _kc_b_exchange(client, assertion)
         triage_token = exchange_step.pop("_token", "")
         steps.append(exchange_step)
         if exchange_step["status"] != "ok":
             return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
 
         # 10+. Create ticket + all nested steps
-        ticket_steps = await _create_ticket(
-            client, triage_token, assertion, body.cve, body.repo
-        )
+        with step_span("create-ticket"):
+            ticket_steps = await _create_ticket(
+                client, triage_token, assertion, body.cve, body.repo
+            )
         steps.extend(ticket_steps)
 
     all_ok = all(s.get("status") in ("ok", "denied") for s in steps)

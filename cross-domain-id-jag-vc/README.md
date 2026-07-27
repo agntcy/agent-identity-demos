@@ -303,6 +303,15 @@ all-in-one container — no external tracing backend or extra setup needed.
 field, so you can jump straight to a specific run:
 `http://localhost:16686/trace/<trace_id>`.
 
+The webapp's sequence diagram goes one step further: every step (`sarah-login`,
+`resolve-badge`, `egress-check`, `open-pr`, …) is wrapped server-side in its own
+named span, `step:<id>` (see `tracing.py`'s `step_span()` in `webapp`,
+`triage-agent`, and `sub-agent`). Clicking any step in the diagram after a run
+opens that exact span in Jaeger via
+`http://localhost:16686/trace/<trace_id>?uiFind=step:<id>` — Jaeger's `uiFind`
+search jumps straight to the matching span instead of leaving you to scroll
+through the whole waterfall.
+
 Note: Envoy hops (`envoy-org-b`) forward the `traceparent` header like any
 other header, so the trace stays continuous through them, but Envoy itself
 doesn't emit its own spans (no Envoy-side tracing filter is configured) —
@@ -804,12 +813,18 @@ imports cleanly.
 
 Open **http://localhost:8090**. Click **Run (animated)** to watch all 22
 steps execute — including the real VC badge issuance, the real Keycloak A
-exchange, and the Org A egress check — with the active step highlighted and
-auto-zoomed in the sequence diagram, a traveling pulse along the live arrow,
-an overall progress bar, and a step-by-step explainer toast. A **View trace
-in Jaeger** link appears once the run finishes (set `JAEGER_UI_URL` in
-`.env` to enable it). Use **Next step ▶** to step through manually, or
-uncheck **Auto-zoom to active step** to keep the full diagram in view.
+exchange, and the Org A egress check — with the active step highlighted in
+the sequence diagram, a traveling pulse along the live arrow, an overall
+progress bar, and a step-by-step explainer toast. Check **Auto-zoom to
+active step** if you'd rather have the diagram zoom in on whichever step is
+currently running instead of always showing the full diagram.
+
+A **View trace in Jaeger** link appears once the run finishes (set
+`JAEGER_UI_URL` in `.env` to enable it). Once a run has a `trace_id`, every
+step in the diagram is also individually clickable — it opens that exact
+step's span in Jaeger, not just the trace root (see
+[Viewing traces](#viewing-traces)). Use **Next step ▶** to step through
+manually.
 
 ### Via the API directly
 

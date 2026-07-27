@@ -62,6 +62,10 @@
     .g.error .seq-label, .g.error .seq-num { fill: var(--err); }
     .g.denied .seq-msg { stroke: var(--denied); }
     .g.denied .seq-label, .g.denied .seq-num { fill: var(--denied); }
+    /* clickable steps — jump to this step's span in Jaeger */
+    .g[data-step] { cursor: pointer; }
+    .g[data-step]:hover .seq-msg { stroke: var(--teal); stroke-width: 2.2; }
+    .g[data-step]:hover .seq-label, .g[data-step]:hover .seq-num { fill: var(--teal); }
     /* active step — the one currently being explained, before it settles into
        its final ok/error color. A pulsing glow + thicker stroke draws the eye
        to exactly what the side toast is talking about right now. */
@@ -945,6 +949,47 @@ POST /realms/org-b/protocol/openid-connect/token
     }
   }
 
+  // Jaeger's `uiFind` query param highlights/scrolls to spans matching a
+  // search term inside a trace view. Each step is wrapped server-side in a
+  // span named `step:<id>` (see tracing.py `step_span`), so this jumps
+  // straight to that step's span instead of just opening the trace root.
+  function traceUrlForStep(stepId) {
+    if (!lastTraceId || !CONFIG.jaeger_ui_url) return null;
+    const base = `${CONFIG.jaeger_ui_url}/trace/${encodeURIComponent(lastTraceId)}`;
+    return `${base}?uiFind=${encodeURIComponent('step:' + stepId)}`;
+  }
+
+  document.getElementById('seqSvg').addEventListener('click', (e) => {
+    const g = e.target.closest('.g[data-step]');
+    if (!g) return;
+    const url = traceUrlForStep(g.dataset.step);
+    if (!url) {
+      setStatus('Run the demo, then click a step to view its trace in Jaeger.');
+      return;
+    }
+    window.open(url, '_blank', 'noopener');
+  });
+
+  // Each step group only draws thin lines/text with no fill, so by default
+  // only those exact pixels receive clicks. Prepend a transparent full-width
+  // hit-area rect (behind the visible content) so the whole row is clickable,
+  // and add a native tooltip — both done once at load rather than 16x in markup.
+  document.querySelectorAll('#seqSvg .g[data-step]').forEach(g => {
+    const bbox = g.getBBox();
+    const pad = 8;
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', FULL_VB[0] - 4);
+    rect.setAttribute('y', bbox.y - pad);
+    rect.setAttribute('width', FULL_VB[2] + 8);
+    rect.setAttribute('height', bbox.height + pad * 2);
+    rect.setAttribute('fill', 'transparent');
+    g.insertBefore(rect, g.firstChild);
+
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    title.textContent = "Click to view this step's trace in Jaeger";
+    g.appendChild(title);
+  });
+
   // ── Step cards ─────────────────────────────────────────────────────────────
   function render() {
     stepsEl.innerHTML = allSteps.slice(0, cursor).map(s => {
@@ -1015,6 +1060,7 @@ POST /realms/org-b/protocol/openid-connect/token
 
       const data = await fetchAllSteps();
       allSteps = data.steps || [];
+      lastTraceId = data.trace_id || null;  // set early so steps are clickable mid-run
       for (let i = 0; i < allSteps.length; i++) {
         cursor = i + 1;
         setStatus(`Step ${cursor}/${allSteps.length}: ${allSteps[i].id}`);
