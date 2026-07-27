@@ -32,13 +32,42 @@ name: cross-domain-stack
 #   opencode-agent  → host:8100  (Org A mock agent)
 #   triage-agent    → internal only (behind Envoy)
 #   sub-agent       → host:8300  (Org B sub-agent)
+#   jaeger          → host:16686 (trace UI; every service exports via OTLP)
 #
 # Quick start:
 #   cp .env.example .env          # edit the change-me-* values
 #   docker compose up -d
 #   curl http://localhost:8100/api/run   # trigger the full sequence
+#   open http://localhost:16686           # view the resulting trace
 
 services:
+
+  # ---------------------------------------------------------------------------
+  # Jaeger — OpenTelemetry trace backend (all-in-one: collector + UI + storage)
+  #   - Every Python service exports spans here via OTLP (OTEL_EXPORTER_OTLP_
+  #     ENDPOINT=http://jaeger:4317); httpx calls carry the W3C traceparent
+  #     header automatically, so one browser-triggered run produces one
+  #     continuous trace across every hop, including through Envoy (a plain
+  #     proxy that forwards the header unmodified — no Envoy-side tracing
+  #     filter configured, so Envoy hops themselves aren't separate spans)
+  #   - UI: http://localhost:16686
+  # ---------------------------------------------------------------------------
+  jaeger:
+    image: jaegertracing/all-in-one:1.65.0
+    container_name: cd-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+    networks:
+      - cd-net
+      - resource-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:14269/"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
 
   # ---------------------------------------------------------------------------
   # Keycloak A — Org A IdP (realm: org-a)
@@ -178,9 +207,13 @@ services:
       context: ../archive/single-org-id-jag-app-access/idjag-issuer
     image: cd-idjag-issuer
     container_name: cd-idjag-issuer
+    depends_on:
+      jaeger:
+        condition: service_healthy
     environment:
       ISSUER_URL: http://idjag-issuer:9000
       ASSERTION_TTL: ${ASSERTION_TTL:-300}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     ports:
       - "${IDJAG_PORT:-9002}:9000"
     networks:
@@ -335,6 +368,8 @@ services:
         condition: service_healthy
       gitea:
         condition: service_healthy
+      jaeger:
+        condition: service_healthy
     environment:
       # Validate tokens against Keycloak B (Org B)
       KEYCLOAK_URL: http://keycloak-b:8080
@@ -347,6 +382,7 @@ services:
       GITEA_PR_SCOPE: gitea:pr
       GITEA_DENY_LIST: demo-protected
       REQUIRE_ENVOY_POLICY: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     networks:
       - resource-net
     healthcheck:
@@ -453,6 +489,8 @@ services:
         condition: service_healthy
       envoy-org-b:
         condition: service_healthy
+      jaeger:
+        condition: service_healthy
     ports:
       - "${OPENCODE_PORT:-8100}:8100"
     environment:
@@ -479,6 +517,7 @@ services:
       TRIAGE_AGENT_URL: http://envoy-org-b:10000
       # Default scan target
       SCAN_REPO: ${SCAN_REPO:-demo-admin/payments-service}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     networks:
       - cd-net
     healthcheck:
@@ -506,6 +545,8 @@ services:
         condition: service_healthy
       sub-agent:
         condition: service_started
+      jaeger:
+        condition: service_healthy
     environment:
       KC_B_URL: http://keycloak-b:8080
       KC_B_REALM: org-b
@@ -514,6 +555,7 @@ services:
       IDJAG_ISSUER_URL: http://idjag-issuer:9000
       IDENTITY_NODE_URL: http://identity-node:4000
       SUB_AGENT_URL: http://sub-agent:8300
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     networks:
       - cd-net
     healthcheck:
@@ -544,6 +586,8 @@ services:
         condition: service_healthy
       gitea-gateway:
         condition: service_healthy
+      jaeger:
+        condition: service_healthy
     ports:
       - "${SUB_AGENT_PORT:-8300}:8300"
     environment:
@@ -555,6 +599,7 @@ services:
       # Org B resource boundary; direct Gitea Gateway access is not exposed.
       GITEA_GATEWAY_URL: http://envoy-org-b:10001
       GITEA_ADMIN_USER: ${GITEA_ADMIN_USER:-demo-admin}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     networks:
       - cd-net
     healthcheck:
@@ -699,6 +744,8 @@ services:
         condition: service_started
       envoy-org-b:
         condition: service_healthy
+      jaeger:
+        condition: service_healthy
     ports:
       - "${WEBAPP_PORT:-8090}:8090"
     environment:
@@ -722,6 +769,7 @@ services:
       VAULT_KEY_NAME: org-a-issuer
       ORG_A_COMMON_NAME: org-a
       SCAN_REPO: ${SCAN_REPO:-demo-admin/payments-service}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     networks:
       - cd-net
     healthcheck:

@@ -23,6 +23,9 @@ import secrets
 
 import httpx
 from fastapi import FastAPI
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+from tracing import setup_tracing
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -39,6 +42,8 @@ GITEA_ADMIN_USER = os.environ.get("GITEA_ADMIN_USER", "demo-admin")
 KC_B_TOKEN_EP = f"{KC_B_URL}/realms/{KC_B_REALM}/protocol/openid-connect/token"
 
 app = FastAPI(title="Sub-Agent (mock)", version="0.1.0")
+setup_tracing("sub-agent")
+FastAPIInstrumentor.instrument_app(app)
 
 
 class RunRequest(BaseModel):

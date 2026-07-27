@@ -35,6 +35,7 @@ It also wires in two AGNTCY components for real:
 | 15–18 | Sub-Agent `jwt-bearer` exchange, Envoy resource enforcement, push file, open PR | **Real** |
 | 19 | Resource-boundary OPA decision | **Real** two-token JWT verification + repository-bound policy |
 | 20 | PR created, causal act-chain audit | **Real** |
+| — | OpenTelemetry `trace_id` linking every hop | **Real** — see [Viewing traces](#viewing-traces) |
 
 Milestone 1 provisioned the Built On Envoy gateway and inline OPA module.
 Milestone 2 protects ticket ingress by verifying the Keycloak B access token
@@ -51,7 +52,12 @@ VC badge mock with vc-issuer, a real signed-`vc+jwt` issuer/verifier standing
 in for identity-node's (nonexistent) badge API. Milestone 6 makes the RFC
 8693 exchange at Keycloak A a real network call instead of a static mock —
 see the note below on what Keycloak's standard token exchange does and does
-not do with the `actor_token`.
+not do with the `actor_token`. Milestone 7 adds real distributed tracing:
+every service exports OpenTelemetry spans via OTLP to a local Jaeger container,
+and standard `httpx`/FastAPI auto-instrumentation propagates the W3C
+`traceparent` header across every hop (including transparently through Envoy,
+which just forwards it as an ordinary header) — so one browser-triggered run
+produces one real, inspectable trace end to end.
 
 **A note on `actor_token` and the `act` claim**: Keycloak 26.7's standard
 token exchange (`standard.token.exchange.enabled`) validates `subject_token`
@@ -149,6 +155,7 @@ flowchart TB
 | `triage-agent` | built from `./triage-agent` | _(internal only)_ | Org B mock agent; reachable from outside `cd-net` only through Envoy |
 | `sub-agent` | built from `./sub-agent` | `8300` | Org B bounded-privilege mock agent (push + PR) |
 | `webapp` | built from `./webapp` | `8090` | Animated sequence-diagram demo UI |
+| `jaeger` | `jaegertracing/all-in-one:1.65.0` | `16686` | OpenTelemetry trace backend — collector (OTLP) + UI + storage |
 
 ## Sequence flow
 
@@ -275,6 +282,30 @@ docker compose logs -f
 
 Wait until these one-shot containers exit 0: `kc-a-init`, `kc-b-init`,
 `gitea-init`, `identity-node-init`, `agent-dir-init`.
+
+## Viewing traces
+
+Every service exports OpenTelemetry spans via OTLP to a local Jaeger
+all-in-one container — no external tracing backend or extra setup needed.
+
+1. Trigger a run (`curl -X POST http://localhost:8100/api/run ...`, or via
+   the webapp).
+2. Open **http://localhost:16686**, select a service (e.g. `opencode-agent`)
+   in the left panel, and click **Find Traces**.
+3. Open the most recent trace to see the full waterfall — `opencode-agent`'s
+   own spans plus every downstream call it made via `httpx` (`vc-issuer`,
+   `idjag-issuer`, Keycloak A/B, Envoy, …), all under one `trace_id`, because
+   standard `httpx`/FastAPI auto-instrumentation propagates the W3C
+   `traceparent` header on every hop automatically — no manual wiring.
+
+`opencode-agent`'s `/api/run` response also includes a top-level `trace_id`
+field, so you can jump straight to a specific run:
+`http://localhost:16686/trace/<trace_id>`.
+
+Note: Envoy hops (`envoy-org-b`) forward the `traceparent` header like any
+other header, so the trace stays continuous through them, but Envoy itself
+doesn't emit its own spans (no Envoy-side tracing filter is configured) —
+the fan-out is visible per-service, just not per-Envoy-hop.
 
 ## Testing
 
@@ -469,6 +500,70 @@ If a port is allocated, change the corresponding `ENVOY_*_PORT` value in
 When finished, `docker compose down` preserves demo data. Use
 `docker compose down -v` only when intentionally deleting all demo data.
 
+### OpenTelemetry / Jaeger reviewer verification
+
+Verifies traces are actually flowing end to end, not just that the SDK
+imports cleanly.
+
+1. Bring up the stack (includes `jaeger`) and confirm it's healthy:
+
+   ```bash
+   cd cross-domain-id-jag-vc
+   docker compose up -d --build
+   curl --fail --silent --show-error -o /dev/null -w '%{http_code}\n' http://localhost:16686
+   ```
+
+2. Trigger a run and capture its `trace_id`:
+
+   ```bash
+   RUN_OUTPUT="$(mktemp)"
+   curl --fail --silent --show-error -X POST http://localhost:8100/api/run \
+     -H 'Content-Type: application/json' \
+     -d '{"repo":"demo-admin/payments-service"}' -o "$RUN_OUTPUT"
+   TRACE_ID="$(jq -r .trace_id "$RUN_OUTPUT")"
+   echo "trace_id: $TRACE_ID"
+   rm "$RUN_OUTPUT"
+   ```
+
+   Expected: a 32-character hex string, not `null`.
+
+3. Confirm Jaeger actually received spans for that trace, across multiple
+   services (proving propagation, not just that `opencode-agent` traces
+   itself):
+
+   ```bash
+   curl --fail --silent --show-error "http://localhost:16686/api/traces/$TRACE_ID" \
+     | jq '{
+         spanCount: (.data[0].spans | length),
+         services: [.data[0].processes[].serviceName] | unique
+       }'
+   ```
+
+   Expected: `spanCount` > 1, and `services` includes at minimum
+   `opencode-agent`, `vc-issuer` (or `idjag-issuer`), and `keycloak`-adjacent
+   spans — i.e. more than one service name, proving the `traceparent` header
+   really propagated across the `httpx` calls rather than each service
+   starting an unrelated, disconnected trace.
+
+4. Run the existing unit test suites and confirm no regressions from adding
+   instrumentation:
+
+   ```bash
+   docker run --rm -e PYTHONDONTWRITEBYTECODE=1 \
+     -v "$PWD/../archive/single-org-id-jag-app-access/idjag-issuer:/src" \
+     -w /src python:3.12-slim sh -c \
+     'pip install -q -r requirements-dev.txt && pytest -q -p no:cacheprovider'
+
+   docker run --rm -e PYTHONDONTWRITEBYTECODE=1 \
+     -v "$PWD/../archive/single-org-id-jag-app-access/gitea-gateway:/src" \
+     -w /src python:3.12-slim sh -c \
+     'pip install -q -r requirements-dev.txt && pytest -q -p no:cacheprovider'
+   ```
+
+   Expected: 10/10 and 15/15 pass (same counts as before this PR). You'll see
+   `Transient error ... exporting traces to jaeger:4317` warnings in the
+   output — expected, since these unit tests run standalone without Jaeger
+   reachable; they don't affect the test results.
 
 ### Envoy Milestone 4 reviewer verification
 
@@ -513,7 +608,6 @@ Docker, Docker Compose, `curl`, and `jq`.
    curl --fail --silent --show-error -X POST http://localhost:8100/api/run \
      -H 'Content-Type: application/json' \
      -d '{"repo":"demo-admin/payments-service"}' -o "$RUN_OUTPUT"
-
    jq '{ok, egress: [.steps[] | select(.id == "egress-check")][0]}' "$RUN_OUTPUT"
    rm "$RUN_OUTPUT"
    ```
@@ -685,6 +779,8 @@ above: `subject_token` is validated, `actor_token` is not.
    real behavior of Keycloak 26.7's standard token exchange in this
    configuration, documented above.
 
+
+### Via the webapp (recommended)
 
 Open **http://localhost:8090**. Click **Run (animated)** to watch all 20
 steps execute with live sequence-diagram highlighting and a step-by-step
