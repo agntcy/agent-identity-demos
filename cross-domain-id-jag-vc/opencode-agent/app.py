@@ -12,10 +12,11 @@ Drives Phase A + Discovery + Phase B of the cross-domain remediation sequence:
   Phase B (cross-domain begins):
     7. RFC 8693 exchange (subject=Sarah, actor_token=badge) → Keycloak A (mocked)
     8. Mint ID-JAG assertion for Org B triage-agent → idjag-issuer
+  9-10. Egress PDP check — may Sarah delegate this scope to Org B? → Envoy A + OPA
    11. Redeem ID-JAG at Keycloak B → scoped access token (triage:create)
    13. Create remediation ticket → Triage agent (Org B)
 
-Steps 9-10 (egress PDP/OPA) and 14-15 (ingress PDP) are skipped per demo scope.
+Step 7 (RFC 8693 exchange) remains mocked per demo scope.
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ SARAH_PASSWORD = os.environ.get("SARAH_PASSWORD", "")
 SARAH_EMAIL = os.environ.get("SARAH_EMAIL", "sarah@org-a.example")
 IDJAG_ISSUER_URL = os.environ.get("IDJAG_ISSUER_URL", "http://idjag-issuer:9000").rstrip("/")
 IDENTITY_NODE_URL = os.environ.get("IDENTITY_NODE_URL", "http://identity-node:4000").rstrip("/")
+EGRESS_PDP_URL = os.environ.get("EGRESS_PDP_URL", "http://envoy-org-a:12000").rstrip("/")
 TRIAGE_AGENT_URL = os.environ.get("TRIAGE_AGENT_URL", "http://triage-agent:8200").rstrip("/")
 SCAN_REPO = os.environ.get("SCAN_REPO", "demo-admin/payments-service")
 
@@ -82,6 +84,7 @@ def config():
         "triage_client": TRIAGE_CLIENT_ID,
         "idjag_issuer": IDJAG_ISSUER_URL,
         "identity_node": IDENTITY_NODE_URL,
+        "egress_pdp": EGRESS_PDP_URL,
         "triage_agent": TRIAGE_AGENT_URL,
     }
 
@@ -186,6 +189,30 @@ async def run(body: RunRequest | None = None):
             s.update(status="error", error=str(exc))
             steps.append(s)
             return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
+        steps.append(s)
+
+        # ── Steps 9-10: Org A egress PDP check (Envoy + OPA) ────────────────
+        # May Sarah delegate this scope to Org B? Envoy verifies the ID-JAG's
+        # signature against idjag-issuer's JWKS; OPA checks scope, intent,
+        # and delegation-chain depth before the assertion ever leaves Org A.
+        s = _s("egress-check",
+               "9-10. Egress PDP check — may Sarah delegate this scope to Org B? → Envoy A + OPA",
+               f"POST {EGRESS_PDP_URL}/api/egress-check  Bearer=<id-jag>")
+        try:
+            r = await client.post(
+                f"{EGRESS_PDP_URL}/api/egress-check",
+                headers={"Authorization": f"Bearer {assertion}"},
+            )
+            if r.status_code == 200:
+                s.update(status="ok", result=r.json() if r.content else {"decision": "ALLOW"})
+            else:
+                s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
+                steps.append(s)
+                return JSONResponse({"ok": False, "steps": steps})
+        except Exception as exc:  # noqa: BLE001
+            s.update(status="error", error=str(exc))
+            steps.append(s)
+            return JSONResponse({"ok": False, "steps": steps})
         steps.append(s)
 
         # ── Step 11: Redeem ID-JAG at Keycloak B ───────────────────────────
