@@ -718,7 +718,7 @@ above: `subject_token` is validated, `actor_token` is not.
      http://localhost:8082/realms/org-a/protocol/openid-connect/token \
      -d grant_type=password -d client_id=opencode-agent \
      -d client_secret=demo-opencode-secret-change-me \
-     -d username=sarah -d password=demo-sarah-password-change-me \
+     -d username=sarah -d ****** \
      -d 'scope=openid profile email' | jq -r .access_token)"
 
    curl --silent --show-error -o /dev/null -w 'with garbage actor_token: %{http_code}\n' \
