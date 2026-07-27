@@ -343,9 +343,11 @@ watching the animated run. Each entry is opt-in via its own `*_UI_URL` env
 var (blank hides it):
 
 - **Gitea**: set `GITEA_ROOT_URL` to the public URL (e.g.
-  `https://your-domain/gitea/`) and `GITEA_UI_URL` to match. Gitea generates
-  its own links from `ROOT_URL`, so this works the same non-stripping way as
-  Jaeger above.
+  `https://your-domain/gitea/`) and `GITEA_UI_URL` to match. Unlike Jaeger/
+  Keycloak, Gitea's own router only ever listens at `/` — `ROOT_URL` controls
+  link/cookie generation only, not routing — so nginx must *strip* the
+  `/gitea/` prefix before forwarding (trailing slash on `proxy_pass`, the
+  opposite of the non-stripping pattern below).
 - **Keycloak A/B**: set `KC_A_RELATIVE_PATH`/`KC_B_RELATIVE_PATH` (e.g.
   `/keycloak-a`, `/keycloak-b`) — Keycloak's own `--http-relative-path`
   option, so it's aware of the prefix for every link/redirect it generates —
@@ -364,7 +366,7 @@ re-verified end to end before trusting the deployment.
 location /gitea/ {
     auth_request /oauth2/auth;
     error_page 401 = /oauth2/sign_in?rd=$scheme://$host$request_uri;
-    proxy_pass http://127.0.0.1:3002;  # no trailing slash — matches GITEA_ROOT_URL's /gitea/ prefix
+    proxy_pass http://127.0.0.1:3002/;  # trailing slash — STRIPS /gitea/ before forwarding
     proxy_set_header Host $host;
     client_max_body_size 50m;
 }
