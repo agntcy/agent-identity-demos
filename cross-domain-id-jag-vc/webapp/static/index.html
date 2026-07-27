@@ -35,8 +35,12 @@
     .field { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
     .field input { background: var(--panel); border: 1px solid var(--border); border-radius: 5px;
       color: var(--text); padding: 5px 9px; font-size: 13px; font-family: ui-monospace, monospace; width: 200px; }
+    .config-wrap { margin-bottom: 16px; }
+    .config-wrap summary { cursor: pointer; font-size: 12px; color: var(--muted);
+      padding: 4px 2px; user-select: none; }
+    .config-wrap summary:hover { color: var(--text); }
     .config { font-size: 12px; color: var(--muted); background: var(--panel);
-      border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px;
+      border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-top: 6px;
       display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 3px 18px; }
     .config b { color: var(--text); }
     .diagram { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
@@ -204,7 +208,10 @@
       <div class="field"><label><input id="autoZoom" type="checkbox" style="width:auto" /> Auto-zoom to active step</label></div>
     </div>
 
-    <div class="config" id="config"><div><i>Loading config…</i></div></div>
+    <details class="config-wrap">
+      <summary>Service config</summary>
+      <div class="config" id="config"><div><i>Loading config…</i></div></div>
+    </details>
     <div class="status-bar" id="legend" style="margin-top:-8px"></div>
     <div class="status-bar" id="status"></div>
     <div class="status-bar" id="traceLink" style="margin-top:-8px"></div>
