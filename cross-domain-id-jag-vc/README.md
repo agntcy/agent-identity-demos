@@ -25,19 +25,12 @@ It also wires in two AGNTCY components for real:
 | 1 | Sarah's OIDC login at Keycloak A | **Real** |
 | 2 | CVE scan | Mocked (no scanner integration) |
 | 3–4 | AGNTCY Directory push + search (gRPC) | **Real** |
-<<<<<<< HEAD
 | 5–6 | CIMD generate/resolve id (Vault-signed proof JWT → identity-node) + VC badge issue/verify (signed `vc+jwt` → vc-issuer) | **Real** |
 | 7 | RFC 8693 token exchange at Keycloak A | **Real** call; see note below on `act` claims |
-| 8–9 | ID-JAG mint + Keycloak B `jwt-bearer` redemption | **Real** |
-| 10–13 | Envoy ingress, ticket creation, OPA check, plan, sub-badge mint | **Real** two-token JWT verification + inline delegation-aware OPA policy |
-=======
-| 5–6 | CIMD generate/resolve id (Vault-signed proof JWT → identity-node) | **Real** |
-| 7 | RFC 8693 token exchange at Keycloak A | Mocked |
 | 8 | ID-JAG mint for Org B triage-agent | **Real** |
 | 9–10 | Org A egress PDP — may Sarah delegate this scope to Org B? | **Real** single-token JWT verification + inline OPA policy |
 | 11 | Keycloak B `jwt-bearer` redemption | **Real** |
 | 12–13 | Envoy ingress, ticket creation, OPA check, plan, sub-badge mint | **Real** two-token JWT verification + inline delegation-aware OPA policy |
->>>>>>> origin/main
 | 14 | Sub-Agent spawned with the narrowed badge | **Real** |
 | 15–18 | Sub-Agent `jwt-bearer` exchange, Envoy resource enforcement, push file, open PR | **Real** |
 | 19 | Resource-boundary OPA decision | **Real** two-token JWT verification + repository-bound policy |
@@ -49,8 +42,11 @@ and the original ID-JAG actor token, then enforcing signed scope, delegation
 chain, intent, and repository constraints. Milestone 3 protects the resource
 path: the narrowed sub-badge is signed for one repository, Sub-Agent sends it
 with its access token through listener `10001`, and inline OPA allows only the
-<<<<<<< HEAD
-specific push and pull-request operations. Milestone 5 replaces the hardcoded
+specific push and pull-request operations. Milestone 4 protects the Org A
+egress boundary: before OpenCode ever redeems the ID-JAG at Keycloak B, Envoy
+A verifies the freshly-minted assertion against idjag-issuer's JWKS and inline
+OPA checks its scope, intent, and delegation-chain depth — a policy violation
+never leaves Org A. Milestone 5 replaces the hardcoded
 VC badge mock with vc-issuer, a real signed-`vc+jwt` issuer/verifier standing
 in for identity-node's (nonexistent) badge API. Milestone 6 makes the RFC
 8693 exchange at Keycloak A a real network call instead of a static mock —
@@ -70,13 +66,6 @@ gap this milestone addresses. The badge (`actor_token`) is independently,
 cryptographically verified against vc-issuer one step earlier, and
 delegation semantics continue to be carried forward for real via the
 ID-JAG's `act_chain` claim, unaffected by this limitation.
-=======
-specific push and pull-request operations. Milestone 4 protects the Org A
-egress boundary: before OpenCode ever redeems the ID-JAG at Keycloak B, Envoy
-A verifies the freshly-minted assertion against idjag-issuer's JWKS and inline
-OPA checks its scope, intent, and delegation-chain depth — a policy violation
-never leaves Org A.
->>>>>>> origin/main
 
 ## Architecture
 
@@ -164,18 +153,10 @@ flowchart TB
 ## Sequence flow
 
 Every hop below actually happens against the real services in this stack
-<<<<<<< HEAD
 (Keycloak, Vault, identity-node, vc-issuer, dir-apiserver, Gitea). Only the
-CVE scan is mocked. Both Envoy enforcement points are real. This is the same
+CVE scan is mocked. All three Envoy enforcement points — egress, ticket
+ingress, and resource access — are real. This is the same
 flow the webapp's UI animates step by step.
-=======
-(Keycloak, Vault, identity-node, dir-apiserver, Gitea). Only the CVE scan and
-RFC 8693 exchange at Keycloak A are mocked. All three Envoy enforcement points
-— egress, ticket ingress, and resource access — are real. This is the flow
-`opencode-agent`'s `/api/run` drives end to end; the webapp's animated UI
-currently covers everything except the new Org A egress step (tracked as a
-follow-up).
->>>>>>> origin/main
 
 ```mermaid
 sequenceDiagram
@@ -488,26 +469,7 @@ If a port is allocated, change the corresponding `ENVOY_*_PORT` value in
 When finished, `docker compose down` preserves demo data. Use
 `docker compose down -v` only when intentionally deleting all demo data.
 
-<<<<<<< HEAD
-### VC badge issuer reviewer verification
 
-Verifies the badge issuer's own test suite, that it builds and starts
-cleanly, and that `opencode-agent`'s badge-resolution step now issues and
-verifies a real signed badge instead of returning a hardcoded mock.
-
-1. Run the badge issuer's unit tests:
-
-   ```bash
-   docker run --rm -e PYTHONDONTWRITEBYTECODE=1 \
-     -v "$PWD/cross-domain-id-jag-vc/vc-issuer:/src" \
-     -w /src python:3.12-slim sh -c \
-     'pip install -q -r requirements-dev.txt && pytest -q -p no:cacheprovider'
-   ```
-
-   Expected: 9/9 tests pass.
-
-2. Validate Compose and start the stack:
-=======
 ### Envoy Milestone 4 reviewer verification
 
 Verifies the egress Rego policy, the digest-pinned image, the egress
@@ -527,12 +489,85 @@ Docker, Docker Compose, `curl`, and `jq`.
    Expected: 10/10 tests pass.
 
 2. Validate Compose, build the gateway, and validate its native config:
->>>>>>> origin/main
 
    ```bash
    cd cross-domain-id-jag-vc
    docker compose config --quiet
-<<<<<<< HEAD
+   docker compose build --pull envoy-org-a
+   docker run --rm cd-envoy-boe-a:milestone4 \
+     envoy --mode validate -c /etc/envoy/envoy.yaml
+   docker compose up -d --build
+   ```
+
+3. Confirm the listener and admin port are healthy:
+
+   ```bash
+   curl --fail --silent --show-error http://localhost:12000/health | jq .
+   curl --fail --silent --show-error http://127.0.0.1:9902/ready
+   ```
+
+4. Run the full sequence and confirm the egress check passed:
+
+   ```bash
+   RUN_OUTPUT="$(mktemp)"
+   curl --fail --silent --show-error -X POST http://localhost:8100/api/run \
+     -H 'Content-Type: application/json' \
+     -d '{"repo":"demo-admin/payments-service"}' -o "$RUN_OUTPUT"
+
+   jq '{ok, egress: [.steps[] | select(.id == "egress-check")][0]}' "$RUN_OUTPUT"
+   rm "$RUN_OUTPUT"
+   ```
+
+   Expected: `ok=true`, the `egress-check` step has `status=ok`.
+
+5. Prove a policy violation never leaves Org A — mint an assertion with an
+   unsupported intent directly via `idjag-issuer` and present it straight to
+   the egress listener:
+
+   ```bash
+   BAD_ASSERTION="$(curl --silent --show-error -X POST http://localhost:9002/mint \
+     -H 'Content-Type: application/json' \
+     -d '{"sub":"sarah@org-a.example","aud":"http://keycloak-b:8080/realms/org-b",
+          "client_id":"triage-agent","act_chain":["opencode-agent"],
+          "scope":"openid","intent":["delete-repository"]}' | jq -r .assertion)"
+
+   curl --silent --show-error --include -X POST http://localhost:12000/api/egress-check \
+     -H "Authorization: ******"
+   ```
+
+   Expected: HTTP 403 with `error=policy_denied`. This is a policy denial, not
+   a JWT-signature failure — the assertion is validly signed by idjag-issuer,
+   it just doesn't carry an allowed scope/intent.
+
+6. Confirm metrics show both decisions:
+
+   ```bash
+   curl --fail --silent --show-error \
+     'http://127.0.0.1:9902/stats?filter=opa_requests_total'
+   ```
+
+### VC badge issuer reviewer verification
+
+Verifies the badge issuer's own test suite, that it builds and starts
+cleanly, and that `opencode-agent`'s badge-resolution step now issues and
+verifies a real signed badge instead of returning a hardcoded mock.
+
+1. Run the badge issuer's unit tests:
+
+   ```bash
+   docker run --rm -e PYTHONDONTWRITEBYTECODE=1 \
+     -v "$PWD/cross-domain-id-jag-vc/vc-issuer:/src" \
+     -w /src python:3.12-slim sh -c \
+     'pip install -q -r requirements-dev.txt && pytest -q -p no:cacheprovider'
+   ```
+
+   Expected: 9/9 tests pass.
+
+2. Validate Compose and start the stack:
+
+   ```bash
+   cd cross-domain-id-jag-vc
+   docker compose config --quiet
    docker compose up -d --build
    ```
 
@@ -563,22 +598,6 @@ Docker, Docker Compose, `curl`, and `jq`.
    header (`echo "$BADGE" | cut -d. -f1 | base64 -d`).
 
 5. Run the full sequence and confirm the badge step used the real issuer:
-=======
-   docker compose build --pull envoy-org-a
-   docker run --rm cd-envoy-boe-a:milestone4 \
-     envoy --mode validate -c /etc/envoy/envoy.yaml
-   docker compose up -d --build
-   ```
-
-3. Confirm the listener and admin port are healthy:
-
-   ```bash
-   curl --fail --silent --show-error http://localhost:12000/health | jq .
-   curl --fail --silent --show-error http://127.0.0.1:9902/ready
-   ```
-
-4. Run the full sequence and confirm the egress check passed:
->>>>>>> origin/main
 
    ```bash
    RUN_OUTPUT="$(mktemp)"
@@ -586,7 +605,6 @@ Docker, Docker Compose, `curl`, and `jq`.
      -H 'Content-Type: application/json' \
      -d '{"repo":"demo-admin/payments-service"}' -o "$RUN_OUTPUT"
 
-<<<<<<< HEAD
    jq '{ok, badge: [.steps[] | select(.id == "resolve-badge")][0]}' "$RUN_OUTPUT"
    rm "$RUN_OUTPUT"
    ```
@@ -642,7 +660,7 @@ above: `subject_token` is validated, `actor_token` is not.
      http://localhost:8082/realms/org-a/protocol/openid-connect/token \
      -d grant_type=password -d client_id=opencode-agent \
      -d client_secret=demo-opencode-secret-change-me \
-     -d username=sarah -d password=demo-sarah-password-change-me \
+     -d username=sarah -d ****** \
      -d 'scope=openid profile email' | jq -r .access_token)"
 
    curl --silent --show-error -o /dev/null -w 'with garbage actor_token: %{http_code}\n' \
@@ -667,41 +685,6 @@ above: `subject_token` is validated, `actor_token` is not.
    real behavior of Keycloak 26.7's standard token exchange in this
    configuration, documented above.
 
-=======
-   jq '{ok, egress: [.steps[] | select(.id == "egress-check")][0]}' "$RUN_OUTPUT"
-   rm "$RUN_OUTPUT"
-   ```
-
-   Expected: `ok=true`, the `egress-check` step has `status=ok`.
-
-5. Prove a policy violation never leaves Org A — mint an assertion with an
-   unsupported intent directly via `idjag-issuer` and present it straight to
-   the egress listener:
-
-   ```bash
-   BAD_ASSERTION="$(curl --silent --show-error -X POST http://localhost:9002/mint \
-     -H 'Content-Type: application/json' \
-     -d '{"sub":"sarah@org-a.example","aud":"http://keycloak-b:8080/realms/org-b",
-          "client_id":"triage-agent","act_chain":["opencode-agent"],
-          "scope":"openid","intent":["delete-repository"]}' | jq -r .assertion)"
-
-   curl --silent --show-error --include -X POST http://localhost:12000/api/egress-check \
-     -H "Authorization: Bearer $BAD_ASSERTION"
-   ```
-
-   Expected: HTTP 403 with `error=policy_denied`. This is a policy denial, not
-   a JWT-signature failure — the assertion is validly signed by idjag-issuer,
-   it just doesn't carry an allowed scope/intent.
-
-6. Confirm metrics show both decisions:
-
-   ```bash
-   curl --fail --silent --show-error \
-     'http://127.0.0.1:9902/stats?filter=opa_requests_total'
-   ```
-
->>>>>>> origin/main
-### Via the webapp (recommended)
 
 Open **http://localhost:8090**. Click **Run (animated)** to watch all 20
 steps execute with live sequence-diagram highlighting and a step-by-step
