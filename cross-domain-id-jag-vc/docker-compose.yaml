@@ -4,15 +4,15 @@
 name: cross-domain-stack
 
 # Cross-domain agent remediation demo — sequence diagram:
-#   local scan → discovery → cross-domain token exchange → inline OPA PDP →
-#   sub-agent spawn → Gitea PR audit
+#   local scan → discovery → cross-domain token exchange → inline OPA PDP
+#   (egress + ingress + resource) → sub-agent spawn → Gitea PR audit
 #
 # Actors from the diagram:
 #   Sarah          → demo user (Org A), signs in via Keycloak A
 #   OpenCode       → Org A AI agent (mock), phases A+B steps 1-13
 #   AGNTCY         → identity node (CIMD) + vc-issuer (badge mint) + idjag-issuer (assertion mint)
 #   Keycloak A     → Org A IdP (org-a realm), authenticates Sarah
-#   Envoy+OPA A    → SKIPPED (future Org A egress milestone)
+#   Envoy+OPA A    → egress inline policy (may Sarah delegate this scope to Org B?)
 #   Keycloak B     → Org B IdP (org-b realm), receives cross-domain ID-JAG assertion
 #   Envoy+OPA B    → ticket-ingress + resource-access inline policies
 #   Triage         → Org B remediation agent (mock), steps 13-19
@@ -26,6 +26,7 @@ name: cross-domain-stack
 #   idjag-issuer    → host:9002  (AGNTCY assertion minter)
 #   identity-node   → host:4005 (REST) / 4006 (gRPC)
 #   gitea           → host:3002
+#   envoy-org-a     → host:12000 (egress)  admin:127.0.0.1:9902
 #   envoy-org-b     → host:10000 (ticket ingress) / 10001 (resource access)
 #                     admin:127.0.0.1:9901
 #   opencode-agent  → host:8100  (Org A mock agent)
@@ -356,6 +357,37 @@ services:
       start_period: 5s
 
   # ---------------------------------------------------------------------------
+  # Org A gateway — Envoy + Built On Envoy inline OPA dynamic module
+  #   - Listener 12000 enforces the egress PDP: may Sarah delegate this scope
+  #     to Org B? Verifies the freshly-minted ID-JAG against idjag-issuer's
+  #     JWKS, then checks scope/intent/delegation-chain in Rego before
+  #     OpenCode redeems it at Keycloak B.
+  # ---------------------------------------------------------------------------
+  envoy-org-a:
+    build:
+      context: ./envoy-org-a
+      pull: true
+      args:
+        BOE_COMPOSER_IMAGE: ${BOE_COMPOSER_IMAGE:-ghcr.io/tetratelabs/built-on-envoy/composer:0.11.0-dev@sha256:842fca7db63af7385478380bf097c6e85eb16db7158a88778d6f2018b265d84f}
+        ENVOY_IMAGE: ${ENVOY_BASE_IMAGE:-envoyproxy/envoy:v1.38.3@sha256:5f7c43e1147412fdb3af578c651c67478a3df818eae89d2261e707e06c209cdb}
+    image: cd-envoy-boe-a:${ENVOY_A_IMAGE_TAG:-milestone4}
+    container_name: cd-envoy-org-a
+    depends_on:
+      idjag-issuer:
+        condition: service_healthy
+    ports:
+      - "${ENVOY_A_EGRESS_PORT:-12000}:12000"
+      - "127.0.0.1:${ENVOY_A_ADMIN_PORT:-9902}:9902"
+    networks:
+      - cd-net
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9902"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  # ---------------------------------------------------------------------------
   # Org B gateway — Envoy + Built On Envoy inline OPA dynamic module
   #   - Listener 10000 proxies cross-domain ticket requests to Triage
   #   - Listener 10001 enforces Sub-Agent resource access before Gitea Gateway
@@ -398,7 +430,8 @@ services:
   # OpenCode Agent (mock) — Org A AI agent
   #   Phase A (steps 1-2): Sarah sign-in, mock CVE scan
   #   Discovery (steps 3-6): badge resolution (mocked → identity-node)
-  #   Phase B (steps 7-13): mint ID-JAG, redeem at KC-B, Envoy JWT + OPA enforcement, create ticket
+  #   Phase B (steps 7-13): mint ID-JAG, Org A egress PDP check, redeem at
+  #     KC-B, Envoy JWT + OPA enforcement, create ticket
   #
   # Trigger: POST http://localhost:8100/api/run
   # ---------------------------------------------------------------------------
@@ -415,6 +448,8 @@ services:
       vc-issuer:
         condition: service_healthy
       idjag-issuer:
+        condition: service_healthy
+      envoy-org-a:
         condition: service_healthy
       envoy-org-b:
         condition: service_healthy
@@ -438,6 +473,8 @@ services:
       VC_ISSUER_URL: http://vc-issuer:9003
       IDJAG_ISSUER_URL: http://idjag-issuer:9000
       IDENTITY_NODE_URL: http://identity-node:4000
+      # Org A trust boundary; Envoy enforces the egress PDP before redemption.
+      EGRESS_PDP_URL: http://envoy-org-a:12000
       # Org B trust boundary; Envoy proxies the request to Triage.
       TRIAGE_AGENT_URL: http://envoy-org-b:10000
       # Default scan target
