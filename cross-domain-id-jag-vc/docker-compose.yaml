@@ -382,7 +382,7 @@ services:
         condition: service_healthy
     environment:
       # Validate tokens against Keycloak B (Org B)
-      KEYCLOAK_URL: http://keycloak-b:8080
+      KEYCLOAK_URL: ${KC_B_INTERNAL_URL:-http://keycloak-b:8080}
       KEYCLOAK_REALM: org-b
       GITEA_URL: http://gitea:3000
       GITEA_ADMIN_USER: ${GITEA_ADMIN_USER:-demo-admin}
