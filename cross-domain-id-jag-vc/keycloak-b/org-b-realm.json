@@ -7,7 +7,28 @@
   "identityProviders": [
     {
       "alias": "id-jag",
-      "displayName": "ID-JAG Issuer (AGNTCY)",
+      "displayName": "ID-JAG Issuer (AGNTCY, mock)",
+      "providerId": "keycloak-oidc",
+      "enabled": true,
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "config": {
+        "issuer": "http://idjag-issuer:9000",
+        "authorizationUrl": "http://idjag-issuer:9000/auth",
+        "tokenUrl": "http://idjag-issuer:9000/token",
+        "jwksUrl": "http://idjag-issuer:9000/jwks",
+        "useJwksUrl": "true",
+        "clientId": "idjag-receiver",
+        "clientSecret": "demo-idjag-secret-change-me",
+        "jwtAuthorizationGrantEnabled": "true",
+        "jwtAuthorizationGrantAssertionReuseAllowed": "false",
+        "jwtAuthorizationGrantMaxAllowedAssertionExpiration": "300"
+      }
+    },
+    {
+      "alias": "id-jag-keycloak-a",
+      "displayName": "ID-JAG Issuer (Keycloak A, native — keycloak-idjag-spi)",
       "providerId": "keycloak-oidc",
       "enabled": true,
       "trustEmail": true,
@@ -39,7 +60,7 @@
       "consentRequired": false,
       "attributes": {
         "oauth2.jwt.authorization.grant.enabled": "true",
-        "oauth2.jwt.authorization.grant.idp": "id-jag"
+        "oauth2.jwt.authorization.grant.idp": "id-jag-keycloak-a"
       }
     },
     {
@@ -67,7 +88,8 @@
       "emailVerified": true,
       "credentials": [],
       "federatedIdentities": [
-        { "identityProvider": "id-jag", "userId": "sarah@org-a.example", "userName": "sarah" }
+        { "identityProvider": "id-jag", "userId": "sarah@org-a.example", "userName": "sarah" },
+        { "identityProvider": "id-jag-keycloak-a", "userId": "sarah@org-a.example", "userName": "sarah" }
       ]
     }
   ]

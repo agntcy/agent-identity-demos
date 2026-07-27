@@ -86,10 +86,22 @@ public class IdJagTokenExchangeProvider implements TokenExchangeProvider {
             return oauthError(Response.Status.FORBIDDEN, "invalid_scope", e.getMessage());
         }
 
+        // act_chain is trusted as supplied by the (already-authorized, per
+        // DelegationAuthorization above) caller as-is — it is not built up
+        // automatically here, matching idjag-issuer's original model where
+        // the caller declares the full chain itself.
         List<String> actChain = commaDelimited(context.getFormParams().getFirst("act_chain"));
-        actChain.add(client.getClientId());
         List<String> intent = commaDelimited(context.getFormParams().getFirst("intent"));
         List<String> resource = commaDelimited(context.getFormParams().getFirst("resource"));
+        // client_id/azp on an ID-JAG identify the *target* client the
+        // assertion is for (e.g. "triage-agent"), not the caller minting it
+        // (e.g. "opencode-agent") — matching idjag-issuer's original
+        // client_id request field. Falls back to the calling client's own
+        // ID if the caller doesn't specify one.
+        String targetClientId = context.getFormParams().getFirst("target_client_id");
+        if (targetClientId == null || targetClientId.isBlank()) {
+            targetClientId = client.getClientId();
+        }
 
         String issuer = Urls.realmIssuer(session.getContext().getUri().getBaseUri(), realm.getName());
         long now = Instant.now().getEpochSecond();
@@ -101,8 +113,8 @@ public class IdJagTokenExchangeProvider implements TokenExchangeProvider {
         claims.put("iat", now);
         claims.put("exp", now + ASSERTION_TTL_SECONDS);
         claims.put("jti", UUID.randomUUID().toString());
-        claims.put("client_id", client.getClientId());
-        claims.put("azp", client.getClientId());
+        claims.put("client_id", targetClientId);
+        claims.put("azp", targetClientId);
         if (scope != null && !scope.isBlank()) {
             claims.put("scope", scope);
         }

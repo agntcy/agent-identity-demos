@@ -637,6 +637,7 @@ async def _mint_idjag(client: httpx.AsyncClient, subject_token: str) -> dict:
         "requested_token_type": "urn:ietf:params:oauth:token-type:id-jag",
         "audience": KC_B_ISSUER,
         "scope": "openid triage:create",
+        "target_client_id": TRIAGE_CLIENT_ID,
         "act_chain": OPENCODE_CLIENT_ID,
         "intent": "create-pr-fix",
     }
