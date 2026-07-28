@@ -430,6 +430,31 @@ location /keycloak-b/ {
 }
 ```
 
+### Reverse-proxying `/api/run` — raise the read timeout
+
+Since Milestone 8, `opencode-plan` makes a real LLM call, and one call
+through a remote/shared model backend can legitimately take a few minutes
+— nginx's default `proxy_read_timeout` is 60s, so a reverse proxy fronting
+the webapp with the default will silently kill the connection mid-request.
+From the browser this looks exactly like the UI hanging on "Fetching all
+steps…", not like an error. Raise the timeout on the webapp's `location /`
+(and `proxy_send_timeout` to match) to comfortably exceed
+`OPENCODE_TIMEOUT` plus the rest of the lifecycle:
+
+```nginx
+location / {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/sign_in?rd=$scheme://$host$request_uri;
+
+    proxy_read_timeout    480s;
+    proxy_send_timeout    480s;
+    proxy_connect_timeout 10s;
+
+    proxy_pass http://127.0.0.1:8090;
+    proxy_set_header Host $host;
+}
+```
+
 ## Testing
 
 ### Envoy Milestones 2–3 reviewer verification

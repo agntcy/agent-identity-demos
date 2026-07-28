@@ -147,6 +147,10 @@
     .tag.agntcy { background: rgba(188,140,255,.15); color: var(--purple); }
     [hidden] { display: none !important; }
     .status-bar { font-size: 12px; color: var(--muted); padding: 6px 0; margin-bottom: 4px; min-height: 22px; }
+    .status-spinner { display: inline-block; width: 10px; height: 10px; margin-right: 7px;
+      border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%;
+      vertical-align: middle; animation: status-spin .7s linear infinite; }
+    @keyframes status-spin { to { transform: rotate(360deg); } }
     #traceLink a { color: var(--teal); text-decoration: none; font-weight: 600; }
     #traceLink a:hover { text-decoration: underline; }
     #legend a { color: var(--accent); text-decoration: none; font-weight: 600; }
@@ -1180,19 +1184,49 @@ POST /realms/org-b/protocol/openid-connect/token
     else stepBtn.textContent = 'Done ✓';
   }
 
-  function setStatus(msg) { statusEl.textContent = msg; }
+  function setStatus(msg, spinning = false) {
+    statusEl.innerHTML = spinning ? `<span class="status-spinner"></span>${esc(msg)}` : esc(msg);
+  }
+
+  // A single /api/run call now runs the real opencode-agent lifecycle,
+  // including a genuine LLM call (opencode-plan) against a shared backend —
+  // that can take a couple of minutes. Without live feedback the "Fetching…"
+  // text just sits there and reads as a frozen page, so this ticks a
+  // spinner + elapsed-seconds counter for the whole duration of the fetch.
+  let statusSpinnerTimer = null;
+  function startStatusSpinner(baseMsg) {
+    stopStatusSpinner();
+    const startedAt = Date.now();
+    const tick = () => {
+      const elapsed = Math.round((Date.now() - startedAt) / 1000);
+      const note = elapsed >= 15
+        ? ` (${elapsed}s — a real LLM call can take a couple of minutes)`
+        : ` (${elapsed}s)`;
+      setStatus(baseMsg + note, true);
+    };
+    tick();
+    statusSpinnerTimer = setInterval(tick, 1000);
+  }
+  function stopStatusSpinner() {
+    if (statusSpinnerTimer) { clearInterval(statusSpinnerTimer); statusSpinnerTimer = null; }
+  }
 
   // ── Fetch all steps ────────────────────────────────────────────────────────
   async function fetchAllSteps() {
     const cve  = document.getElementById('cve').value.trim()  || 'CVE-2024-12345';
     const repo = document.getElementById('repo').value.trim() || 'demo-admin/payments-service';
-    const res  = await fetch('/api/run', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({cve, repo})
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
+    startStatusSpinner('Running full sequence — waiting on identity-node, Keycloak, and the real OpenCode/LLM call…');
+    try {
+      const res = await fetch('/api/run', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({cve, repo})
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } finally {
+      stopStatusSpinner();
+    }
   }
 
   // Dwell time per step during animated playback — configurable via the
@@ -1248,7 +1282,6 @@ POST /realms/org-b/protocol/openid-connect/token
     if (allSteps.length === 0) {
       // First click: fetch everything, reveal first step
       busy = true; updateButtons();
-      setStatus('Fetching all steps…');
       try {
         const data = await fetchAllSteps();
         allSteps = data.steps || [];
