@@ -57,6 +57,10 @@ services:
     container_name: cd-jaeger
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
+      # Only needed when reverse-proxying the UI under a subpath (e.g. a
+      # deployment that fronts everything with its own TLS/auth gate);
+      # leave unset for local use, where Jaeger is reached directly at "/".
+      QUERY_BASE_PATH: ${JAEGER_QUERY_BASE_PATH:-}
     ports:
       - "${JAEGER_UI_PORT:-16686}:16686"
     networks:
@@ -76,11 +80,21 @@ services:
   #   - standard.token.exchange enabled on opencode-agent (RFC 8693, step 7)
   # ---------------------------------------------------------------------------
   keycloak-a:
-    image: quay.io/keycloak/keycloak:26.7
+    # Keycloak 26.7 + the keycloak-idjag-spi provider baked in (native
+    # ID-JAG issuance via grant_type=token-exchange — see
+    # keycloak-idjag-spi/ and https://github.com/agntcy/agent-identity-demos/discussions/18).
+    # Build context is this whole directory (not keycloak-a/) so the
+    # Dockerfile can reach the sibling keycloak-idjag-spi/ Maven module.
+    build:
+      context: .
+      dockerfile: keycloak-a/Dockerfile
+    image: cd-keycloak-a-idjag
     container_name: cd-keycloak-a
     command: >
       start-dev --import-realm
       --features=identity-assertion-jwt,token-exchange-delegation,parameterized-scopes
+      --http-relative-path=${KC_A_RELATIVE_PATH:-/}
+      --proxy-headers=xforwarded
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_A_ADMIN:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_A_ADMIN_PASSWORD:?set KC_A_ADMIN_PASSWORD in .env}
@@ -107,7 +121,7 @@ services:
       keycloak-a:
         condition: service_healthy
     environment:
-      KC_URL: http://keycloak-a:8080
+      KC_URL: ${KC_A_INTERNAL_URL:-http://keycloak-a:8080}
       KC_REALM: org-a
       KC_ADMIN: ${KC_A_ADMIN:-admin}
       KC_ADMIN_PASSWORD: ${KC_A_ADMIN_PASSWORD:?set KC_A_ADMIN_PASSWORD in .env}
@@ -130,6 +144,8 @@ services:
     command: >
       start-dev --import-realm
       --features=identity-assertion-jwt,token-exchange-delegation,parameterized-scopes
+      --http-relative-path=${KC_B_RELATIVE_PATH:-/}
+      --proxy-headers=xforwarded
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_B_ADMIN:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_B_ADMIN_PASSWORD:?set KC_B_ADMIN_PASSWORD in .env}
@@ -157,7 +173,7 @@ services:
       keycloak-b:
         condition: service_healthy
     environment:
-      KC_URL: http://keycloak-b:8080
+      KC_URL: ${KC_B_INTERNAL_URL:-http://keycloak-b:8080}
       KC_REALM: org-b
       KC_ADMIN: ${KC_B_ADMIN:-admin}
       KC_ADMIN_PASSWORD: ${KC_B_ADMIN_PASSWORD:?set KC_B_ADMIN_PASSWORD in .env}
@@ -180,9 +196,13 @@ services:
       context: ./vc-issuer
     image: cd-vc-issuer
     container_name: cd-vc-issuer
+    depends_on:
+      jaeger:
+        condition: service_healthy
     environment:
       ISSUER_URL: http://vc-issuer:9003
       BADGE_TTL: ${BADGE_TTL:-3600}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     ports:
       - "${VC_ISSUER_PORT:-9003}:9003"
     networks:
@@ -290,7 +310,7 @@ services:
       IAM_ORGANIZATION: ${IAM_ORGANIZATION:-cross-domain-demo}
       SECRETS_CRYPTO_KEY: ${SECRETS_CRYPTO_KEY:?set SECRETS_CRYPTO_KEY in .env}
       # Keycloak A is the OIDC issuer for Org A agents registering badges
-      IAM_ISSUER: http://keycloak-a:8080/realms/org-a
+      IAM_ISSUER: ${KC_A_INTERNAL_URL:-http://keycloak-a:8080}/realms/org-a
       IAM_USER_CID: opencode-agent
       IAM_USER_CID_CLAIM_NAME: azp
     networks:
@@ -372,7 +392,7 @@ services:
         condition: service_healthy
     environment:
       # Validate tokens against Keycloak B (Org B)
-      KEYCLOAK_URL: http://keycloak-b:8080
+      KEYCLOAK_URL: ${KC_B_INTERNAL_URL:-http://keycloak-b:8080}
       KEYCLOAK_REALM: org-b
       GITEA_URL: http://gitea:3000
       GITEA_ADMIN_USER: ${GITEA_ADMIN_USER:-demo-admin}
@@ -495,7 +515,7 @@ services:
       - "${OPENCODE_PORT:-8100}:8100"
     environment:
       # Org A IdP — Sarah's login
-      KC_A_URL: http://keycloak-a:8080
+      KC_A_URL: ${KC_A_INTERNAL_URL:-http://keycloak-a:8080}
       KC_A_REALM: org-a
       OPENCODE_CLIENT_ID: opencode-agent
       OPENCODE_CLIENT_SECRET: ${OPENCODE_CLIENT_SECRET:-demo-opencode-secret-change-me}
@@ -503,7 +523,7 @@ services:
       SARAH_PASSWORD: ${SARAH_PASSWORD:?set SARAH_PASSWORD in .env}
       SARAH_EMAIL: ${SARAH_EMAIL:-sarah@org-a.example}
       # Org B IdP — receives cross-domain assertion
-      KC_B_URL: http://keycloak-b:8080
+      KC_B_URL: ${KC_B_INTERNAL_URL:-http://keycloak-b:8080}
       KC_B_REALM: org-b
       TRIAGE_CLIENT_ID: triage-agent
       TRIAGE_CLIENT_SECRET: ${TRIAGE_CLIENT_SECRET:-demo-triage-secret-change-me}
@@ -548,7 +568,7 @@ services:
       jaeger:
         condition: service_healthy
     environment:
-      KC_B_URL: http://keycloak-b:8080
+      KC_B_URL: ${KC_B_INTERNAL_URL:-http://keycloak-b:8080}
       KC_B_REALM: org-b
       TRIAGE_CLIENT_ID: triage-agent
       SUB_AGENT_CLIENT_ID: sub-agent
@@ -591,7 +611,7 @@ services:
     ports:
       - "${SUB_AGENT_PORT:-8300}:8300"
     environment:
-      KC_B_URL: http://keycloak-b:8080
+      KC_B_URL: ${KC_B_INTERNAL_URL:-http://keycloak-b:8080}
       KC_B_REALM: org-b
       SUB_AGENT_CLIENT_ID: sub-agent
       SUB_AGENT_CLIENT_SECRET: ${SUB_AGENT_CLIENT_SECRET:-demo-subagent-secret-change-me}
@@ -744,14 +764,18 @@ services:
         condition: service_started
       envoy-org-b:
         condition: service_healthy
+      envoy-org-a:
+        condition: service_healthy
+      vc-issuer:
+        condition: service_healthy
       jaeger:
         condition: service_healthy
     ports:
       - "${WEBAPP_PORT:-8090}:8090"
     environment:
-      KC_A_URL: http://keycloak-a:8080
+      KC_A_URL: ${KC_A_INTERNAL_URL:-http://keycloak-a:8080}
       KC_A_REALM: org-a
-      KC_B_URL: http://keycloak-b:8080
+      KC_B_URL: ${KC_B_INTERNAL_URL:-http://keycloak-b:8080}
       KC_B_REALM: org-b
       OPENCODE_CLIENT_ID: opencode-agent
       OPENCODE_CLIENT_SECRET: ${OPENCODE_CLIENT_SECRET:-demo-opencode-secret-change-me}
@@ -762,6 +786,8 @@ services:
       SARAH_EMAIL: ${SARAH_EMAIL:-sarah@org-a.example}
       IDJAG_ISSUER_URL: http://idjag-issuer:9000
       IDENTITY_NODE_URL: http://identity-node:4000
+      VC_ISSUER_URL: http://vc-issuer:9003
+      EGRESS_PDP_URL: http://envoy-org-a:12000
       TRIAGE_AGENT_URL: http://envoy-org-b:10000
       DIR_APISERVER_URL: dir-apiserver:8888
       VAULT_ADDR: http://identity-vault:8200
@@ -770,6 +796,15 @@ services:
       ORG_A_COMMON_NAME: org-a
       SCAN_REPO: ${SCAN_REPO:-demo-admin/payments-service}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      JAEGER_UI_URL: ${JAEGER_UI_URL:-}
+      # Public reference links shown in the webapp's "Access these services"
+      # legend — blank hides each entry. Independent of KC_A_URL/KC_B_URL
+      # above (those are for internal token calls; these are for a human
+      # clicking through in a browser).
+      GITEA_UI_URL: ${GITEA_UI_URL:-}
+      GITEA_ADMIN_USER: ${GITEA_ADMIN_USER:-demo-admin}
+      KC_A_UI_URL: ${KC_A_UI_URL:-}
+      KC_B_UI_URL: ${KC_B_UI_URL:-}
     networks:
       - cd-net
     healthcheck:

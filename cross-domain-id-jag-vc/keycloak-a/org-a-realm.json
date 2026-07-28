@@ -42,7 +42,9 @@
       "webOrigins": ["+"],
       "attributes": {
         "standard.token.exchange.enabled": "true",
-        "post.logout.redirect.uris": "+"
+        "post.logout.redirect.uris": "+",
+        "idjag.allowed.scopes": "openid triage:create",
+        "idjag.allowed.audiences": "http://keycloak-b:8080/keycloak-b/realms/org-b"
       }
     }
   ],

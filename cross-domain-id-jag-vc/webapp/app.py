@@ -26,7 +26,7 @@ import httpx
 from fastapi import FastAPI, Request
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-from tracing import setup_tracing
+from tracing import current_trace_id, setup_tracing, step_span
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -50,6 +50,17 @@ IDJAG_ISSUER_URL = os.environ.get("IDJAG_ISSUER_URL", "http://idjag-issuer:9000"
 IDENTITY_NODE_URL = os.environ.get("IDENTITY_NODE_URL", "http://identity-node:4000").rstrip("/")
 TRIAGE_AGENT_URL = os.environ.get("TRIAGE_AGENT_URL", "http://triage-agent:8200").rstrip("/")
 DIR_APISERVER_URL = os.environ.get("DIR_APISERVER_URL", "")  # e.g. "dir-apiserver:8888"
+VC_ISSUER_URL = os.environ.get("VC_ISSUER_URL", "http://vc-issuer:9003").rstrip("/")
+EGRESS_PDP_URL = os.environ.get("EGRESS_PDP_URL", "http://envoy-org-a:12000").rstrip("/")
+JAEGER_UI_URL = os.environ.get("JAEGER_UI_URL", "")  # e.g. "http://localhost:16686" — blank hides the trace link
+
+# Public reference links for the "Access these services" legend — separate
+# from KC_A_URL/KC_B_URL above (those are for internal token calls). Blank
+# hides the corresponding legend entry.
+GITEA_UI_URL = os.environ.get("GITEA_UI_URL", "")
+GITEA_ADMIN_USER = os.environ.get("GITEA_ADMIN_USER", "demo-admin")
+KC_A_UI_URL = os.environ.get("KC_A_UI_URL", "")
+KC_B_UI_URL = os.environ.get("KC_B_UI_URL", "")
 
 # CIMD — org-a's local trust authority, backed by a Vault transit signing key
 # (see identity-node-init.py for the registration bootstrap this depends on).
@@ -85,12 +96,21 @@ class CimdResolveBody(BaseModel):
     id: str = "AGNTCY-triage-agent"
 
 
+class ResolveBadgeBody(BaseModel):
+    sarah_email: str = SARAH_EMAIL
+
+
 class KcAExchangeBody(BaseModel):
-    token: str  # Sarah's KC-A token (unused — mocked)
+    token: str  # Sarah's KC-A token (subject_token)
+    badge: str = ""  # verified badge JWT (actor_token)
+
+
+class EgressCheckBody(BaseModel):
+    assertion: str  # ID-JAG JWT from mint step
 
 
 class MintIdjagBody(BaseModel):
-    sarah_email: str = SARAH_EMAIL
+    subject_token: str  # real KC-A access token (e.g. from the kc-a-exchange step)
 
 
 class KcBExchangeBody(BaseModel):
@@ -480,42 +500,161 @@ async def _cimd_resolve_id(client: httpx.AsyncClient, cimd_id: str) -> dict:
         return _step("cimd-resolve-id", f"6. CIMD: resolve id {cimd_id}", status="error", error=str(exc))
 
 
-async def _kc_a_exchange(_client: httpx.AsyncClient) -> dict:
-    """Step 7 — RFC 8693 token exchange at KC-A (mocked)."""
-    return _step(
-        "kc-a-exchange",
-        "7. KC-A: RFC 8693 token exchange — Sarah token → opencode-agent actor token",
-        detail="mocked — real impl: token-exchange grant at KC-A",
-        status="ok",
-        result={"note": "mocked; real: POST KC_A_TOKEN_URL grant_type=urn:ietf:params:oauth:grant-type:token-exchange"},
-    )
+async def _resolve_badge(client: httpx.AsyncClient, sarah_email: str = SARAH_EMAIL) -> dict:
+    """Step 6b — Issue + verify OpenCode's VC delegation badge at vc-issuer.
 
-
-async def _mint_idjag(client: httpx.AsyncClient, sarah_email: str) -> dict:
-    """Step 8 — Mint an ID-JAG assertion at idjag-issuer."""
-    url = f"{IDJAG_ISSUER_URL}/mint"
-    payload = {
-        "sub": sarah_email,
-        "aud": KC_B_ISSUER,
-        "client_id": TRIAGE_CLIENT_ID,
-        "act_chain": [OPENCODE_CLIENT_ID],
-        "scope": "openid triage:create",
-        "intent": ["create-pr-fix"],
-    }
+    identity-node's real REST API has no badge concept (CIMD id generate/
+    resolve only, steps 5-6 above) — vc-issuer stands in for it the same way
+    idjag-issuer stands in for the ID-JAG issuer: a real signed vc+jwt,
+    really verified.
+    """
     try:
-        r = await client.post(url, json=payload)
+        r = await client.post(f"{VC_ISSUER_URL}/vc/issue", json={
+            "id": OPENCODE_CLIENT_ID,
+            "caps": ["scan", "remediate", "delegate"],
+            "delegating_user": sarah_email,
+            "intent": "cross-domain-remediation",
+            "act_chain": [OPENCODE_CLIENT_ID],
+        })
+        if r.status_code != 200:
+            return _step("resolve-badge", "6b. Issue + verify VC badge → vc-issuer",
+                          status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
+        badge = r.json()["badge"]
+
+        r = await client.post(f"{VC_ISSUER_URL}/vc/verify", json={"badge": badge})
+        if r.status_code == 200 and r.json().get("valid"):
+            return _step(
+                "resolve-badge",
+                "6b. Issue + verify OpenCode's VC delegation badge → vc-issuer",
+                detail=f"POST {VC_ISSUER_URL}/vc/issue  +  POST {VC_ISSUER_URL}/vc/verify",
+                status="ok",
+                result={"token": badge, "claims": r.json()["claims"]},
+            )
+        return _step("resolve-badge", "6b. Issue + verify VC badge → vc-issuer",
+                      status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
+    except Exception as exc:  # noqa: BLE001
+        return _step("resolve-badge", "6b. Issue + verify VC badge → vc-issuer", status="error", error=str(exc))
+
+
+async def _kc_a_exchange(client: httpx.AsyncClient, sarah_token: str, badge: str) -> dict:
+    """Step 7 — RFC 8693 token exchange at KC-A.
+
+    NOTE: Keycloak 26.7's standard token exchange validates subject_token for
+    real, but does not itself verify actor_token or emit an RFC 8693 "act"
+    claim — confirmed live (garbage/absent actor_token produces a
+    byte-identical response). The badge was already independently verified
+    against vc-issuer in the previous step; delegation semantics continue to
+    be carried forward via the ID-JAG's act_chain claim next.
+    """
+    try:
+        r = await client.post(KC_A_TOKEN_URL, data={
+            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+            "client_id": OPENCODE_CLIENT_ID,
+            "client_secret": OPENCODE_CLIENT_SECRET,
+            "subject_token": sarah_token,
+            "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+            "actor_token": badge,
+            "actor_token_type": "urn:ietf:params:oauth:token-type:jwt",
+        })
         if r.status_code == 200:
             data = r.json()
-            assertion: str = data.get("assertion", "")
+            token: str = data["access_token"]
+            return _step(
+                "kc-a-exchange",
+                "7. KC-A: RFC 8693 token exchange — Sarah token + verified badge → exchanged token",
+                detail=f"POST {KC_A_TOKEN_URL}  grant_type=token-exchange",
+                status="ok",
+                result={"token_preview": token[:48] + "…", "token": token},
+            )
+        return _step("kc-a-exchange", "7. KC-A: RFC 8693 token exchange",
+                      status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
+    except Exception as exc:  # noqa: BLE001
+        return _step("kc-a-exchange", "7. KC-A: RFC 8693 token exchange", status="error", error=str(exc))
+
+
+async def _egress_check(client: httpx.AsyncClient, assertion: str) -> dict:
+    """Step 8b — Org A egress PDP: may Sarah delegate this scope to Org B?
+
+    Envoy A verifies the freshly-minted ID-JAG against Keycloak A's own
+    JWKS; inline OPA checks its scope, intent, and delegation-chain depth. A
+    policy violation is denied before ever reaching Keycloak B.
+    """
+    try:
+        r = await client.post(
+            f"{EGRESS_PDP_URL}/api/egress-check",
+            headers={"Authorization": f"Bearer {assertion}"},
+        )
+        if r.status_code == 200:
+            return _step(
+                "egress-check",
+                "8b. Org A egress PDP — may Sarah delegate this scope to Org B? → Envoy A + OPA",
+                detail=f"POST {EGRESS_PDP_URL}/api/egress-check",
+                status="ok",
+                result=r.json() if r.content else {"decision": "ALLOW"},
+            )
+        return _step("egress-check", "8b. Org A egress PDP check",
+                      status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
+    except Exception as exc:  # noqa: BLE001
+        return _step("egress-check", "8b. Org A egress PDP check", status="error", error=str(exc))
+
+
+def _decode_jwt_payload_unverified(token: str) -> dict:
+    """Decode a JWT's payload for display only — no signature check.
+
+    Keycloak's token-exchange response (unlike idjag-issuer's old /mint)
+    only returns the assertion string itself, not pre-decoded claims. This
+    reconstructs them purely so the webapp's "Decoded JWT claims" panel
+    still has something to show; it is never used for a trust decision.
+    """
+    import base64
+    import json as _json
+
+    try:
+        payload_b64 = token.split(".")[1]
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        return _json.loads(base64.urlsafe_b64decode(padded))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+async def _mint_idjag(client: httpx.AsyncClient, subject_token: str) -> dict:
+    """Step 8 — Mint an ID-JAG assertion via Keycloak A's native
+    grant_type=token-exchange (keycloak-idjag-spi), instead of the separate
+    idjag-issuer mock service — see
+    https://github.com/agntcy/agent-identity-demos/discussions/18.
+
+    subject_token is the real, live access token from step 7's exchange
+    (OpenCode acting as Sarah, verified via badge) — Keycloak A's provider
+    verifies its signature for real (session.tokens().decode(...)), it is
+    not a client-supplied free-text email like idjag-issuer accepted.
+    """
+    payload = {
+        "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+        "client_id": OPENCODE_CLIENT_ID,
+        "client_secret": OPENCODE_CLIENT_SECRET,
+        "subject_token": subject_token,
+        "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+        "requested_token_type": "urn:ietf:params:oauth:token-type:id-jag",
+        "audience": KC_B_ISSUER,
+        "scope": "openid triage:create",
+        "target_client_id": TRIAGE_CLIENT_ID,
+        "act_chain": OPENCODE_CLIENT_ID,
+        "intent": "create-pr-fix",
+    }
+    try:
+        r = await client.post(KC_A_TOKEN_URL, data=payload)
+        if r.status_code == 200:
+            data = r.json()
+            assertion: str = data.get("access_token", "")
             return _step(
                 "mint-idjag",
-                "8. Mint ID-JAG assertion → idjag-issuer (act_chain: opencode-agent → triage-agent)",
-                detail=f"POST {url}  sub={sarah_email}  aud={KC_B_ISSUER}  scope=openid triage:create",
+                "8. Mint ID-JAG assertion → Keycloak A (native issuance, keycloak-idjag-spi) (act_chain: opencode-agent → triage-agent)",
+                detail=f"POST {KC_A_TOKEN_URL}  grant_type=token-exchange  requested_token_type=id-jag  aud={KC_B_ISSUER}  scope=openid triage:create",
                 status="ok",
                 result={
                     "assertion_preview": assertion[:48] + "…" if assertion else "",
                     "assertion": assertion,
-                    "claims": data.get("claims", {}),
+                    "claims": _decode_jwt_payload_unverified(assertion),
                 },
             )
         return _step(
@@ -638,7 +777,8 @@ async def run_all(body: RunBody) -> JSONResponse:
 
     async with httpx.AsyncClient(timeout=30) as client:
         # 1. Sarah login
-        login_step = await _login(client)
+        with step_span("sarah-login"):
+            login_step = await _login(client)
         steps.append(login_step)
         if login_step["status"] != "ok":
             return JSONResponse({"ok": False, "steps": steps})
@@ -662,51 +802,76 @@ async def run_all(body: RunBody) -> JSONResponse:
             pass
 
         # 2. Scan
-        steps.append(_scan(body.cve))
+        with step_span("scan"):
+            steps.append(_scan(body.cve))
 
         # 3. Push turn record to directory
-        dir_push_step = await _dir_push_turn(body.cve, body.repo)
+        with step_span("dir-push"):
+            dir_push_step = await _dir_push_turn(body.cve, body.repo)
         steps.append(dir_push_step)
 
         # 4. Search directory for triage-agent
-        dir_search_step = await _dir_search("triage-agent")
+        with step_span("dir-search"):
+            dir_search_step = await _dir_search("triage-agent")
         steps.append(dir_search_step)
 
         # 5. CIMD: generate id for triage-agent (Vault-signed proof, org-a trust authority)
-        generate_step = await _cimd_generate_id(client, "triage-agent")
+        with step_span("cimd-generate-id"):
+            generate_step = await _cimd_generate_id(client, "triage-agent")
         steps.append(generate_step)
         cimd_id: str = (generate_step.get("result") or {}).get("id", "AGNTCY-triage-agent")
 
         # 6. CIMD: resolve id back to its ResolverMetadata
-        steps.append(await _cimd_resolve_id(client, cimd_id))
+        with step_span("cimd-resolve-id"):
+            resolve_step = await _cimd_resolve_id(client, cimd_id)
+        steps.append(resolve_step)
 
-        # 7. KC-A exchange (mocked)
-        steps.append(await _kc_a_exchange(client))
+        # 6b. Issue + verify OpenCode's VC delegation badge → vc-issuer
+        with step_span("resolve-badge"):
+            badge_step = await _resolve_badge(client, SARAH_EMAIL)
+        steps.append(badge_step)
+        badge = (badge_step.get("result") or {}).get("token", "")
+
+        # 7. KC-A exchange (real — subject=Sarah, actor_token=verified badge)
+        with step_span("kc-a-exchange"):
+            kc_a_step = await _kc_a_exchange(client, sarah_token, badge)
+        steps.append(kc_a_step)
+        kc_a_exchanged_token = (kc_a_step.get("result") or {}).get("token", "")
 
         # 8. Mint ID-JAG assertion
-        mint_step = await _mint_idjag(client, SARAH_EMAIL)
+        with step_span("mint-idjag"):
+            mint_step = await _mint_idjag(client, kc_a_exchanged_token)
         steps.append(mint_step)
         if mint_step["status"] != "ok":
-            return JSONResponse({"ok": False, "steps": steps})
+            return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
         # Retain the same signed assertion for Keycloak redemption and Envoy's
         # independent actor-token verification.
         assertion = mint_step["result"].get("assertion", "")
 
+        # 8b. Org A egress PDP — may Sarah delegate this scope to Org B?
+        with step_span("egress-check"):
+            egress_step = await _egress_check(client, assertion)
+        steps.append(egress_step)
+        if egress_step["status"] != "ok":
+            return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
+
         # 9. KC-B jwt-bearer exchange (assertions are single-use — one call only)
-        exchange_step = await _kc_b_exchange(client, assertion)
+        with step_span("kc-b-exchange"):
+            exchange_step = await _kc_b_exchange(client, assertion)
         triage_token = exchange_step.pop("_token", "")
         steps.append(exchange_step)
         if exchange_step["status"] != "ok":
-            return JSONResponse({"ok": False, "steps": steps})
+            return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
 
         # 10+. Create ticket + all nested steps
-        ticket_steps = await _create_ticket(
-            client, triage_token, assertion, body.cve, body.repo
-        )
+        with step_span("create-ticket"):
+            ticket_steps = await _create_ticket(
+                client, triage_token, assertion, body.cve, body.repo
+            )
         steps.extend(ticket_steps)
 
     all_ok = all(s.get("status") in ("ok", "denied") for s in steps)
-    return JSONResponse({"ok": all_ok, "steps": steps})
+    return JSONResponse({"ok": all_ok, "steps": steps, "trace_id": current_trace_id()})
 
 
 # ── Individual step endpoints (step-through mode) ─────────────────────────────
@@ -734,16 +899,28 @@ async def step_cimd_resolve_id(body: CimdResolveBody) -> JSONResponse:
         return JSONResponse(await _cimd_resolve_id(client, body.id))
 
 
+@app.post("/api/step/resolve-badge")
+async def step_resolve_badge(body: ResolveBadgeBody) -> JSONResponse:
+    async with httpx.AsyncClient(timeout=30) as client:
+        return JSONResponse(await _resolve_badge(client, body.sarah_email))
+
+
 @app.post("/api/step/kc-a-exchange")
 async def step_kc_a_exchange(body: KcAExchangeBody) -> JSONResponse:
     async with httpx.AsyncClient(timeout=30) as client:
-        return JSONResponse(await _kc_a_exchange(client))
+        return JSONResponse(await _kc_a_exchange(client, body.token, body.badge))
+
+
+@app.post("/api/step/egress-check")
+async def step_egress_check(body: EgressCheckBody) -> JSONResponse:
+    async with httpx.AsyncClient(timeout=30) as client:
+        return JSONResponse(await _egress_check(client, body.assertion))
 
 
 @app.post("/api/step/mint-idjag")
 async def step_mint_idjag(body: MintIdjagBody) -> JSONResponse:
     async with httpx.AsyncClient(timeout=30) as client:
-        return JSONResponse(await _mint_idjag(client, body.sarah_email))
+        return JSONResponse(await _mint_idjag(client, body.subject_token))
 
 
 @app.post("/api/step/kc-b-exchange")
@@ -793,11 +970,18 @@ def config() -> JSONResponse:
         "sarah_email": SARAH_EMAIL,
         "idjag_issuer_url": IDJAG_ISSUER_URL,
         "identity_node_url": IDENTITY_NODE_URL,
+        "vc_issuer_url": VC_ISSUER_URL,
+        "egress_pdp_url": EGRESS_PDP_URL,
         "triage_agent_url": TRIAGE_AGENT_URL,
         "dir_apiserver_url": DIR_APISERVER_URL or "not configured",
         "org_a_common_name": ORG_A_COMMON_NAME,
         "vault_key_name": VAULT_KEY_NAME,
         "scan_repo": SCAN_REPO,
+        "jaeger_ui_url": JAEGER_UI_URL,
+        "gitea_ui_url": GITEA_UI_URL,
+        "gitea_admin_user": GITEA_ADMIN_USER,
+        "kc_a_ui_url": KC_A_UI_URL,
+        "kc_b_ui_url": KC_B_UI_URL,
     })
 
 
