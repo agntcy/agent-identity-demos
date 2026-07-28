@@ -323,7 +323,7 @@
         <rect class="seq-actor-box" x="742" y="10" width="104" height="36" rx="5"/>
         <use href="#ico-doc" class="actor-icon" x="745.85" y="21.5" width="14" height="14"/>
         <text class="seq-actor" x="764.85" y="28" style="text-anchor:start">ID-JAG Issuer</text>
-        <text class="seq-actor-sub" x="794" y="41">idjag-issuer</text>
+        <text class="seq-actor-sub" x="794" y="41">sub-badge only</text>
         <rect class="seq-actor-box" x="864" y="10" width="104" height="36" rx="5"/>
         <use href="#ico-envoy" class="actor-icon" x="884.40" y="21.5" width="14" height="14"/>
         <text class="seq-actor" x="903.40" y="28" style="text-anchor:start">Envoy A</text>
@@ -428,10 +428,10 @@
 
         <g data-step="mint-idjag" class="g">
           <text class="seq-num" x="72" y="586">8</text>
-          <text class="seq-label" x="90" y="586">mint ID-JAG  sub=sarah  act_chain=[opencode]  aud=KC-B  scope=triage:create</text>
-          <line class="seq-msg" x1="62" y1="592" x2="794" y2="592" marker-end="url(#arr)"/>
-          <text class="seq-label" x="792" y="610" text-anchor="end">signed assertion (RS256)</text>
-          <line class="seq-msg ret" x1="794" y1="616" x2="66" y2="616" marker-end="url(#arr)"/>
+          <text class="seq-label" x="90" y="586">mint ID-JAG (Keycloak A, native — SPI)  sub=sarah  aud=KC-B  scope=triage:create</text>
+          <line class="seq-msg" x1="62" y1="592" x2="184" y2="592" marker-end="url(#arr)"/>
+          <text class="seq-label" x="182" y="610" text-anchor="end">signed assertion (RS256)</text>
+          <line class="seq-msg ret" x1="184" y1="616" x2="66" y2="616" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="egress-check" class="g">
@@ -554,22 +554,32 @@ POST /v1alpha1/id/resolve
 → {"resolverMetadata": {...}}   # same ResolverMetadata, read back</code></pre>
 
     <h3>Cross-domain token exchange (steps 7–10)</h3>
-    <p>OpenCode mints an ID-JAG assertion at <code>idjag-issuer</code>:
-    a short-lived RS256 JWT with <code>sub=sarah@org-a.example</code>, <code>act_chain=[opencode-agent]</code>,
-    <code>aud=KC-B org-b realm</code>, <code>scope=triage:create</code>, and
-    <code>intent=[create-pr-fix]</code>.
-    Org B's Keycloak validates the assertion against the issuer's JWKS, maps Sarah's identity,
-    and issues a scoped access token.</p>
-    <pre><code>POST /mint   # idjag-issuer
-{
-  "sub": "sarah@org-a.example",
-  "aud": "http://keycloak-b:8080/realms/org-b",
-  "client_id": "triage-agent",
-  "act_chain": ["opencode-agent"],
-  "scope": "openid triage:create",
-  "intent": ["create-pr-fix"]
-}
-→ {"assertion": "eyJ…"}
+    <p>OpenCode mints an ID-JAG assertion at <b>Keycloak A itself</b> — a real
+    <code>grant_type=token-exchange</code> call handled by a custom SPI
+    extension (<code>keycloak-idjag-spi</code>), following
+    <code>draft-ietf-oauth-identity-assertion-authz-grant</code>'s
+    <code>requested_token_type=urn:ietf:params:oauth:token-type:id-jag</code>.
+    The result is a short-lived RS256 JWT with <code>sub=sarah@org-a.example</code>,
+    <code>act_chain=[opencode-agent]</code>, <code>aud=KC-B org-b realm</code>,
+    <code>scope=triage:create</code>, and <code>intent=[create-pr-fix]</code> —
+    signed with Keycloak's own realm key, not a separate mock issuer's
+    throwaway keypair. Org B's Keycloak validates the assertion against
+    that same JWKS, maps Sarah's identity, and issues a scoped access
+    token. (Triage's later narrowed sub-badge for Sub-Agent still comes
+    from a separate <code>idjag-issuer</code> mock service — see
+    <a href="https://github.com/agntcy/agent-identity-demos/discussions/18" target="_blank" rel="noopener">Discussion #18</a>
+    for why that path wasn't migrated too.)</p>
+    <pre><code>POST /realms/org-a/protocol/openid-connect/token   # Keycloak A
+  grant_type          = urn:ietf:params:oauth:grant-type:token-exchange
+  subject_token       = &lt;Sarah's exchanged KC-A access token&gt;
+  subject_token_type  = urn:ietf:params:oauth:token-type:access_token
+  requested_token_type = urn:ietf:params:oauth:token-type:id-jag
+  audience            = http://keycloak-b:8080/realms/org-b
+  scope               = openid triage:create
+  target_client_id    = triage-agent
+  act_chain           = opencode-agent
+  intent              = create-pr-fix
+→ {"access_token": "eyJ…", "issued_token_type": "urn:ietf:params:oauth:token-type:id-jag"}
 
 POST /realms/org-b/protocol/openid-connect/token
   grant_type = urn:ietf:params:oauth:grant-type:jwt-bearer
@@ -593,7 +603,7 @@ POST /realms/org-b/protocol/openid-connect/token
 
     <h2>Architecture</h2>
     <div class="diagram doc">
-      <svg viewBox="0 0 900 220" role="img" aria-label="Architecture overview">
+      <svg viewBox="0 0 700 220" role="img" aria-label="Architecture overview">
         <g>
           <rect class="seq-actor-box" x="10"  y="10" width="120" height="30" rx="4"/>
           <text class="seq-actor" x="70" y="30">KC-A (Org A)</text>
@@ -602,15 +612,12 @@ POST /realms/org-b/protocol/openid-connect/token
           <rect class="seq-actor-box" x="350" y="10" width="120" height="30" rx="4"/>
           <text class="seq-actor" x="410" y="30">Identity Node</text>
           <rect class="seq-actor-box" x="520" y="10" width="120" height="30" rx="4"/>
-          <text class="seq-actor" x="580" y="30">ID-JAG Issuer</text>
-          <rect class="seq-actor-box" x="690" y="10" width="120" height="30" rx="4"/>
-          <text class="seq-actor" x="750" y="30">KC-B (Org B)</text>
+          <text class="seq-actor" x="580" y="30">KC-B (Org B)</text>
 
           <line class="seq-life" x1="70"  y1="40" x2="70"  y2="210"/>
           <line class="seq-life" x1="240" y1="40" x2="240" y2="210"/>
           <line class="seq-life" x1="410" y1="40" x2="410" y2="210"/>
           <line class="seq-life" x1="580" y1="40" x2="580" y2="210"/>
-          <line class="seq-life" x1="750" y1="40" x2="750" y2="210"/>
         </g>
         <g>
           <text class="seq-num" x="80" y="70">1</text>
@@ -632,10 +639,9 @@ POST /realms/org-b/protocol/openid-connect/token
         </g>
         <g>
           <text class="seq-num" x="80" y="190">4</text>
-          <text class="seq-label" x="96" y="190">mint ID-JAG → KC-B exchange → triage token</text>
+          <text class="seq-label" x="96" y="190">mint ID-JAG (native, SPI) → KC-B exchange → triage token</text>
           <line class="seq-msg" x1="70" y1="196" x2="574" y2="196" marker-end="url(#arr)"/>
-          <line class="seq-msg" x1="580" y1="196" x2="744" y2="196" marker-end="url(#arr)"/>
-          <line class="seq-msg ret" x1="744" y1="206" x2="76" y2="206" marker-end="url(#arr)"/>
+          <line class="seq-msg ret" x1="574" y1="206" x2="76" y2="206" marker-end="url(#arr)"/>
         </g>
       </svg>
     </div>
@@ -731,8 +737,8 @@ POST /realms/org-b/protocol/openid-connect/token
     'cimd-resolve-id': "OpenCode resolves the id back to its ResolverMetadata, confirming the identity and public key are correctly registered before trusting triage-agent.",
     'resolve-badge': "OpenCode issues and verifies its own VC delegation badge at vc-issuer — a real signed vc+jwt (caps, delegating_user, intent, act_chain), not a hardcoded mock. This badge becomes the actor_token in the next step.",
     'kc-a-exchange': "OpenCode exchanges Sarah's token for its own via RFC 8693 at Keycloak A — a real network call. Keycloak validates subject_token for real; it doesn't itself verify actor_token into an act claim (a real Keycloak platform behavior, documented in the README) — delegation semantics are carried forward via the ID-JAG's act_chain instead.",
-    'egress-check': "Before the ID-JAG ever leaves Org A, Envoy A + inline OPA ask: may Sarah actually delegate this scope to Org B? The assertion is verified against idjag-issuer's JWKS and checked for scope, intent, and delegation depth — a policy violation is denied right here.",
-    'mint-idjag': "OpenCode mints a signed ID-JAG assertion — a portable, cryptographically-signed statement that Sarah authorizes OpenCode to act as triage-agent in Org B, scoped to only triage:create.",
+    'egress-check': "Before the ID-JAG ever leaves Org A, Envoy A + inline OPA ask: may Sarah actually delegate this scope to Org B? The assertion is verified against Keycloak A's own JWKS and checked for scope, intent, and delegation depth — a policy violation is denied right here.",
+    'mint-idjag': "Keycloak A itself mints this ID-JAG — a real grant_type=token-exchange call handled by a custom SPI extension (keycloak-idjag-spi), not a separate mock issuer service. Signed with Keycloak's own realm key, so Envoy and Keycloak B trust the same JWKS Keycloak already publishes. It's a portable, cryptographically-signed statement that Sarah authorizes OpenCode to act as triage-agent in Org B, scoped to only triage:create.",
     'kc-b-exchange': "Org B's Keycloak verifies the assertion's signature and issues a scoped local access token. This is where the cross-domain trust boundary is actually crossed.",
     'create-ticket': "OpenCode sends both the Org B access token and original actor token through Envoy. Both signatures must verify before the inline OPA policy checks their subject, scope, chain, signed intent, and target repo.",
     'opa-ingress': "Org B's Envoy gateway validates the access token and signed actor token, then inline OPA checks the delegation chain, scope, intent, method, path, and repository before Triage receives the ticket.",
