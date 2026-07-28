@@ -8,13 +8,15 @@ Duplicated per service rather than shared from one package: no service in
 this repo currently imports from a shared lib (webapp even vendors its own
 copy of the proto/ tree), so a new shared package would be a bigger,
 separate structural change than adding tracing itself.
+
+This service makes no outbound HTTP calls of its own, so only incoming
+request spans (via FastAPIInstrumentor, wired in app.py) are needed.
 """
 
 import os
 
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -28,7 +30,6 @@ def setup_tracing(service_name: str) -> None:
         BatchSpanProcessor(OTLPSpanExporter(endpoint=_OTLP_ENDPOINT, insecure=True))
     )
     trace.set_tracer_provider(provider)
-    HTTPXClientInstrumentor().instrument()
 
 
 def current_trace_id() -> str | None:
@@ -37,13 +38,3 @@ def current_trace_id() -> str | None:
     if not ctx.is_valid:
         return None
     return format(ctx.trace_id, "032x")
-
-
-def step_span(step_id: str):
-    """Named child span for one demo step (e.g. "step:push-file").
-
-    Lets the webapp UI jump straight to this step's span from the sequence
-    diagram via Jaeger's `uiFind=step:<id>` search, instead of just opening
-    the trace at its root.
-    """
-    return trace.get_tracer(__name__).start_as_current_span(f"step:{step_id}")

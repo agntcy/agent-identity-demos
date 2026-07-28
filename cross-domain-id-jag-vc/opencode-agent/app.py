@@ -24,7 +24,9 @@ Task lifecycle (POST /api/run):
   7    Directory: push turn record (OASF) → CID
   8    Directory: discover triage-agent
   9    RFC 8693 exchange (subject=Sarah, actor_token=badge) → Keycloak A
-  10   Mint ID-JAG (sub=sarah, act_chain=[opencode], scope=triage:create)
+  10   Mint ID-JAG natively at Keycloak A (keycloak-idjag-spi,
+       requested_token_type=id-jag, act_chain=[opencode],
+       scope=triage:create)
   10b  Org A egress PDP check on the ID-JAG (Envoy A + OPA) before it
        leaves the org
   11   jwt-bearer redemption at Keycloak B → scoped access token
@@ -522,22 +524,33 @@ async def run(body: RunRequest | None = None):
         steps.append(s)
 
         # ── Step 10: Mint ID-JAG assertion for Org B triage-agent ──────────
+        # Keycloak A itself mints this now, via a real grant_type=
+        # token-exchange call (keycloak-idjag-spi), instead of the separate
+        # idjag-issuer mock — see
+        # https://github.com/agntcy/agent-identity-demos/discussions/18.
+        # subject_token is step 9's real exchanged token, not a client-
+        # supplied free-text email — Keycloak verifies its signature for
+        # real (session.tokens().decode(...)).
         s = _s("mint-idjag",
-               "10. Mint ID-JAG (sub=sarah, act_chain=[opencode], aud=KC-B, scope=triage:create)",
-               f"POST {IDJAG_ISSUER_URL}/mint  sub={SARAH_EMAIL}  aud={KC_B_ISSUER}  scope=triage:create")
+               "10. Mint ID-JAG natively at Keycloak A (keycloak-idjag-spi, act_chain=[opencode], aud=KC-B, scope=triage:create)",
+               f"POST {KC_A_TOKEN_EP}  grant_type=token-exchange  requested_token_type=id-jag  aud={KC_B_ISSUER}  scope=triage:create")
         try:
-            r = await client.post(f"{IDJAG_ISSUER_URL}/mint", json={
-                "sub": SARAH_EMAIL,
-                "aud": KC_B_ISSUER,
-                "client_id": TRIAGE_CLIENT_ID,
-                "act_chain": [OPENCODE_CLIENT_ID],
+            r = await client.post(KC_A_TOKEN_EP, data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+                "client_id": OPENCODE_CLIENT_ID,
+                "client_secret": OPENCODE_CLIENT_SECRET,
+                "subject_token": exchanged_token,
+                "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                "requested_token_type": "urn:ietf:params:oauth:token-type:id-jag",
+                "audience": KC_B_ISSUER,
                 "scope": "openid triage:create",
-                "intent": ["create-pr-fix"],
+                "target_client_id": TRIAGE_CLIENT_ID,
+                "act_chain": OPENCODE_CLIENT_ID,
+                "intent": "create-pr-fix",
             })
             if r.status_code == 200:
-                assertion = r.json()["assertion"]
-                s.update(status="ok", token_preview=assertion[:48] + "…",
-                         claims=r.json().get("claims", {}))
+                assertion = r.json()["access_token"]
+                s.update(status="ok", token_preview=assertion[:48] + "…")
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)
@@ -550,7 +563,8 @@ async def run(body: RunRequest | None = None):
 
         # ── Step 10b: Org A egress PDP check (Envoy A + inline OPA) ─────────
         # May Sarah delegate this scope to Org B? Envoy verifies the ID-JAG's
-        # signature against idjag-issuer's JWKS; OPA checks scope, intent, and
+        # signature against Keycloak A's JWKS (it is minted natively by the
+        # keycloak-idjag-spi now); OPA checks scope, intent, and
         # delegation-chain depth before the assertion ever leaves Org A.
         s = _s("egress-check",
                "10b. Egress PDP check — may Sarah delegate this scope to Org B? → Envoy A + OPA",
