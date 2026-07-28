@@ -23,7 +23,7 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-from tracing import setup_tracing
+from tracing import setup_tracing, step_span
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -118,39 +118,41 @@ async def receive_ticket(
         )
 
     # ── Steps 14-15: Policy check (real Envoy + inline OPA ALLOW) ─────────
-    steps.append({
-        "id": "opa-ingress",
-        "title": "14-15. Envoy + OPA ingress: both JWTs ✓  chain ✓  scope ✓  action ∈ signed intent ✓  → ALLOW",
-        "status": "ok",
-        "result": {
-            "decision": policy_decision,
-            "enforced_by": policy_enforcer,
-            "rule": policy_rule,
-            "delegation_depth": int(delegation_depth or "0"),
-            "checks": {
-                "access_token_signature": True,
-                "actor_token_signature": True,
-                "act_chain": body.act_chain,
-                "required_scope": "triage:create",
-                "action_in_intent": True,
+    with step_span("opa-ingress"):
+        steps.append({
+            "id": "opa-ingress",
+            "title": "14-15. Envoy + OPA ingress: both JWTs ✓  chain ✓  scope ✓  action ∈ signed intent ✓  → ALLOW",
+            "status": "ok",
+            "result": {
+                "decision": policy_decision,
+                "enforced_by": policy_enforcer,
+                "rule": policy_rule,
+                "delegation_depth": int(delegation_depth or "0"),
+                "checks": {
+                    "access_token_signature": True,
+                    "actor_token_signature": True,
+                    "act_chain": body.act_chain,
+                    "required_scope": "triage:create",
+                    "action_in_intent": True,
+                },
+                "note": "decision headers were injected by the Built On Envoy inline OPA filter",
             },
-            "note": "decision headers were injected by the Built On Envoy inline OPA filter",
-        },
-    })
+        })
 
     # ── Step 16: Create ticket + plan ─────────────────────────────────────
     ticket_id = f"TRIAGE-{body.cve.replace('CVE-', '')}"
-    steps.append({
-        "id": "plan",
-        "title": "16. Create ticket, plan remediation, decide sub-agent",
-        "status": "ok",
-        "result": {
-            "ticket_id": ticket_id,
-            "plan": f"bump-dependency-{body.cve}",
-            "sub_agent": SUB_AGENT_CLIENT_ID,
-            "repo": body.repo,
-        },
-    })
+    with step_span("plan"):
+        steps.append({
+            "id": "plan",
+            "title": "16. Create ticket, plan remediation, decide sub-agent",
+            "status": "ok",
+            "result": {
+                "ticket_id": ticket_id,
+                "plan": f"bump-dependency-{body.cve}",
+                "sub_agent": SUB_AGENT_CLIENT_ID,
+                "repo": body.repo,
+            },
+        })
 
     # ── Steps 17-18: Request narrowed sub-badge ────────────────────────────
     # caps ⊆ parent (gitea:write gitea:pr only — no triage:create),
@@ -169,32 +171,33 @@ async def receive_ticket(
     }
     sub_badge = ""
     async with httpx.AsyncClient(timeout=20) as client:
-        try:
-            r = await client.post(f"{IDJAG_ISSUER_URL}/mint", json={
-                "sub": "sarah@org-a.example",
-                "aud": KC_B_ISSUER,
-                "client_id": SUB_AGENT_CLIENT_ID,
-                "act_chain": parent_chain + [TRIAGE_CLIENT_ID],
-                "scope": sub_scope,
-                "intent": [body.intent],
-                "resource": [body.repo],
-            })
-            if r.status_code == 200:
-                sub_badge = r.json()["assertion"]
-                s.update(status="ok",
-                         token_preview=sub_badge[:48] + "…",
-                         token=sub_badge,
-                         claims=r.json().get("claims", {}))
-            else:
-                s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
-                steps.append(s)
-                return JSONResponse({
-                    "ok": False, "ticket_id": ticket_id, "steps": steps,
+        with step_span("mint-sub-badge"):
+            try:
+                r = await client.post(f"{IDJAG_ISSUER_URL}/mint", json={
+                    "sub": "sarah@org-a.example",
+                    "aud": KC_B_ISSUER,
+                    "client_id": SUB_AGENT_CLIENT_ID,
+                    "act_chain": parent_chain + [TRIAGE_CLIENT_ID],
+                    "scope": sub_scope,
+                    "intent": [body.intent],
+                    "resource": [body.repo],
                 })
-        except Exception as exc:  # noqa: BLE001
-            s.update(status="error", error=str(exc))
-            steps.append(s)
-            return JSONResponse({"ok": False, "ticket_id": ticket_id, "steps": steps})
+                if r.status_code == 200:
+                    sub_badge = r.json()["assertion"]
+                    s.update(status="ok",
+                             token_preview=sub_badge[:48] + "…",
+                             token=sub_badge,
+                             claims=r.json().get("claims", {}))
+                else:
+                    s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
+                    steps.append(s)
+                    return JSONResponse({
+                        "ok": False, "ticket_id": ticket_id, "steps": steps,
+                    })
+            except Exception as exc:  # noqa: BLE001
+                s.update(status="error", error=str(exc))
+                steps.append(s)
+                return JSONResponse({"ok": False, "ticket_id": ticket_id, "steps": steps})
         steps.append(s)
 
         # ── Step 19: Spawn sub-agent with narrowed badge + intent ──────────
@@ -203,24 +206,25 @@ async def receive_ticket(
             "title": "19. Spawn sub-agent with narrowed badge + intent → Sub-Agent /api/run",
             "detail": f"POST {SUB_AGENT_URL}/api/run  sub_badge=…  repo={body.repo}",
         }
-        try:
-            r = await client.post(
-                f"{SUB_AGENT_URL}/api/run",
-                json={
-                    "sub_badge": sub_badge,
-                    "repo": body.repo,
-                    "intent": body.intent,
-                    "act_chain": parent_chain + [TRIAGE_CLIENT_ID, SUB_AGENT_CLIENT_ID],
-                    "ticket_id": ticket_id,
-                },
-                timeout=60,
-            )
-            if r.status_code in (200, 201):
-                s.update(status="ok", result=r.json())
-            else:
-                s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
-        except Exception as exc:  # noqa: BLE001
-            s.update(status="error", error=str(exc))
+        with step_span("spawn-sub-agent"):
+            try:
+                r = await client.post(
+                    f"{SUB_AGENT_URL}/api/run",
+                    json={
+                        "sub_badge": sub_badge,
+                        "repo": body.repo,
+                        "intent": body.intent,
+                        "act_chain": parent_chain + [TRIAGE_CLIENT_ID, SUB_AGENT_CLIENT_ID],
+                        "ticket_id": ticket_id,
+                    },
+                    timeout=60,
+                )
+                if r.status_code in (200, 201):
+                    s.update(status="ok", result=r.json())
+                else:
+                    s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
+            except Exception as exc:  # noqa: BLE001
+                s.update(status="error", error=str(exc))
         steps.append(s)
 
     all_ok = all(s.get("status") in ("ok", "denied") for s in steps)

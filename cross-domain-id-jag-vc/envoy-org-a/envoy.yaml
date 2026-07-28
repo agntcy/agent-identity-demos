@@ -67,16 +67,29 @@ static_resources:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
                       providers:
                         idjag_actor_token:
-                          issuer: http://idjag-issuer:9000
+                          # Keycloak A itself now mints this assertion (see
+                          # keycloak-idjag-spi/) instead of the separate
+                          # idjag-issuer mock — issuer/JWKS point at
+                          # Keycloak A's own realm, matching
+                          # Urls.realmIssuer(...) in
+                          # IdJagTokenExchangeProvider. Assumes
+                          # KC_A_RELATIVE_PATH is unset (default "/"); if a
+                          # deployment sets it, this issuer/uri need the same
+                          # prefix.
+                          issuer: http://keycloak-a:8080/realms/org-a
+                          # /keycloak-b matches KC_B_RELATIVE_PATH on the
+                          # keycloak-b service (docker-compose.yaml) — this
+                          # must equal the "aud" the ID-JAG was minted with
+                          # (KC_B_ISSUER, derived from KC_B_URL there).
                           audiences:
-                            - http://keycloak-b:8080/realms/org-b
+                            - http://keycloak-b:8080/keycloak-b/realms/org-b
                           from_headers:
                             - name: Authorization
                               value_prefix: "Bearer "
                           remote_jwks:
                             http_uri:
-                              uri: http://idjag-issuer:9000/jwks
-                              cluster: idjag_issuer_jwks
+                              uri: http://keycloak-a:8080/realms/org-a/protocol/openid-connect/certs
+                              cluster: keycloak_a_jwks
                               timeout: 5s
                             cache_duration: 300s
                           forward: false
@@ -106,15 +119,15 @@ static_resources:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
   clusters:
-    - name: idjag_issuer_jwks
+    - name: keycloak_a_jwks
       type: STRICT_DNS
       connect_timeout: 5s
       load_assignment:
-        cluster_name: idjag_issuer_jwks
+        cluster_name: keycloak_a_jwks
         endpoints:
           - lb_endpoints:
               - endpoint:
                   address:
                     socket_address:
-                      address: idjag-issuer
-                      port_value: 9000
+                      address: keycloak-a
+                      port_value: 8080

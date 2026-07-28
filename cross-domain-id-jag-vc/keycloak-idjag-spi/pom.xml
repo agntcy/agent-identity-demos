@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 AGNTCY Contributors (https://github.com/agntcy)
+  SPDX-License-Identifier: Apache-2.0
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.agntcy.idjag</groupId>
+  <artifactId>keycloak-idjag-spi</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+
+  <properties>
+    <maven.compiler.source>21</maven.compiler.source>
+    <maven.compiler.target>21</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <keycloak.version>26.2.5</keycloak.version>
+  </properties>
+
+  <!--
+    Keycloak's own server-spi/server-spi-private jars are what define the
+    TokenExchangeProvider/TokenExchangeProviderFactory/TokenExchangeContext
+    interfaces this module implements against. "provided" scope: the
+    Keycloak runtime supplies these classes at deploy time (they're already
+    on Keycloak's own classpath) — we must not bundle them into our JAR.
+
+    Pinned to 26.2.5 (the newest org.keycloak:keycloak-server-spi published
+    to Maven Central) rather than 26.7.0, the image tag this demo actually
+    runs (docker-compose.yaml) — 26.7.0 has a git tag on
+    github.com/keycloak/keycloak but no matching artifacts on Central as of
+    this writing. This is only a compile-time stand-in: "provided" scope
+    means none of these classes are bundled into our JAR, so at runtime the
+    actual 26.7 container's own classes are what get used. The specific
+    interfaces this module depends on (TokenExchangeProvider,
+    TokenExchangeContext, KeyManager.getActiveKey) were verified directly
+    against the real 26.7.0 tag's source on GitHub and are unchanged from
+    this version — if `kc.sh build` against the real 26.7 image surfaces an
+    incompatibility, this pin is the first thing to revisit.
+  -->
+  <dependencies>
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-server-spi</artifactId>
+      <version>${keycloak.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-server-spi-private</artifactId>
+      <version>${keycloak.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-services</artifactId>
+      <version>${keycloak.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-core</artifactId>
+      <version>${keycloak.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>jakarta.ws.rs</groupId>
+      <artifactId>jakarta.ws.rs-api</artifactId>
+      <version>3.1.0</version>
+      <scope>provided</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>keycloak-idjag-spi</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+        <configuration>
+          <release>21</release>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

@@ -45,9 +45,9 @@ path: the narrowed sub-badge is signed for one repository, Sub-Agent sends it
 with its access token through listener `10001`, and inline OPA allows only the
 specific push and pull-request operations. Milestone 4 protects the Org A
 egress boundary: before OpenCode ever redeems the ID-JAG at Keycloak B, Envoy
-A verifies the freshly-minted assertion against idjag-issuer's JWKS and inline
-OPA checks its scope, intent, and delegation-chain depth — a policy violation
-never leaves Org A. Milestone 5 replaces the hardcoded
+A verifies the freshly-minted assertion against Keycloak A's own JWKS and
+inline OPA checks its scope, intent, and delegation-chain depth — a policy
+violation never leaves Org A. Milestone 5 replaces the hardcoded
 VC badge mock with vc-issuer, a real signed-`vc+jwt` issuer/verifier standing
 in for identity-node's (nonexistent) badge API. Milestone 6 makes the RFC
 8693 exchange at Keycloak A a real network call instead of a static mock —
@@ -107,7 +107,7 @@ flowchart TB
     OC -->|"generate / resolve id"| IdNode
     IdNode -.->|"proof JWT signing"| Vault
     OC -->|"issue + verify badge"| VC
-    OC -->|"mint assertion"| IDJAG
+    OC -->|"mint assertion (native, SPI)"| KCA
     OC -->|"egress check: assertion"| EnvoyA
     EnvoyA -->|"verify JWT + enforce scope, intent, chain"| OC
     OC -->|"jwt-bearer exchange"| KCB
@@ -132,12 +132,12 @@ flowchart TB
 
 | Service | Image | Host port(s) | Purpose |
 |---|---|---|---|
-| `keycloak-a` | `quay.io/keycloak/keycloak:26.7` | `8082` | Org A IdP (`org-a` realm), authenticates Sarah |
+| `keycloak-a` | built from `./keycloak-a` (`quay.io/keycloak/keycloak:26.7` + `keycloak-idjag-spi`) | `8082` | Org A IdP (`org-a` realm), authenticates Sarah, natively mints ID-JAG assertions via a custom token-exchange SPI |
 | `kc-a-init` | `quay.io/keycloak/keycloak:26.7` | _(one-shot)_ | Registers `triage:create` optional scope |
 | `keycloak-b` | `quay.io/keycloak/keycloak:26.7` | `8083` | Org B IdP (`org-b` realm), redeems ID-JAG assertions |
 | `kc-b-init` | `quay.io/keycloak/keycloak:26.7` | _(one-shot)_ | Registers `triage:create`/`gitea:*` optional scopes |
 | `vc-issuer` | built from `./vc-issuer` | `9003` | Issues + verifies signed VC badges (stand-in — identity-node has no badge API) |
-| `idjag-issuer` | built from `../archive/single-org-id-jag-app-access/idjag-issuer` | `9002` | Mints ID-JAG assertions (stand-in issuer) |
+| `idjag-issuer` | built from `../archive/single-org-id-jag-app-access/idjag-issuer` | `9002` | Mints Triage's narrowed sub-badge ID-JAG (the initial Org A→B assertion is now minted natively by `keycloak-a`) |
 | `identity-postgres` | `postgres:16` | _(internal)_ | DB for identity-node |
 | `identity-vault` | `hashicorp/vault:1.17` | _(internal)_ | Holds the org-a trust-authority signing key (Transit engine) |
 | `identity-node` | `ghcr.io/agntcy/identity/node:0.0.23` | `4005` (REST), `4006` (gRPC) | AGNTCY identity node — CIMD id generate/resolve |
@@ -209,11 +209,11 @@ sequenceDiagram
     OC->>KCA: token-exchange (subject_token=Sarah, actor_token=badge)
     Note over KCA: validates subject_token; does not process actor_token<br/>into an act claim (real Keycloak behavior, see README note)
     KCA-->>OC: exchanged access token
-    OC->>IDJAG: mint assertion (sub=Sarah, scope=triage:create, intent=create-pr-fix)
-    IDJAG-->>OC: signed assertion (RS256)
+    OC->>KCA: mint assertion (token-exchange, native SPI; sub=Sarah, scope=triage:create, intent=create-pr-fix)
+    KCA-->>OC: signed assertion (RS256)
 
     OC->>EnvoyA: POST /api/egress-check (assertion as Bearer)
-    EnvoyA->>IDJAG: fetch/cached JWKS
+    EnvoyA->>KCA: fetch/cached JWKS
     Note over EnvoyA: verify JWT; enforce scope, intent, act-chain depth
     EnvoyA-->>OC: ALLOW + policy decision headers
 
@@ -222,7 +222,7 @@ sequenceDiagram
 
     OC->>Envoy: POST /api/ticket (access token + actor token)
     Envoy->>KCB: fetch/cached JWKS
-    Envoy->>IDJAG: fetch/cached JWKS
+    Envoy->>KCA: fetch/cached JWKS
     Note over Envoy: verify both JWTs; enforce scope, chain, signed intent, repo
     Envoy->>Triage: ALLOW + policy decision headers
     Triage->>IDJAG: mint sub-badge (gitea:write/pr, resource=target repo)
@@ -302,10 +302,88 @@ all-in-one container — no external tracing backend or extra setup needed.
 field, so you can jump straight to a specific run:
 `http://localhost:16686/trace/<trace_id>`.
 
+The webapp's sequence diagram goes one step further: every step (`sarah-login`,
+`resolve-badge`, `egress-check`, `open-pr`, …) is wrapped server-side in its own
+named span, `step:<id>` (see `tracing.py`'s `step_span()` in `webapp`,
+`triage-agent`, and `sub-agent`). Clicking any step in the diagram after a run
+opens that exact span in Jaeger via
+`http://localhost:16686/trace/<trace_id>?uiFind=step:<id>` — Jaeger's `uiFind`
+search jumps straight to the matching span instead of leaving you to scroll
+through the whole waterfall.
+
 Note: Envoy hops (`envoy-org-b`) forward the `traceparent` header like any
 other header, so the trace stays continuous through them, but Envoy itself
 doesn't emit its own spans (no Envoy-side tracing filter is configured) —
 the fan-out is visible per-service, just not per-Envoy-hop.
+
+### Reverse-proxying the Jaeger UI under a subpath
+
+If your deployment fronts everything with its own TLS/auth gate (e.g. nginx
++ OAuth) rather than exposing `16686` directly, set `JAEGER_QUERY_BASE_PATH`
+(e.g. `/jaeger`) so Jaeger's UI generates asset URLs under that prefix, and
+point `JAEGER_UI_URL` at the same public path. An nginx location for this,
+gated behind the same auth as the rest of the site:
+
+```nginx
+location /jaeger/ {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/sign_in?rd=$scheme://$host$request_uri;
+    proxy_pass http://127.0.0.1:16686;  # no trailing slash — Jaeger already
+                                         # expects the /jaeger prefix itself
+    proxy_set_header Host $host;
+}
+```
+
+### Exposing Gitea and Keycloak A/B directly
+
+The webapp's "Access these services" legend links straight to Gitea and both
+Keycloak realms, for anyone who wants to click around instead of just
+watching the animated run. Each entry is opt-in via its own `*_UI_URL` env
+var (blank hides it):
+
+- **Gitea**: set `GITEA_ROOT_URL` to the public URL (e.g.
+  `https://your-domain/gitea/`) and `GITEA_UI_URL` to match. Unlike Jaeger/
+  Keycloak, Gitea's own router only ever listens at `/` — `ROOT_URL` controls
+  link/cookie generation only, not routing — so nginx must *strip* the
+  `/gitea/` prefix before forwarding (trailing slash on `proxy_pass`, the
+  opposite of the non-stripping pattern below).
+- **Keycloak A/B**: set `KC_A_RELATIVE_PATH`/`KC_B_RELATIVE_PATH` (e.g.
+  `/keycloak-a`, `/keycloak-b`) — Keycloak's own `--http-relative-path`
+  option, so it's aware of the prefix for every link/redirect it generates —
+  and `KC_A_INTERNAL_URL`/`KC_B_INTERNAL_URL` to the same path so every
+  *other* service (webapp, opencode-agent, triage-agent, sub-agent) keeps
+  reaching Keycloak at a URL that matches what it now actually issues as the
+  token `iss`/`aud`. Set `KC_A_UI_URL`/`KC_B_UI_URL` for the legend links.
+
+**This changes the issuer/audience baked into every token these Keycloaks
+mint** — if you enable it, `envoy` and `envoy-org-a`'s hardcoded
+`issuer`/`remote_jwks`/`audiences` fields (built into the image, not
+env-driven) must be rebuilt to match, and a full `/api/run` should be
+re-verified end to end before trusting the deployment.
+
+```nginx
+location /gitea/ {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/sign_in?rd=$scheme://$host$request_uri;
+    proxy_pass http://127.0.0.1:3002/;  # trailing slash — STRIPS /gitea/ before forwarding
+    proxy_set_header Host $host;
+    client_max_body_size 50m;
+}
+
+location /keycloak-a/ {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/sign_in?rd=$scheme://$host$request_uri;
+    proxy_pass http://127.0.0.1:8082;  # no trailing slash — matches KC_A_RELATIVE_PATH
+    proxy_set_header Host $host;
+}
+
+location /keycloak-b/ {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/sign_in?rd=$scheme://$host$request_uri;
+    proxy_pass http://127.0.0.1:8083;  # no trailing slash — matches KC_B_RELATIVE_PATH
+    proxy_set_header Host $host;
+}
+```
 
 ## Testing
 
@@ -615,22 +693,35 @@ Docker, Docker Compose, `curl`, and `jq`.
    Expected: `ok=true`, the `egress-check` step has `status=ok`.
 
 5. Prove a policy violation never leaves Org A — mint an assertion with an
-   unsupported intent directly via `idjag-issuer` and present it straight to
-   the egress listener:
+   unsupported intent directly via Keycloak A's own token exchange
+   (`keycloak-idjag-spi`) and present it straight to the egress listener:
 
    ```bash
-   BAD_ASSERTION="$(curl --silent --show-error -X POST http://localhost:9002/mint \
-     -H 'Content-Type: application/json' \
-     -d '{"sub":"sarah@org-a.example","aud":"http://keycloak-b:8080/realms/org-b",
-          "client_id":"triage-agent","act_chain":["opencode-agent"],
-          "scope":"openid","intent":["delete-repository"]}' | jq -r .assertion)"
+   SARAH_TOKEN="$(curl --silent --show-error -X POST \
+     http://localhost:8082/realms/org-a/protocol/openid-connect/token \
+     -d grant_type=password -d client_id=opencode-agent \
+     -d client_secret=demo-opencode-secret-change-me \
+     -d username=sarah -d password=demo-sarah-password-change-me \
+     -d 'scope=openid profile email' | jq -r .access_token)"
+
+   BAD_ASSERTION="$(curl --silent --show-error -X POST \
+     http://localhost:8082/realms/org-a/protocol/openid-connect/token \
+     -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
+     -d client_id=opencode-agent -d client_secret=demo-opencode-secret-change-me \
+     -d "subject_token=$SARAH_TOKEN" \
+     -d subject_token_type=urn:ietf:params:oauth:token-type:access_token \
+     -d requested_token_type=urn:ietf:params:oauth:token-type:id-jag \
+     -d audience=http://keycloak-b:8080/keycloak-b/realms/org-b \
+     -d scope=openid -d target_client_id=triage-agent \
+     -d act_chain=opencode-agent -d intent=delete-repository \
+     | jq -r .access_token)"
 
    curl --silent --show-error --include -X POST http://localhost:12000/api/egress-check \
-     -H "Authorization: ******"
+     -H "Authorization: Bearer $BAD_ASSERTION"
    ```
 
    Expected: HTTP 403 with `error=policy_denied`. This is a policy denial, not
-   a JWT-signature failure — the assertion is validly signed by idjag-issuer,
+   a JWT-signature failure — the assertion is validly signed by Keycloak A,
    it just doesn't carry an allowed scope/intent.
 
 6. Confirm metrics show both decisions:
@@ -754,7 +845,7 @@ above: `subject_token` is validated, `actor_token` is not.
      http://localhost:8082/realms/org-a/protocol/openid-connect/token \
      -d grant_type=password -d client_id=opencode-agent \
      -d client_secret=demo-opencode-secret-change-me \
-     -d username=sarah -d ****** \
+     -d username=sarah -d password=demo-sarah-password-change-me \
      -d 'scope=openid profile email' | jq -r .access_token)"
 
    curl --silent --show-error -o /dev/null -w 'with garbage actor_token: %{http_code}\n' \
@@ -782,9 +873,20 @@ above: `subject_token` is validated, `actor_token` is not.
 
 ### Via the webapp (recommended)
 
-Open **http://localhost:8090**. Click **Run (animated)** to watch all 20
-steps execute with live sequence-diagram highlighting and a step-by-step
-explainer toast, or **Next step ▶** to step through manually.
+Open **http://localhost:8090**. Click **Run (animated)** to watch all 22
+steps execute — including the real VC badge issuance, the real Keycloak A
+exchange, and the Org A egress check — with the active step highlighted in
+the sequence diagram, a traveling pulse along the live arrow, an overall
+progress bar, and a step-by-step explainer toast. Check **Auto-zoom to
+active step** if you'd rather have the diagram zoom in on whichever step is
+currently running instead of always showing the full diagram.
+
+A **View trace in Jaeger** link appears once the run finishes (set
+`JAEGER_UI_URL` in `.env` to enable it). Once a run has a `trace_id`, every
+step in the diagram is also individually clickable — it opens that exact
+step's span in Jaeger, not just the trace root (see
+[Viewing traces](#viewing-traces)). Use **Next step ▶** to step through
+manually.
 
 ### Via the API directly
 
@@ -886,6 +988,7 @@ cross-domain-id-jag-vc/
 ├── vc-issuer/                  # VC badge issuer (stand-in for identity-node's badge API)
 ├── identity-node-init.py      # Vault Transit bootstrap + org-a issuer registration
 ├── keycloak-a/, keycloak-b/   # realm import JSON + scope bootstrap scripts
+├── keycloak-idjag-spi/         # Keycloak SPI: native token-exchange ID-JAG minting (see Discussion #18)
 ├── gitea/                     # Gitea admin/repo seed script
 ├── dir/                       # Zot OCI registry config
 ├── agent-dir-init/            # one-shot: pushes static OASF records for all agents

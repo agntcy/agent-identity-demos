@@ -37,3 +37,13 @@ def current_trace_id() -> str | None:
     if not ctx.is_valid:
         return None
     return format(ctx.trace_id, "032x")
+
+
+def step_span(step_id: str):
+    """Named child span for one demo step (e.g. "step:mint-sub-badge").
+
+    Lets the webapp UI jump straight to this step's span from the sequence
+    diagram via Jaeger's `uiFind=step:<id>` search, instead of just opening
+    the trace at its root.
+    """
+    return trace.get_tracer(__name__).start_as_current_span(f"step:{step_id}")

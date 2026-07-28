@@ -17,42 +17,63 @@
     * { box-sizing: border-box; }
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: var(--bg); color: var(--text); line-height: 1.5; }
+    /* Reserves the step-explainer toast's gutter as real layout space (not
+       just a margin on main) — otherwise main's centering math and the
+       toast's viewport-fixed position drift apart at wide-but-not-huge
+       viewport widths and the two visibly overlap. Matches the toast's own
+       display:none breakpoint below. */
+    @media (min-width: 981px) { body { padding-right: 340px; } }
     header { padding: 20px 32px; border-bottom: 1px solid var(--border);
       display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
     header h1 { font-size: 19px; margin: 0; }
     header .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
-    main { max-width: 1060px; margin: 0 auto; padding: 24px 32px; }
+    main { max-width: 1500px; margin: 0 auto; padding: 24px 32px; }
     .tabs { display: flex; gap: 4px; }
     .tab { background: transparent; color: var(--muted); border: 1px solid var(--border);
       border-radius: 8px; padding: 8px 16px; font-size: 14px; font-weight: 600; cursor: pointer; }
     .tab.active { background: var(--panel); color: var(--text); border-color: var(--accent); }
-    .controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
     button.action { background: var(--accent); color: white; border: 0; border-radius: 6px;
-      padding: 9px 18px; font-size: 14px; font-weight: 600; cursor: pointer; }
+      padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
     button.secondary { background: #21262d; color: var(--text); border: 1px solid var(--border);
-      border-radius: 6px; padding: 9px 16px; font-size: 14px; font-weight: 600; cursor: pointer; }
+      border-radius: 6px; padding: 7px 12px; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
     button:disabled { opacity: 0.5; cursor: default; }
-    .field { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+    .field { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
     .field input { background: var(--panel); border: 1px solid var(--border); border-radius: 5px;
-      color: var(--text); padding: 5px 9px; font-size: 13px; font-family: ui-monospace, monospace; width: 200px; }
+      color: var(--text); padding: 5px 8px; font-size: 12.5px; font-family: ui-monospace, monospace; width: 150px; }
+    .config-wrap { margin-bottom: 16px; }
+    .config-wrap summary { cursor: pointer; font-size: 12px; color: var(--muted);
+      padding: 4px 2px; user-select: none; }
+    .config-wrap summary:hover { color: var(--text); }
     .config { font-size: 12px; color: var(--muted); background: var(--panel);
-      border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px;
+      border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-top: 6px;
       display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 3px 18px; }
     .config b { color: var(--text); }
+    /* No overflow-x here — an overflow-x on this element would make it its
+       own scroll container, which would make the sticky actor-box header
+       stick relative to THIS container (which never itself scrolls, so
+       nothing would visibly stick) instead of the page's scroll. On very
+       narrow viewports where the diagram's min-width exceeds the
+       container, the whole page scrolls horizontally instead — keeps the
+       header and body in perfect sync since neither has its own
+       independent horizontal scroll to fall out of sync with the other. */
     .diagram { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-      padding: 12px; margin-bottom: 18px; overflow-x: auto; }
+      padding: 12px; margin-bottom: 18px; position: relative; }
     .diagram svg { width: 100%; min-width: 900px; height: auto; display: block; }
+    .diagram svg#seqSvg { transition: none; }
+    .diagram-header-sticky { position: sticky; top: 0; z-index: 6; background: var(--panel);
+      margin: -12px -12px 0; padding: 12px 12px 0; border-bottom: 1px solid var(--border); }
     /* actor boxes */
-    .seq-actor-box { fill: #21262d; stroke: var(--border); }
+    .seq-actor-box { fill: #21262d; stroke: var(--border); transition: stroke .3s ease, fill .3s ease; }
     .seq-actor { fill: var(--text); font-size: 11px; font-weight: 700; text-anchor: middle; }
     .seq-actor-sub { fill: var(--muted); font-size: 9px; text-anchor: middle; }
     .seq-life { stroke: var(--border); stroke-dasharray: 4 4; stroke-width: 1; }
     /* step groups — color driven by status class */
-    .g .seq-msg { stroke: #30363d; stroke-width: 1.6; fill: none; }
+    .g .seq-msg { stroke: #30363d; stroke-width: 1.6; fill: none; transition: stroke .25s ease, stroke-width .25s ease; }
     .g .seq-msg.ret { stroke-dasharray: 6 4; }
     .g .seq-msg.alt { stroke-dasharray: 3 3; }
-    .g .seq-label { fill: var(--muted); font-size: 10.5px; }
-    .g .seq-num { fill: var(--muted); font-size: 11px; font-weight: 700; }
+    .g .seq-label { fill: var(--muted); font-size: 10.5px; transition: fill .25s ease; }
+    .g .seq-num { fill: var(--muted); font-size: 11px; font-weight: 700; transition: fill .25s ease; }
     .g.running .seq-msg { stroke: var(--run); }
     .g.running .seq-label, .g.running .seq-num { fill: var(--run); }
     .g.ok .seq-msg { stroke: var(--ok); }
@@ -61,6 +82,24 @@
     .g.error .seq-label, .g.error .seq-num { fill: var(--err); }
     .g.denied .seq-msg { stroke: var(--denied); }
     .g.denied .seq-label, .g.denied .seq-num { fill: var(--denied); }
+    /* clickable steps — jump to this step's span in Jaeger */
+    .g[data-step] { cursor: pointer; }
+    .g[data-step]:hover .seq-msg { stroke: var(--teal); stroke-width: 2.2; }
+    .g[data-step]:hover .seq-label, .g[data-step]:hover .seq-num { fill: var(--teal); }
+    /* active step — the one currently being explained, before it settles into
+       its final ok/error color. A pulsing glow + thicker stroke draws the eye
+       to exactly what the side toast is talking about right now. */
+    .g.active .seq-msg { stroke: var(--run); stroke-width: 2.6;
+      filter: drop-shadow(0 0 4px rgba(210,153,34,.75)); animation: pulse-msg 1.1s ease-in-out infinite; }
+    .g.active .seq-label, .g.active .seq-num { fill: var(--run); font-weight: 700; }
+    @keyframes pulse-msg { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+    .seq-actor-box.active-actor { stroke: var(--run); stroke-width: 2; }
+    /* traveling pulse dot — a little "packet" flying along the active message */
+    #travelDot { fill: var(--run); filter: drop-shadow(0 0 5px rgba(210,153,34,.9)); opacity: 0; }
+    /* overall run progress bar, above the diagram */
+    .run-progress { height: 4px; border-radius: 2px; background: #21262d; margin-bottom: 10px; overflow: hidden; }
+    .run-progress > div { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--teal));
+      transition: width .3s ease; }
     /* static doc diagrams */
     .diagram.doc .seq-msg { stroke: var(--accent); stroke-width: 1.6; fill: none; }
     .diagram.doc .seq-msg.ret { stroke: var(--muted); stroke-dasharray: 6 4; }
@@ -108,6 +147,10 @@
     .tag.agntcy { background: rgba(188,140,255,.15); color: var(--purple); }
     [hidden] { display: none !important; }
     .status-bar { font-size: 12px; color: var(--muted); padding: 6px 0; margin-bottom: 4px; min-height: 22px; }
+    #traceLink a { color: var(--teal); text-decoration: none; font-weight: 600; }
+    #traceLink a:hover { text-decoration: underline; }
+    #legend a { color: var(--accent); text-decoration: none; font-weight: 600; }
+    #legend a:hover { text-decoration: underline; }
     /* Right-side step explainer toast */
     .side-toast {
       position: fixed; top: 96px; right: 24px; width: 300px; max-width: calc(100vw - 48px);
@@ -177,188 +220,270 @@
       <button id="reset" class="secondary" disabled>Reset</button>
       <div class="field"><label>CVE:</label><input id="cve" value="CVE-2024-12345" /></div>
       <div class="field"><label>Repo:</label><input id="repo" value="demo-admin/payments-service" /></div>
-      <div class="field"><label>Step delay (ms):</label><input id="stepDelay" type="number" min="200" max="10000" step="100" value="2200" style="width:90px" /></div>
+      <div class="field"><label>Delay (ms):</label><input id="stepDelay" type="number" min="200" max="10000" step="100" value="2200" style="width:70px" /></div>
+      <div class="field"><label style="gap:5px"><input id="autoZoom" type="checkbox" style="width:auto" /> Auto-zoom</label></div>
     </div>
 
-    <div class="config" id="config"><div><i>Loading config…</i></div></div>
+    <details class="config-wrap">
+      <summary>Service config</summary>
+      <div class="config" id="config"><div><i>Loading config…</i></div></div>
+    </details>
+    <div class="status-bar" id="legend" style="margin-top:-8px"></div>
     <div class="status-bar" id="status"></div>
+    <div class="status-bar" id="traceLink" style="margin-top:-8px"></div>
+    <div class="run-progress"><div id="runProgressBar"></div></div>
 
     <!-- ── Sequence diagram ── -->
     <div class="diagram">
-      <svg viewBox="0 0 1140 800" role="img" aria-label="Cross-domain remediation sequence diagram">
+      <!-- Actor-box header lives in its own small SVG, sticky-pinned above
+           the scrolling body SVG below, so column labels stay visible while
+           scrolling through a long run. Both share the same viewBox width
+           (1432) and are scaled via the same `.diagram svg { width:100% }`
+           rule, so their columns stay pixel-aligned at any container width. -->
+      <div class="diagram-header-sticky">
+        <svg viewBox="0 0 1432 50" role="img" aria-label="Sequence diagram actors">
         <defs>
           <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="context-stroke" />
           </marker>
+
+          <!-- Actor icons. Real-project marks (Keycloak, Vault, Envoy, Gitea)
+               are CC0-licensed glyphs from the Simple Icons project
+               (github.com/simple-icons/simple-icons) — free to redistribute.
+               The rest are small custom glyphs for this demo's own
+               components, which have no real-world logo. -->
+          <symbol id="ico-agent" viewBox="0 0 24 24"><g fill="#8b949e">
+            <rect x="6" y="6" width="12" height="12" rx="2"/>
+            <rect x="10" y="1" width="4" height="4" rx="1"/>
+            <rect x="10" y="19" width="4" height="4" rx="1"/>
+            <rect x="1" y="10" width="4" height="4" rx="1"/>
+            <rect x="19" y="10" width="4" height="4" rx="1"/>
+          </g></symbol>
+          <symbol id="ico-folder" viewBox="0 0 24 24"><path fill="#8b949e"
+            d="M3 5a2 2 0 0 1 2-2h4.5l2 2H19a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></symbol>
+          <symbol id="ico-person" viewBox="0 0 24 24"><g fill="#8b949e">
+            <circle cx="12" cy="7.5" r="4.5"/>
+            <path d="M3.5 21c0-4.7 3.8-8.5 8.5-8.5s8.5 3.8 8.5 8.5Z"/>
+          </g></symbol>
+          <symbol id="ico-badge" viewBox="0 0 24 24"><g fill="#8b949e">
+            <circle cx="12" cy="9" r="6.5"/>
+            <path d="M8 14.2 4.5 21l3.8-1.7L10 22l2-6Z"/>
+            <path d="M16 14.2 19.5 21l-3.8-1.7L14 22l-2-6Z"/>
+          </g></symbol>
+          <symbol id="ico-doc" viewBox="0 0 24 24"><g fill="#8b949e">
+            <path d="M5 2h9l5 5v15H5Z"/>
+            <rect x="8" y="11" width="8" height="1.6" fill="#0d1117"/>
+            <rect x="8" y="14.5" width="8" height="1.6" fill="#0d1117"/>
+            <rect x="8" y="18" width="5" height="1.6" fill="#0d1117"/>
+          </g></symbol>
+          <symbol id="ico-keycloak" viewBox="0 0 24 24"><path fill="#7a7a7a"
+            d="m18.742 1.182-12.493.002C4.155 4.784 2.079 8.393 0 12.002c2.071 3.612 4.162 7.214 6.252 10.816l12.49-.004 3.089-5.404h2.158v-.002H24L23.996 6.59h-2.168zM8.327 4.792h2.081l1.04 1.8-3.12 5.413 3.117 5.403-1.035 1.81H8.327a2047.566 2047.566 0 0 0-4.168-7.204C5.547 9.606 6.937 7.2 8.327 4.792Zm6.241 0 2.086.003c1.393 2.405 2.78 4.813 4.166 7.222l-4.167 7.2h-2.08c-.382-.562-1.038-1.808-1.038-1.808l3.123-5.405-3.124-5.413z"/></symbol>
+          <!-- Simplified from the official Vault mark (github.com/simple-icons/
+               simple-icons) to just the outer triangle — the real logo's fine
+               internal grid pattern turns into an illegible dark smudge at
+               icon size. -->
+          <symbol id="ico-vault" viewBox="0 0 24 24"><path fill="#FFEC6E"
+            d="M0 0l11.955 24L24 0z"/></symbol>
+          <symbol id="ico-envoy" viewBox="0 0 24 24"><path fill="#AC6199"
+            d="m23.351 7.593-7.068-4.379a1.034 1.034 0 0 0-.84-.117c-.02.01-.052.021-.074.032L8.471 6.105a.695.695 0 0 0-.435.68l.17 7.355c.01.298.191.595.478.765l7.068 4.38c.255.159.574.201.84.116.02-.01.053-.021.074-.032l6.898-2.976a.705.705 0 0 0 .436-.68l-.17-7.355c-.011-.297-.192-.584-.479-.765m-7.185 10.044-6.143-3.805-.149-6.388 5.995-2.583 6.143 3.805.149 6.388zm.011-6.027a.832.832 0 0 0-.414-.67l-5.06-3.135-.159.064.032 1.52 4.007 2.487.095 4.06 1.53.946.086-.032zm-6.058 7.132L5.41 15.83l-.116-4.89 2.146-.924-.042-1.69-3.327 1.435a.611.611 0 0 0-.382.595l.138 5.74c0 .265.16.52.414.67l5.516 3.422c.224.138.5.18.734.106a.15.15 0 0 1 .064-.021l3.252-1.403-1.616-1zm-2.615-6.1-1.52-.947.032 1.446 1.52.946zm2.19 5.059-.032-1.414-1.329-.83c-.021-.01-.042-.031-.053-.042l.032 1.425zm-4.751 1.902-3.476-2.158-.085-3.613 1.7-.734-.031-1.445-2.72 1.17a.527.527 0 0 0-.33.51l.106 4.336c0 .223.138.446.35.574l4.167 2.582a.822.822 0 0 0 .627.096c.021-.01.043-.01.064-.021l2.561-1.106-1.392-.86Z"/></symbol>
+          <symbol id="ico-gitea" viewBox="0 0 24 24"><path fill="#6cc644"
+            d="M4.209 4.603c-.247 0-.525.02-.84.088-.333.07-1.28.283-2.054 1.027C-.403 7.25.035 9.685.089 10.052c.065.446.263 1.687 1.21 2.768 1.749 2.141 5.513 2.092 5.513 2.092s.462 1.103 1.168 2.119c.955 1.263 1.936 2.248 2.89 2.367 2.406 0 7.212-.004 7.212-.004s.458.004 1.08-.394c.535-.324 1.013-.893 1.013-.893s.492-.527 1.18-1.73c.21-.37.385-.729.538-1.068 0 0 2.107-4.471 2.107-8.823-.042-1.318-.367-1.55-.443-1.627-.156-.156-.366-.153-.366-.153s-4.475.252-6.792.306c-.508.011-1.012.023-1.512.027v4.474l-.634-.301c0-1.39-.004-4.17-.004-4.17-1.107.016-3.405-.084-3.405-.084s-5.399-.27-5.987-.324c-.187-.011-.401-.032-.648-.032zm.354 1.832h.111s.271 2.269.6 3.597C5.549 11.147 6.22 13 6.22 13s-.996-.119-1.641-.348c-.99-.324-1.409-.714-1.409-.714s-.73-.511-1.096-1.52C1.444 8.73 2.021 7.7 2.021 7.7s.32-.859 1.47-1.145c.395-.106.863-.12 1.072-.12zm8.33 2.554c.26.003.509.127.509.127l.868.422-.529 1.075a.686.686 0 0 0-.614.359.685.685 0 0 0 .072.756l-.939 1.924a.69.69 0 0 0-.66.527.687.687 0 0 0 .347.763.686.686 0 0 0 .867-.206.688.688 0 0 0-.069-.882l.916-1.874a.667.667 0 0 0 .237-.02.657.657 0 0 0 .271-.137 8.826 8.826 0 0 1 1.016.512.761.761 0 0 1 .286.282c.073.21-.073.569-.073.569-.087.29-.702 1.55-.702 1.55a.692.692 0 0 0-.676.477.681.681 0 1 0 1.157-.252c.073-.141.141-.282.214-.431.19-.397.515-1.16.515-1.16.035-.066.218-.394.103-.814-.095-.435-.48-.638-.48-.638-.467-.301-1.116-.58-1.116-.58s0-.156-.042-.27a.688.688 0 0 0-.148-.241l.516-1.062 2.89 1.401s.48.218.583.619c.073.282-.019.534-.069.657-.24.587-2.1 4.317-2.1 4.317s-.232.554-.748.588a1.065 1.065 0 0 1-.393-.045l-.202-.08-4.31-2.1s-.417-.218-.49-.596c-.083-.31.104-.691.104-.691l2.073-4.272s.183-.37.466-.497a.855.855 0 0 1 .35-.077z"/></symbol>
         </defs>
 
-        <!-- Actor boxes — 9 columns -->
-        <!-- col 1: OpenCode x=62 -->
-        <rect class="seq-actor-box" x="10"  y="10" width="104" height="36" rx="5"/>
-        <text class="seq-actor"     x="62"  y="28">OpenCode</text>
-        <text class="seq-actor-sub" x="62"  y="41">Org A agent</text>
-        <!-- col 2: KC-A x=180 -->
-        <rect class="seq-actor-box" x="128" y="10" width="104" height="36" rx="5"/>
-        <text class="seq-actor"     x="180" y="28">Keycloak A</text>
-        <text class="seq-actor-sub" x="180" y="41">org-a realm</text>
-        <!-- col 3: Directory x=300 -->
-        <rect class="seq-actor-box" x="248" y="10" width="104" height="36" rx="5"/>
-        <text class="seq-actor"     x="300" y="28">AGNTCY Dir</text>
-        <text class="seq-actor-sub" x="300" y="41">dir-apiserver</text>
-        <!-- col 4: Identity Node x=420 -->
-        <rect class="seq-actor-box" x="368" y="10" width="104" height="36" rx="5"/>
-        <text class="seq-actor"     x="420" y="28">Identity Node</text>
-        <text class="seq-actor-sub" x="420" y="41">badge / VC</text>
-        <!-- col 5: Vault x=540 -->
-        <rect class="seq-actor-box" x="488" y="10" width="104" height="36" rx="5"/>
-        <text class="seq-actor"     x="540" y="28">Vault</text>
-        <text class="seq-actor-sub" x="540" y="41">transit engine</text>
-        <!-- col 6: ID-JAG x=660 -->
-        <rect class="seq-actor-box" x="608" y="10" width="104" height="36" rx="5"/>
-        <text class="seq-actor"     x="660" y="28">ID-JAG Issuer</text>
-        <text class="seq-actor-sub" x="660" y="41">idjag-issuer</text>
-        <!-- col 7: KC-B x=780 -->
-        <rect class="seq-actor-box" x="728" y="10" width="104" height="36" rx="5"/>
-        <text class="seq-actor"     x="780" y="28">Keycloak B</text>
-        <text class="seq-actor-sub" x="780" y="41">org-b realm</text>
-        <!-- col 8: Triage x=922 -->
-        <rect class="seq-actor-box" x="864" y="10" width="116" height="36" rx="5"/>
-        <text class="seq-actor"     x="922" y="28">Triage + Sub</text>
-        <text class="seq-actor-sub" x="922" y="41">Org B agents</text>
-        <!-- col 9: Gitea x=1062 -->
-        <rect class="seq-actor-box" x="1010" y="10" width="104" height="36" rx="5"/>
-        <text class="seq-actor"     x="1062" y="28">Gitea</text>
-        <text class="seq-actor-sub" x="1062" y="41">via gateway</text>
+        <!-- Actor boxes — 11 columns. Icon sits inline to the left of the
+             title (not stacked above it), with the icon+title group
+             horizontally centered — text_x/icon_x below were computed from
+             each label's actual rendered width (getComputedTextLength), not
+             estimated, since several boxes are only a few px wider than
+             their label alone. -->
+        <rect class="seq-actor-box" x="10" y="10" width="104" height="36" rx="5"/>
+        <use href="#ico-agent" class="actor-icon" x="23.25" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="42.25" y="28" style="text-anchor:start">OpenCode</text>
+        <text class="seq-actor-sub" x="62" y="41">Org A agent</text>
+        <rect class="seq-actor-box" x="132" y="10" width="104" height="36" rx="5"/>
+        <use href="#ico-keycloak" class="actor-icon" x="143.85" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="162.85" y="28" style="text-anchor:start">Keycloak A</text>
+        <text class="seq-actor-sub" x="184" y="41">org-a realm</text>
+        <rect class="seq-actor-box" x="254" y="10" width="104" height="36" rx="5"/>
+        <use href="#ico-folder" class="actor-icon" x="263.05" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="282.05" y="28" style="text-anchor:start">AGNTCY Dir</text>
+        <text class="seq-actor-sub" x="306" y="41">dir-apiserver</text>
+        <rect class="seq-actor-box" x="370" y="10" width="116" height="36" rx="5"/>
+        <use href="#ico-person" class="actor-icon" x="380.65" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="399.65" y="28" style="text-anchor:start">Identity Node</text>
+        <text class="seq-actor-sub" x="428" y="41">CIMD id gen/resolve</text>
+        <rect class="seq-actor-box" x="498" y="10" width="104" height="36" rx="5"/>
+        <use href="#ico-vault" class="actor-icon" x="526.10" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="545.10" y="28" style="text-anchor:start">Vault</text>
+        <text class="seq-actor-sub" x="550" y="41">transit engine</text>
+        <rect class="seq-actor-box" x="612" y="10" width="120" height="36" rx="5"/>
+        <use href="#ico-badge" class="actor-icon" x="616.70" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="635.70" y="28" style="text-anchor:start">VC Badge Issuer</text>
+        <text class="seq-actor-sub" x="672" y="41">vc-issuer</text>
+        <rect class="seq-actor-box" x="742" y="10" width="104" height="36" rx="5"/>
+        <use href="#ico-doc" class="actor-icon" x="745.85" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="764.85" y="28" style="text-anchor:start">ID-JAG Issuer</text>
+        <text class="seq-actor-sub" x="794" y="41">sub-badge only</text>
+        <rect class="seq-actor-box" x="864" y="10" width="104" height="36" rx="5"/>
+        <use href="#ico-envoy" class="actor-icon" x="884.40" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="903.40" y="28" style="text-anchor:start">Envoy A</text>
+        <text class="seq-actor-sub" x="916" y="41">egress OPA</text>
+        <rect class="seq-actor-box" x="986" y="10" width="104" height="36" rx="5"/>
+        <use href="#ico-keycloak" class="actor-icon" x="998.10" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="1017.10" y="28" style="text-anchor:start">Keycloak B</text>
+        <text class="seq-actor-sub" x="1038" y="41">org-b realm</text>
+        <rect class="seq-actor-box" x="1102" y="10" width="116" height="36" rx="5"/>
+        <use href="#ico-agent" class="actor-icon" x="1115.45" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="1134.45" y="28" style="text-anchor:start">Triage + Sub</text>
+        <text class="seq-actor-sub" x="1160" y="41">Org B agents</text>
+        <rect class="seq-actor-box" x="1230" y="10" width="104" height="36" rx="5"/>
+        <use href="#ico-gitea" class="actor-icon" x="1257.80" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="1276.80" y="28" style="text-anchor:start">Gitea</text>
+        <text class="seq-actor-sub" x="1282" y="41">via gateway</text>
+        </svg>
+      </div><!-- /diagram-header-sticky -->
 
+      <svg id="seqSvg" viewBox="0 46 1432 994" role="img" aria-label="Cross-domain remediation sequence diagram">
         <!-- Lifelines -->
-        <line class="seq-life" x1="62"  y1="46" x2="62"  y2="790"/>
-        <line class="seq-life" x1="180" y1="46" x2="180" y2="790"/>
-        <line class="seq-life" x1="300" y1="46" x2="300" y2="790"/>
-        <line class="seq-life" x1="420" y1="46" x2="420" y2="790"/>
-        <line class="seq-life" x1="540" y1="46" x2="540" y2="790"/>
-        <line class="seq-life" x1="660" y1="46" x2="660" y2="790"/>
-        <line class="seq-life" x1="780" y1="46" x2="780" y2="790"/>
-        <line class="seq-life" x1="922" y1="46" x2="922" y2="790"/>
-        <line class="seq-life" x1="1062" y1="46" x2="1062" y2="790"/>
+        <line class="seq-life" x1="62" y1="46" x2="62" y2="1010"/>
+        <line class="seq-life" x1="184" y1="46" x2="184" y2="1010"/>
+        <line class="seq-life" x1="306" y1="46" x2="306" y2="1010"/>
+        <line class="seq-life" x1="428" y1="46" x2="428" y2="1010"/>
+        <line class="seq-life" x1="550" y1="46" x2="550" y2="1010"/>
+        <line class="seq-life" x1="672" y1="46" x2="672" y2="1010"/>
+        <line class="seq-life" x1="794" y1="46" x2="794" y2="1010"/>
+        <line class="seq-life" x1="916" y1="46" x2="916" y2="1010"/>
+        <line class="seq-life" x1="1038" y1="46" x2="1038" y2="1010"/>
+        <line class="seq-life" x1="1160" y1="46" x2="1160" y2="1010"/>
+        <line class="seq-life" x1="1282" y1="46" x2="1282" y2="1010"/>
 
-        <!-- ── Step 1: sarah-login ── -->
         <g data-step="sarah-login" class="g">
-          <text class="seq-num"   x="72"  y="64">1</text>
-          <text class="seq-label" x="90"  y="64">OIDC password grant (Sarah)</text>
-          <line class="seq-msg"      x1="62" y1="70" x2="174" y2="70" marker-end="url(#arr)"/>
-          <text class="seq-label" x="172" y="90" text-anchor="end">access token (opencode-agent client)</text>
-          <line class="seq-msg ret"  x1="174" y1="96" x2="68"  y2="96" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="64">1</text>
+          <text class="seq-label" x="90" y="64">OIDC password grant (Sarah)</text>
+          <line class="seq-msg" x1="62" y1="70" x2="184" y2="70" marker-end="url(#arr)"/>
+          <text class="seq-label" x="182" y="90" text-anchor="end">access token</text>
+          <line class="seq-msg ret" x1="184" y1="96" x2="66" y2="96" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 2: scan ── -->
         <g data-step="scan" class="g">
-          <text class="seq-num"   x="72"  y="116">2</text>
-          <text class="seq-label" x="90"  y="116">scan repo → CVE found (HIGH) → decide cross-domain remediation</text>
+          <text class="seq-num" x="72" y="116">2</text>
+          <text class="seq-label" x="90" y="116">scan repo &#8594; CVE found (HIGH) &#8594; decide cross-domain remediation</text>
           <path class="seq-msg" d="M62,122 Q46,128 46,134 Q46,140 62,140" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 3: dir-push ── -->
         <g data-step="dir-push" class="g">
-          <text class="seq-num"   x="72"  y="158">3</text>
-          <text class="seq-label" x="90"  y="158">push turn record (OASF, schema_version=1.1.0)</text>
-          <line class="seq-msg"      x1="62" y1="164" x2="294" y2="164" marker-end="url(#arr)"/>
-          <text class="seq-label" x="292" y="182" text-anchor="end">CID (content-addressed)</text>
-          <line class="seq-msg ret"  x1="294" y1="188" x2="68"  y2="188" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="158">3</text>
+          <text class="seq-label" x="90" y="158">push turn record (OASF, schema_version=1.1.0)</text>
+          <line class="seq-msg" x1="62" y1="164" x2="306" y2="164" marker-end="url(#arr)"/>
+          <text class="seq-label" x="304" y="182" text-anchor="end">CID (content-addressed)</text>
+          <line class="seq-msg ret" x1="306" y1="188" x2="66" y2="188" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 4: dir-search ── -->
         <g data-step="dir-search" class="g">
-          <text class="seq-num"   x="72"  y="206">4</text>
-          <text class="seq-label" x="90"  y="206">search: name=triage-agent</text>
-          <line class="seq-msg"      x1="62" y1="212" x2="294" y2="212" marker-end="url(#arr)"/>
-          <text class="seq-label" x="292" y="230" text-anchor="end">agent record + CID</text>
-          <line class="seq-msg ret"  x1="294" y1="236" x2="68"  y2="236" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="210">4</text>
+          <text class="seq-label" x="90" y="210">search: name=triage-agent</text>
+          <line class="seq-msg" x1="62" y1="216" x2="306" y2="216" marker-end="url(#arr)"/>
+          <text class="seq-label" x="304" y="234" text-anchor="end">agent record + CID</text>
+          <line class="seq-msg ret" x1="306" y1="240" x2="66" y2="240" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 5: cimd-generate-id (real: Vault-signed proof JWT) ── -->
         <g data-step="cimd-generate-id" class="g">
-          <text class="seq-num"   x="72"  y="254">5</text>
-          <text class="seq-label" x="90"  y="254">generate id for triage-agent (Vault-signed proof, org-a authority)</text>
-          <text class="seq-label" x="90"  y="272">sign self-issued proof JWT (iss=agntcy:org-a) via Vault transit/sign</text>
-          <line class="seq-msg"      x1="62" y1="278" x2="540" y2="278" marker-end="url(#arr)"/>
-          <text class="seq-label" x="538" y="296" text-anchor="end">RS256 signature (private key stays in Vault)</text>
-          <line class="seq-msg ret"  x1="540" y1="302" x2="68"  y2="302" marker-end="url(#arr)"/>
-          <line class="seq-msg"      x1="62" y1="316" x2="414" y2="316" marker-end="url(#arr)"/>
-          <text class="seq-label" x="412" y="334" text-anchor="end">id = AGNTCY-triage-agent</text>
-          <line class="seq-msg ret"  x1="414" y1="340" x2="68"  y2="340" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="262">5</text>
+          <text class="seq-label" x="90" y="262">generate id for triage-agent (Vault-signed proof, org-a authority)</text>
+          <text class="seq-label" x="90" y="280">sign self-issued proof JWT (iss=agntcy:org-a) via Vault transit/sign</text>
+          <line class="seq-msg" x1="62" y1="286" x2="550" y2="286" marker-end="url(#arr)"/>
+          <text class="seq-label" x="548" y="304" text-anchor="end">RS256 signature (private key stays in Vault)</text>
+          <line class="seq-msg ret" x1="550" y1="310" x2="66" y2="310" marker-end="url(#arr)"/>
+          <line class="seq-msg" x1="62" y1="324" x2="428" y2="324" marker-end="url(#arr)"/>
+          <text class="seq-label" x="426" y="342" text-anchor="end">id = AGNTCY-triage-agent</text>
+          <line class="seq-msg ret" x1="428" y1="348" x2="66" y2="348" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 6: cimd-resolve-id ── -->
         <g data-step="cimd-resolve-id" class="g">
-          <text class="seq-num"   x="72"  y="384">6</text>
-          <text class="seq-label" x="90"  y="384">resolve id → ResolverMetadata (verification method + public key)</text>
-          <line class="seq-msg"      x1="62" y1="390" x2="414" y2="390" marker-end="url(#arr)"/>
-          <text class="seq-label" x="412" y="408" text-anchor="end">ResolverMetadata + JWK</text>
-          <line class="seq-msg ret"  x1="414" y1="414" x2="68"  y2="414" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="392">6</text>
+          <text class="seq-label" x="90" y="392">resolve id &#8594; ResolverMetadata (verification method + public key)</text>
+          <line class="seq-msg" x1="62" y1="398" x2="428" y2="398" marker-end="url(#arr)"/>
+          <text class="seq-label" x="426" y="416" text-anchor="end">ResolverMetadata + JWK</text>
+          <line class="seq-msg ret" x1="428" y1="422" x2="66" y2="422" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 7: kc-a-exchange (mocked) ── -->
+        <g data-step="resolve-badge" class="g">
+          <text class="seq-num" x="72" y="444">6b</text>
+          <text class="seq-label" x="90" y="444">issue + verify OpenCode's VC delegation badge (real signed vc+jwt)</text>
+          <line class="seq-msg" x1="62" y1="450" x2="672" y2="450" marker-end="url(#arr)"/>
+          <text class="seq-label" x="670" y="468" text-anchor="end">signed badge (vc+jwt)</text>
+          <line class="seq-msg ret" x1="672" y1="474" x2="66" y2="474" marker-end="url(#arr)"/>
+          <line class="seq-msg" x1="62" y1="488" x2="672" y2="488" marker-end="url(#arr)"/>
+          <text class="seq-label" x="670" y="506" text-anchor="end">valid=true + claims</text>
+          <line class="seq-msg ret" x1="672" y1="512" x2="66" y2="512" marker-end="url(#arr)"/>
+        </g>
+
         <g data-step="kc-a-exchange" class="g">
-          <text class="seq-num"   x="72"  y="434">7</text>
-          <text class="seq-label" x="90"  y="434">RFC 8693 token exchange — subject=Sarah, actor=opencode (mocked)</text>
-          <line class="seq-msg"      x1="62" y1="440" x2="174" y2="440" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="534">7</text>
+          <text class="seq-label" x="90" y="534">RFC 8693 token exchange &#8212; subject=Sarah, actor_token=verified badge</text>
+          <line class="seq-msg" x1="62" y1="540" x2="184" y2="540" marker-end="url(#arr)"/>
+          <text class="seq-label" x="182" y="558" text-anchor="end">exchanged access token</text>
+          <line class="seq-msg ret" x1="184" y1="564" x2="66" y2="564" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 8: mint-idjag ── -->
         <g data-step="mint-idjag" class="g">
-          <text class="seq-num"   x="72"  y="460">8</text>
-          <text class="seq-label" x="92"  y="460">mint ID-JAG  sub=sarah  act_chain=[opencode]  aud=KC-B  scope=triage:create</text>
-          <line class="seq-msg"      x1="62" y1="466" x2="654" y2="466" marker-end="url(#arr)"/>
-          <text class="seq-label" x="652" y="484" text-anchor="end">signed assertion (RS256)</text>
-          <line class="seq-msg ret"  x1="654" y1="490" x2="68"  y2="490" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="586">8</text>
+          <text class="seq-label" x="90" y="586">mint ID-JAG (Keycloak A, native — SPI)  sub=sarah  aud=KC-B  scope=triage:create</text>
+          <line class="seq-msg" x1="62" y1="592" x2="184" y2="592" marker-end="url(#arr)"/>
+          <text class="seq-label" x="182" y="610" text-anchor="end">signed assertion (RS256)</text>
+          <line class="seq-msg ret" x1="184" y1="616" x2="66" y2="616" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 9: kc-b-exchange ── -->
+        <g data-step="egress-check" class="g">
+          <text class="seq-num" x="72" y="638">8b</text>
+          <text class="seq-label" x="90" y="638">Org A egress PDP &#8212; may Sarah delegate this scope to Org B?</text>
+          <line class="seq-msg" x1="62" y1="644" x2="916" y2="644" marker-end="url(#arr)"/>
+          <text class="seq-label" x="914" y="662" text-anchor="end">ALLOW + policy decision headers</text>
+          <line class="seq-msg ret" x1="916" y1="668" x2="66" y2="668" marker-end="url(#arr)"/>
+        </g>
+
         <g data-step="kc-b-exchange" class="g">
-          <text class="seq-num"   x="72"  y="510">9</text>
-          <text class="seq-label" x="92"  y="510">jwt-bearer grant  assertion=…  scope=triage:create</text>
-          <line class="seq-msg"      x1="62" y1="516" x2="774" y2="516" marker-end="url(#arr)"/>
-          <text class="seq-label" x="772" y="534" text-anchor="end">access token (triage:create, act=opencode)</text>
-          <line class="seq-msg ret"  x1="774" y1="540" x2="68"  y2="540" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="690">9</text>
+          <text class="seq-label" x="90" y="690">jwt-bearer grant  assertion=&#8230;  scope=triage:create</text>
+          <line class="seq-msg" x1="62" y1="696" x2="1038" y2="696" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1036" y="714" text-anchor="end">access token (triage:create, act=opencode)</text>
+          <line class="seq-msg ret" x1="1038" y1="720" x2="66" y2="720" marker-end="url(#arr)"/>
         </g>
 
-        <!-- ── Step 10: create-ticket (cascade) ── -->
         <g data-step="create-ticket" class="g">
-          <text class="seq-num"   x="72"  y="560">10</text>
-          <text class="seq-label" x="92"  y="560">POST /api/ticket  access + actor tokens  cve=…  intent=create-pr-fix</text>
-          <line class="seq-msg"      x1="62" y1="566" x2="916" y2="566" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="742">10</text>
+          <text class="seq-label" x="90" y="742">POST /api/ticket  access + actor tokens  cve=&#8230;  intent=create-pr-fix</text>
+          <line class="seq-msg" x1="62" y1="748" x2="1160" y2="748" marker-end="url(#arr)"/>
         </g>
 
-        <!-- Triage: OPA + plan + mint sub-badge — lights up once mint-sub-badge (step 13) is revealed -->
         <g data-step="mint-sub-badge" class="g">
-          <text class="seq-label" x="924" y="586">OPA ingress ✓  mint repo-bound sub-badge (gitea:write gitea:pr)</text>
-          <line class="seq-msg"      x1="922" y1="592" x2="654" y2="592" marker-end="url(#arr)"/>
-          <text class="seq-label" x="652" y="610" text-anchor="end">sub-badge (act_chain: sarah→opencode→triage→sub)</text>
-          <line class="seq-msg ret"  x1="654" y1="616" x2="928" y2="616" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1168" y="796">OPA ingress &#10003;  mint narrowed sub-badge</text>
+          <line class="seq-msg" x1="1160" y1="802" x2="794" y2="802" marker-end="url(#arr)"/>
+          <text class="seq-label" x="796" y="820">sub-badge (act_chain: sarah&#8594;opencode&#8594;triage&#8594;sub)</text>
+          <line class="seq-msg ret" x1="794" y1="826" x2="1156" y2="826" marker-end="url(#arr)"/>
         </g>
 
-        <!-- Sub-agent: KC-B exchange — lights up once idjag-gitea (step 16) is revealed -->
         <g data-step="idjag-gitea" class="g">
-          <text class="seq-label" x="924" y="636">Sub-Agent: jwt-bearer (sub-badge) → KC-B → gitea:write gitea:pr token</text>
-          <line class="seq-msg"      x1="922" y1="642" x2="774" y2="642" marker-end="url(#arr)"/>
-          <line class="seq-msg ret"  x1="774" y1="652" x2="928" y2="652" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1168" y="848">Sub-Agent: jwt-bearer &#8594; gitea:write/pr token</text>
+          <line class="seq-msg" x1="1160" y1="854" x2="1038" y2="854" marker-end="url(#arr)"/>
+          <line class="seq-msg ret" x1="1038" y1="864" x2="1156" y2="864" marker-end="url(#arr)"/>
         </g>
 
-        <!-- resource Envoy + push + PR — lights up once open-pr is revealed -->
         <g data-step="open-pr" class="g">
-          <text class="seq-label" x="924" y="672">Envoy resource OPA ✓  push fix file + open PR</text>
-          <line class="seq-msg"      x1="922" y1="678" x2="1056" y2="678" marker-end="url(#arr)"/>
-          <text class="seq-label" x="1054" y="696" text-anchor="end">PR created ✓</text>
-          <line class="seq-msg ret"  x1="1056" y1="702" x2="928" y2="702" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1168" y="888">Envoy OPA &#10003;  push fix + open PR</text>
+          <line class="seq-msg" x1="1160" y1="894" x2="1282" y2="894" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1280" y="912" text-anchor="end">PR created &#10003;</text>
+          <line class="seq-msg ret" x1="1282" y1="918" x2="1156" y2="918" marker-end="url(#arr)"/>
         </g>
 
-        <!-- resource decision + final return — lights up once pr-created is revealed -->
         <g data-step="pr-created" class="g">
-          <text class="seq-label" x="924" y="722">OPA egress: delegation depth ✓ sub-scope ⊆ parent ✓ → ALLOW</text>
-          <path class="seq-msg" d="M922,728 L950,728 L950,738 L924,738" marker-end="url(#arr)"/>
-          <text class="seq-label" x="918" y="764" text-anchor="end">PR created ✓ — Sarah → OpenCode → Triage → Sub-Agent</text>
-          <line class="seq-msg ret"  x1="916" y1="770" x2="68"  y2="770" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1168" y="940">OPA egress: depth &#10003; scope &#8838; parent &#10003; &#8594; ALLOW</text>
+          <path class="seq-msg" d="M1160,946 L1188,946 L1188,956 L1162,956" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1154" y="984" text-anchor="end">PR created &#10003; &#8212; Sarah &#8594; OpenCode &#8594; Triage &#8594; Sub-Agent</text>
+          <line class="seq-msg ret" x1="1152" y1="990" x2="66" y2="990" marker-end="url(#arr)"/>
         </g>
+
+        <circle id="travelDot" r="5"/>
 
       </svg>
     </div><!-- /diagram -->
@@ -429,22 +554,32 @@ POST /v1alpha1/id/resolve
 → {"resolverMetadata": {...}}   # same ResolverMetadata, read back</code></pre>
 
     <h3>Cross-domain token exchange (steps 7–10)</h3>
-    <p>OpenCode mints an ID-JAG assertion at <code>idjag-issuer</code>:
-    a short-lived RS256 JWT with <code>sub=sarah@org-a.example</code>, <code>act_chain=[opencode-agent]</code>,
-    <code>aud=KC-B org-b realm</code>, <code>scope=triage:create</code>, and
-    <code>intent=[create-pr-fix]</code>.
-    Org B's Keycloak validates the assertion against the issuer's JWKS, maps Sarah's identity,
-    and issues a scoped access token.</p>
-    <pre><code>POST /mint   # idjag-issuer
-{
-  "sub": "sarah@org-a.example",
-  "aud": "http://keycloak-b:8080/realms/org-b",
-  "client_id": "triage-agent",
-  "act_chain": ["opencode-agent"],
-  "scope": "openid triage:create",
-  "intent": ["create-pr-fix"]
-}
-→ {"assertion": "eyJ…"}
+    <p>OpenCode mints an ID-JAG assertion at <b>Keycloak A itself</b> — a real
+    <code>grant_type=token-exchange</code> call handled by a custom SPI
+    extension (<code>keycloak-idjag-spi</code>), following
+    <code>draft-ietf-oauth-identity-assertion-authz-grant</code>'s
+    <code>requested_token_type=urn:ietf:params:oauth:token-type:id-jag</code>.
+    The result is a short-lived RS256 JWT with <code>sub=sarah@org-a.example</code>,
+    <code>act_chain=[opencode-agent]</code>, <code>aud=KC-B org-b realm</code>,
+    <code>scope=triage:create</code>, and <code>intent=[create-pr-fix]</code> —
+    signed with Keycloak's own realm key, not a separate mock issuer's
+    throwaway keypair. Org B's Keycloak validates the assertion against
+    that same JWKS, maps Sarah's identity, and issues a scoped access
+    token. (Triage's later narrowed sub-badge for Sub-Agent still comes
+    from a separate <code>idjag-issuer</code> mock service — see
+    <a href="https://github.com/agntcy/agent-identity-demos/discussions/18" target="_blank" rel="noopener">Discussion #18</a>
+    for why that path wasn't migrated too.)</p>
+    <pre><code>POST /realms/org-a/protocol/openid-connect/token   # Keycloak A
+  grant_type          = urn:ietf:params:oauth:grant-type:token-exchange
+  subject_token       = &lt;Sarah's exchanged KC-A access token&gt;
+  subject_token_type  = urn:ietf:params:oauth:token-type:access_token
+  requested_token_type = urn:ietf:params:oauth:token-type:id-jag
+  audience            = http://keycloak-b:8080/realms/org-b
+  scope               = openid triage:create
+  target_client_id    = triage-agent
+  act_chain           = opencode-agent
+  intent              = create-pr-fix
+→ {"access_token": "eyJ…", "issued_token_type": "urn:ietf:params:oauth:token-type:id-jag"}
 
 POST /realms/org-b/protocol/openid-connect/token
   grant_type = urn:ietf:params:oauth:grant-type:jwt-bearer
@@ -468,7 +603,7 @@ POST /realms/org-b/protocol/openid-connect/token
 
     <h2>Architecture</h2>
     <div class="diagram doc">
-      <svg viewBox="0 0 900 220" role="img" aria-label="Architecture overview">
+      <svg viewBox="0 0 700 220" role="img" aria-label="Architecture overview">
         <g>
           <rect class="seq-actor-box" x="10"  y="10" width="120" height="30" rx="4"/>
           <text class="seq-actor" x="70" y="30">KC-A (Org A)</text>
@@ -477,15 +612,12 @@ POST /realms/org-b/protocol/openid-connect/token
           <rect class="seq-actor-box" x="350" y="10" width="120" height="30" rx="4"/>
           <text class="seq-actor" x="410" y="30">Identity Node</text>
           <rect class="seq-actor-box" x="520" y="10" width="120" height="30" rx="4"/>
-          <text class="seq-actor" x="580" y="30">ID-JAG Issuer</text>
-          <rect class="seq-actor-box" x="690" y="10" width="120" height="30" rx="4"/>
-          <text class="seq-actor" x="750" y="30">KC-B (Org B)</text>
+          <text class="seq-actor" x="580" y="30">KC-B (Org B)</text>
 
           <line class="seq-life" x1="70"  y1="40" x2="70"  y2="210"/>
           <line class="seq-life" x1="240" y1="40" x2="240" y2="210"/>
           <line class="seq-life" x1="410" y1="40" x2="410" y2="210"/>
           <line class="seq-life" x1="580" y1="40" x2="580" y2="210"/>
-          <line class="seq-life" x1="750" y1="40" x2="750" y2="210"/>
         </g>
         <g>
           <text class="seq-num" x="80" y="70">1</text>
@@ -507,10 +639,9 @@ POST /realms/org-b/protocol/openid-connect/token
         </g>
         <g>
           <text class="seq-num" x="80" y="190">4</text>
-          <text class="seq-label" x="96" y="190">mint ID-JAG → KC-B exchange → triage token</text>
+          <text class="seq-label" x="96" y="190">mint ID-JAG (native, SPI) → KC-B exchange → triage token</text>
           <line class="seq-msg" x1="70" y1="196" x2="574" y2="196" marker-end="url(#arr)"/>
-          <line class="seq-msg" x1="580" y1="196" x2="744" y2="196" marker-end="url(#arr)"/>
-          <line class="seq-msg ret" x1="744" y1="206" x2="76" y2="206" marker-end="url(#arr)"/>
+          <line class="seq-msg ret" x1="574" y1="206" x2="76" y2="206" marker-end="url(#arr)"/>
         </g>
       </svg>
     </div>
@@ -545,9 +676,12 @@ POST /realms/org-b/protocol/openid-connect/token
   }));
 
   // ── Config ─────────────────────────────────────────────────────────────────
+  let CONFIG = {};
+
   async function loadConfig() {
     try {
       const c = await (await fetch('/api/config')).json();
+      CONFIG = c;
       document.getElementById('config').innerHTML =
         `<div><b>KC-A:</b> ${esc(c.kc_a_url)} / ${esc(c.kc_a_realm)}</div>
          <div><b>KC-B:</b> ${esc(c.kc_b_url)} / ${esc(c.kc_b_realm)}</div>
@@ -556,12 +690,33 @@ POST /realms/org-b/protocol/openid-connect/token
          <div><b>User:</b> ${esc(c.sarah_user)} (${esc(c.sarah_email)})</div>
          <div><b>ID-JAG issuer:</b> ${esc(c.idjag_issuer_url)}</div>
          <div><b>Identity node:</b> ${esc(c.identity_node_url)}</div>
+         <div><b>VC badge issuer:</b> ${esc(c.vc_issuer_url)}</div>
+         <div><b>Egress PDP:</b> ${esc(c.egress_pdp_url)}</div>
          <div><b>Directory:</b> ${esc(c.dir_apiserver_url)}</div>
          <div><b>Trust authority:</b> ${esc(c.org_a_common_name)} (Vault key: ${esc(c.vault_key_name)})</div>
          <div><b>Scan repo:</b> ${esc(c.scan_repo)}</div>`;
+      renderLegend(c);
     } catch(e) {
       document.getElementById('config').innerHTML = '<div style="color:var(--err)">Could not reach /api/config — is the webapp running?</div>';
     }
+  }
+
+  // "Access these services" legend — direct links to the real services
+  // behind this demo, for anyone who wants to click around themselves
+  // instead of just watching the animated run. Each entry only appears if
+  // its *_UI_URL env var is set (blank hides it, e.g. when a UI's port
+  // isn't publicly reachable in a given deployment).
+  function renderLegend(c) {
+    const entries = [
+      { label: 'Gitea', url: c.gitea_ui_url, note: `admin: ${c.gitea_admin_user || 'demo-admin'}` },
+      { label: 'Keycloak A (org-a)', url: c.kc_a_ui_url, note: `users: ${esc(c.sarah_user)}, admin` },
+      { label: 'Keycloak B (org-b)', url: c.kc_b_ui_url, note: 'user: admin' },
+    ].filter(e => e.url);
+    const el = document.getElementById('legend');
+    if (!entries.length) { el.innerHTML = ''; return; }
+    el.innerHTML = 'Access these services directly: ' + entries.map(e =>
+      `<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.label)}</a> <span style="color:var(--muted)">(${esc(e.note)})</span>`
+    ).join('&nbsp;&nbsp;|&nbsp;&nbsp;');
   }
 
   // ── Story overview (shown once, before the animated run starts) ───────────
@@ -580,8 +735,10 @@ POST /realms/org-b/protocol/openid-connect/token
     'dir-search': "OpenCode looks up triage-agent in the Directory by name, discovering it before delegating any authority.",
     'cimd-generate-id': "OpenCode asks identity-node to mint a cryptographic id for triage-agent. The request is proven with a JWT self-signed by a key held in Vault — the private key never leaves Vault.",
     'cimd-resolve-id': "OpenCode resolves the id back to its ResolverMetadata, confirming the identity and public key are correctly registered before trusting triage-agent.",
-    'kc-a-exchange': "(Mocked) OpenCode would exchange Sarah's token for its own actor token via RFC 8693, formally recording 'OpenCode acting on Sarah's behalf' in the token.",
-    'mint-idjag': "OpenCode mints a signed ID-JAG assertion — a portable, cryptographically-signed statement that Sarah authorizes OpenCode to act as triage-agent in Org B, scoped to only triage:create.",
+    'resolve-badge': "OpenCode issues and verifies its own VC delegation badge at vc-issuer — a real signed vc+jwt (caps, delegating_user, intent, act_chain), not a hardcoded mock. This badge becomes the actor_token in the next step.",
+    'kc-a-exchange': "OpenCode exchanges Sarah's token for its own via RFC 8693 at Keycloak A — a real network call. Keycloak validates subject_token for real; it doesn't itself verify actor_token into an act claim (a real Keycloak platform behavior, documented in the README) — delegation semantics are carried forward via the ID-JAG's act_chain instead.",
+    'egress-check': "Before the ID-JAG ever leaves Org A, Envoy A + inline OPA ask: may Sarah actually delegate this scope to Org B? The assertion is verified against Keycloak A's own JWKS and checked for scope, intent, and delegation depth — a policy violation is denied right here.",
+    'mint-idjag': "Keycloak A itself mints this ID-JAG — a real grant_type=token-exchange call handled by a custom SPI extension (keycloak-idjag-spi), not a separate mock issuer service. Signed with Keycloak's own realm key, so Envoy and Keycloak B trust the same JWKS Keycloak already publishes. It's a portable, cryptographically-signed statement that Sarah authorizes OpenCode to act as triage-agent in Org B, scoped to only triage:create.",
     'kc-b-exchange': "Org B's Keycloak verifies the assertion's signature and issues a scoped local access token. This is where the cross-domain trust boundary is actually crossed.",
     'create-ticket': "OpenCode sends both the Org B access token and original actor token through Envoy. Both signatures must verify before the inline OPA policy checks their subject, scope, chain, signed intent, and target repo.",
     'opa-ingress': "Org B's Envoy gateway validates the access token and signed actor token, then inline OPA checks the delegation chain, scope, intent, method, path, and repository before Triage receives the ticket.",
@@ -734,8 +891,8 @@ POST /realms/org-b/protocol/openid-connect/token
   // real Vault-backed identity-node calls, not mocks).
   const SVG_STEPS = [
     'sarah-login', 'scan', 'dir-push', 'dir-search',
-    'cimd-generate-id', 'cimd-resolve-id',
-    'kc-a-exchange', 'mint-idjag', 'kc-b-exchange', 'create-ticket',
+    'cimd-generate-id', 'cimd-resolve-id', 'resolve-badge',
+    'kc-a-exchange', 'mint-idjag', 'egress-check', 'kc-b-exchange', 'create-ticket',
     // The create-ticket cascade is split into sub-groups so the diagram lights
     // up at the same pace as the nested step cards reveal, instead of jumping
     // to fully-green the instant step 10 (the outer POST) completes.
@@ -745,6 +902,8 @@ POST /realms/org-b/protocol/openid-connect/token
   let allSteps  = [];   // full list from /api/run
   let cursor    = 0;    // how many steps have been revealed
   let busy      = false;
+  let activeStepId = null;  // the step currently being explained (pulsing highlight)
+  let lastTraceId  = null;
   const animated = new Set();
 
   const stepsEl  = document.getElementById('steps');
@@ -752,6 +911,8 @@ POST /realms/org-b/protocol/openid-connect/token
   const runBtn   = document.getElementById('run');
   const stepBtn  = document.getElementById('step');
   const resetBtn = document.getElementById('reset');
+  const autoZoomEl = document.getElementById('autoZoom');
+  const progressBarEl = document.getElementById('runProgressBar');
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -770,10 +931,187 @@ POST /realms/org-b/protocol/openid-connect/token
     SVG_STEPS.forEach(id => {
       const g = document.querySelector(`[data-step="${id}"]`);
       if (!g) return;
-      const st = statusMap[id] || 'pending';
-      g.setAttribute('class', 'g ' + st);
+      if (id === activeStepId) {
+        g.setAttribute('class', 'g active');
+      } else {
+        const st = statusMap[id] || 'pending';
+        g.setAttribute('class', 'g ' + st);
+      }
     });
   }
+
+  function updateProgressBar() {
+    const total = allSteps.length || 0;
+    const pct = total ? Math.round((cursor / total) * 100) : 0;
+    progressBarEl.style.width = pct + '%';
+  }
+
+  // Settle an "active" (pulsing) step back to its real ok/error color after a
+  // beat — guarded so a stale timeout from a superseded step can't clobber
+  // whatever became active in the meantime.
+  function scheduleSettle(stepId, ms) {
+    setTimeout(() => {
+      if (activeStepId === stepId) {
+        activeStepId = null;
+        updateDiagram();
+      }
+    }, ms);
+  }
+
+  // ── Zoom-to-active-step ──────────────────────────────────────────────────
+  // Narrows the vertical range to the active step (full width always stays
+  // visible — columns need to stay in view for context) via a small rAF
+  // tween on the SVG's viewBox. Toggle off with the "Auto-zoom" checkbox.
+  const seqSvg = document.getElementById('seqSvg');
+  const FULL_VB = seqSvg.getAttribute('viewBox').split(' ').map(Number);
+  let currentVB = FULL_VB.slice();
+  let vbAnimHandle = null;
+
+  function easeInOutQuad(t) { return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+
+  function animateViewBox(target, duration = 480) {
+    if (vbAnimHandle) cancelAnimationFrame(vbAnimHandle);
+    const start = currentVB.slice();
+    const t0 = performance.now();
+    function tick(now) {
+      const t = Math.min(1, (now - t0) / duration);
+      const eased = easeInOutQuad(t);
+      const vb = start.map((v, i) => v + (target[i] - v) * eased);
+      seqSvg.setAttribute('viewBox', vb.join(' '));
+      if (t < 1) {
+        vbAnimHandle = requestAnimationFrame(tick);
+      } else {
+        currentVB = target.slice();
+        vbAnimHandle = null;
+      }
+    }
+    vbAnimHandle = requestAnimationFrame(tick);
+  }
+
+  function focusOnStep(stepId) {
+    if (!autoZoomEl.checked) return;
+    const g = document.querySelector(`[data-step="${stepId}"]`);
+    if (!g) return;
+    const bbox = g.getBBox();
+    const padY = 70;
+    const minH = 280;
+    // FULL_VB[1] is the body SVG's viewBox minY (46, since the actor-box
+    // header now lives in its own separate SVG) — NOT 0, so clamp against
+    // that instead of a hardcoded 0.
+    const minY = FULL_VB[1];
+    const maxY = FULL_VB[1] + FULL_VB[3];
+    let y0 = Math.max(minY, bbox.y - padY);
+    let y1 = Math.min(maxY, bbox.y + bbox.height + padY);
+    if (y1 - y0 < minH) {
+      const mid = (y0 + y1) / 2;
+      y0 = Math.max(minY, mid - minH / 2);
+      y1 = Math.min(maxY, y0 + minH);
+    }
+    animateViewBox([FULL_VB[0], y0, FULL_VB[2], y1 - y0]);
+  }
+
+  function resetZoom() {
+    animateViewBox(FULL_VB, 500);
+  }
+
+  autoZoomEl.addEventListener('change', () => {
+    if (!autoZoomEl.checked) resetZoom();
+    else if (activeStepId) focusOnStep(activeStepId);
+  });
+
+  // ── Traveling pulse dot ──────────────────────────────────────────────────
+  // A little "packet" that actually flies from source to destination along
+  // the active step's primary message — reinforces which arrow is live right
+  // now, rather than just a color change.
+  const travelDot = document.getElementById('travelDot');
+
+  function animateTravelDot(stepId) {
+    const g = document.querySelector(`[data-step="${stepId}"]`);
+    const line = g && g.querySelector('.seq-msg:not(.ret)');
+    if (!line) { travelDot.setAttribute('opacity', '0'); return; }
+    let x1, y1, x2, y2;
+    if (line.tagName === 'line') {
+      x1 = +line.getAttribute('x1'); y1 = +line.getAttribute('y1');
+      x2 = +line.getAttribute('x2'); y2 = +line.getAttribute('y2');
+    } else {
+      const len = line.getTotalLength();
+      const p0 = line.getPointAtLength(0), p1 = line.getPointAtLength(len);
+      x1 = p0.x; y1 = p0.y; x2 = p1.x; y2 = p1.y;
+    }
+    const duration = 650;
+    const t0 = performance.now();
+    travelDot.setAttribute('opacity', '1');
+    function tick(now) {
+      const t = Math.min(1, (now - t0) / duration);
+      travelDot.setAttribute('cx', x1 + (x2 - x1) * t);
+      travelDot.setAttribute('cy', y1 + (y2 - y1) * t);
+      if (t < 1) requestAnimationFrame(tick);
+      else setTimeout(() => travelDot.setAttribute('opacity', '0'), 200);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  // Bundles everything that should happen the moment a step becomes "live".
+  function activateStep(stepId, settleMs) {
+    activeStepId = stepId;
+    updateDiagram();
+    focusOnStep(stepId);
+    animateTravelDot(stepId);
+    scheduleSettle(stepId, settleMs);
+  }
+
+  // ── Trace link ─────────────────────────────────────────────────────────────
+  function showTraceLink(traceId) {
+    lastTraceId = traceId || null;
+    const el = document.getElementById('traceLink');
+    if (!el) return;
+    if (traceId && CONFIG.jaeger_ui_url) {
+      el.innerHTML = `<a href="${esc(CONFIG.jaeger_ui_url)}/trace/${esc(traceId)}" target="_blank" rel="noopener">View trace in Jaeger &#8594;</a>`;
+    } else {
+      el.innerHTML = '';
+    }
+  }
+
+  // Jaeger's `uiFind` query param highlights/scrolls to spans matching a
+  // search term inside a trace view. Each step is wrapped server-side in a
+  // span named `step:<id>` (see tracing.py `step_span`), so this jumps
+  // straight to that step's span instead of just opening the trace root.
+  function traceUrlForStep(stepId) {
+    if (!lastTraceId || !CONFIG.jaeger_ui_url) return null;
+    const base = `${CONFIG.jaeger_ui_url}/trace/${encodeURIComponent(lastTraceId)}`;
+    return `${base}?uiFind=${encodeURIComponent('step:' + stepId)}`;
+  }
+
+  document.getElementById('seqSvg').addEventListener('click', (e) => {
+    const g = e.target.closest('.g[data-step]');
+    if (!g) return;
+    const url = traceUrlForStep(g.dataset.step);
+    if (!url) {
+      setStatus('Run the demo, then click a step to view its trace in Jaeger.');
+      return;
+    }
+    window.open(url, '_blank', 'noopener');
+  });
+
+  // Each step group only draws thin lines/text with no fill, so by default
+  // only those exact pixels receive clicks. Prepend a transparent full-width
+  // hit-area rect (behind the visible content) so the whole row is clickable,
+  // and add a native tooltip — both done once at load rather than 16x in markup.
+  document.querySelectorAll('#seqSvg .g[data-step]').forEach(g => {
+    const bbox = g.getBBox();
+    const pad = 8;
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', FULL_VB[0] - 4);
+    rect.setAttribute('y', bbox.y - pad);
+    rect.setAttribute('width', FULL_VB[2] + 8);
+    rect.setAttribute('height', bbox.height + pad * 2);
+    rect.setAttribute('fill', 'transparent');
+    g.insertBefore(rect, g.firstChild);
+
+    const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    title.textContent = "Click to view this step's trace in Jaeger";
+    g.appendChild(title);
+  });
 
   // ── Step cards ─────────────────────────────────────────────────────────────
   function render() {
@@ -792,6 +1130,7 @@ POST /realms/org-b/protocol/openid-connect/token
         </div>${detail}${body}</div>`;
     }).join('');
     updateDiagram();
+    updateProgressBar();
   }
 
   function updateButtons() {
@@ -844,15 +1183,22 @@ POST /realms/org-b/protocol/openid-connect/token
 
       const data = await fetchAllSteps();
       allSteps = data.steps || [];
+      lastTraceId = data.trace_id || null;  // set early so steps are clickable mid-run
       for (let i = 0; i < allSteps.length; i++) {
         cursor = i + 1;
         setStatus(`Step ${cursor}/${allSteps.length}: ${allSteps[i].id}`);
         render();
         showToast(allSteps[i], i, allSteps.length, delay);
+        // Pulse+zoom+fly for most of the dwell time, then settle to the real
+        // status color for the last beat before the next step takes over.
+        const settleAt = Math.max(300, delay - 400);
+        activateStep(allSteps[i].id, settleAt);
         if (i < allSteps.length - 1) await sleep(delay);
       }
+      resetZoom();
       const ok = data.ok;
       setStatus(ok ? `✓ All ${allSteps.length} steps complete.` : `⚠ Sequence finished with errors.`);
+      showTraceLink(data.trace_id);
     } catch(e) {
       setStatus(`Error: ${e.message}`);
     }
@@ -869,10 +1215,15 @@ POST /realms/org-b/protocol/openid-connect/token
       try {
         const data = await fetchAllSteps();
         allSteps = data.steps || [];
+        lastTraceId = data.trace_id || null;
         cursor = 1;
         setStatus(`Step 1/${allSteps.length}: ${allSteps[0]?.id || ''}`);
         render();
-        if (allSteps[0]) showToast(allSteps[0], 0, allSteps.length);
+        if (allSteps[0]) {
+          showToast(allSteps[0], 0, allSteps.length);
+          activateStep(allSteps[0].id, 1400);
+        }
+        if (cursor >= allSteps.length) showTraceLink(lastTraceId);
       } catch(e) {
         setStatus(`Error: ${e.message}`);
       }
@@ -884,15 +1235,20 @@ POST /realms/org-b/protocol/openid-connect/token
     setStatus(`Step ${cursor}/${allSteps.length}: ${allSteps[cursor-1]?.id || ''}`);
     render();
     showToast(allSteps[cursor - 1], cursor - 1, allSteps.length);
+    activateStep(allSteps[cursor - 1].id, 1400);
+    if (cursor >= allSteps.length) { resetZoom(); showTraceLink(lastTraceId); }
     updateButtons();
   });
 
   // ── Reset ──────────────────────────────────────────────────────────────────
   function resetState() {
-    allSteps = []; cursor = 0; animated.clear();
+    allSteps = []; cursor = 0; animated.clear(); activeStepId = null;
     stepsEl.innerHTML = '';
     setStatus('');
     hideToast();
+    resetZoom();
+    updateProgressBar();
+    showTraceLink(null);
     SVG_STEPS.forEach(id => {
       const g = document.querySelector(`[data-step="${id}"]`);
       if (g) g.setAttribute('class', 'g');
