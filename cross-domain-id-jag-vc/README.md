@@ -315,10 +315,44 @@ ollama serve                    # or keep the Ollama desktop app running
 Containers reach it via `host.docker.internal:11434`. On Linux, Ollama must
 listen beyond loopback: `OLLAMA_HOST=0.0.0.0 ollama serve`. Tool-calling
 quality improves with a larger context window (Ollama's `num_ctx` ≥ 16k).
-Alternative provider: set `OPENCODE_MODEL=anthropic/claude-sonnet-4-5` and
-`ANTHROPIC_API_KEY` in `.env`. **Without Ollama or a key, every run still
-succeeds** — the `opencode-plan` step reports `status=skipped` and the
-identity chain completes normally.
+**Without any model server, every run still succeeds** — the `opencode-plan`
+step reports `status=skipped` and the identity chain completes normally.
+
+### Using your own model server (on-prem GPUs, vLLM/TGI/SGLang)
+
+Any endpoint that speaks the **OpenAI-compatible `/v1` API** works — point
+the stack at it instead of Ollama:
+
+```bash
+# .env
+LLM_BASE_URL=http://gemma.internal:8000/v1     # your endpoint's /v1 base
+LLM_API_KEY=                                    # optional bearer token
+OPENCODE_MODEL=onprem/gemma-3-27b-it            # <label>/<served model id>
+```
+
+The provider label before the `/` is free-form (it only names the provider
+block in the generated `opencode.json`); the part after it **must match the
+model id your server advertises** — check with:
+
+```bash
+curl -s $LLM_BASE_URL/models | jq -r '.data[].id'
+```
+
+Then `docker compose up -d opencode-server opencode-agent` and confirm:
+
+```bash
+curl -fsS http://localhost:8100/api/config | jq '{opencode_server, llm, opencode_model}'
+```
+
+Expected: `llm.reachable=true` with your `base_url`. The endpoint must be
+reachable **from the Docker host** (VPN or same network); `host.docker.internal`
+is only needed for services on your laptop. Cloud providers remain available
+via their built-in names (`OPENCODE_MODEL=anthropic/claude-sonnet-4-5` plus
+`ANTHROPIC_API_KEY`).
+
+Note: the demo's plan step only needs prose from OpenCode's read-only `plan`
+agent, so it is undemanding. If you later let OpenCode *edit code*, the
+serving stack's function-calling support becomes the limiting factor.
 
 The first build pulls the pinned Envoy base image and Built On Envoy Composer
 artifact. To deliberately refresh those pinned inputs:

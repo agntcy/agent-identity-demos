@@ -73,6 +73,14 @@ OPENCODE_SERVER_URL = os.environ.get("OPENCODE_SERVER_URL", "http://opencode-ser
 OPENCODE_MODEL = os.environ.get("OPENCODE_MODEL", "ollama/qwen2.5-coder:7b")
 OPENCODE_TIMEOUT = float(os.environ.get("OPENCODE_TIMEOUT", "240"))
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://host.docker.internal:11434/v1").rstrip("/")
+# Any OpenAI-compatible model server: local Ollama by default, or an on-prem
+# vLLM/TGI/SGLang deployment (see opencode-server/entrypoint.sh).
+LLM_BASE_URL = (os.environ.get("LLM_BASE_URL") or OLLAMA_BASE_URL).rstrip("/")
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
+BUILTIN_PROVIDERS = {
+    "anthropic", "openai", "azure", "google", "vertex",
+    "bedrock", "openrouter", "groq", "mistral", "deepseek", "xai",
+}
 
 REQUESTED_ACTION = "scan-remediate"
 
@@ -106,6 +114,10 @@ def _model_parts() -> tuple[str, str]:
     return provider, model_id or OPENCODE_MODEL
 
 
+def _llm_headers() -> dict:
+    return {"Authorization": f"Bearer {LLM_API_KEY}"} if LLM_API_KEY else {}
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "agent": "opencode", "realm": KC_A_REALM}
@@ -114,7 +126,7 @@ def health():
 @app.get("/api/config")
 async def config():
     opencode_status: dict = {"reachable": False}
-    ollama_status: dict = {"reachable": False}
+    llm_status: dict = {"reachable": False}
     async with httpx.AsyncClient(timeout=3) as client:
         try:
             r = await client.get(f"{OPENCODE_SERVER_URL}/global/health")
@@ -122,11 +134,18 @@ async def config():
                 opencode_status = {"reachable": True, **r.json()}
         except Exception:  # noqa: BLE001
             pass
-        try:
-            r = await client.get(f"{OLLAMA_BASE_URL}/models")
-            ollama_status = {"reachable": r.status_code == 200}
-        except Exception:  # noqa: BLE001
-            pass
+        provider, _ = _model_parts()
+        if provider in BUILTIN_PROVIDERS:
+            llm_status = {"provider": provider, "type": "built-in cloud provider",
+                          "note": "credentials come from the provider's env var"}
+        else:
+            llm_status = {"provider": provider, "base_url": LLM_BASE_URL,
+                          "authenticated": bool(LLM_API_KEY), "reachable": False}
+            try:
+                r = await client.get(f"{LLM_BASE_URL}/models", headers=_llm_headers())
+                llm_status["reachable"] = r.status_code == 200
+            except Exception:  # noqa: BLE001
+                pass
     return {
         "kc_a": KC_A_URL, "kc_a_realm": KC_A_REALM,
         "kc_b": KC_B_URL, "kc_b_realm": KC_B_REALM,
@@ -143,7 +162,7 @@ async def config():
         "opencode_server_url": OPENCODE_SERVER_URL,
         "opencode_model": OPENCODE_MODEL,
         "opencode_server": opencode_status,
-        "ollama": ollama_status,
+        "llm": llm_status,
     }
 
 
@@ -199,15 +218,18 @@ async def _opencode_plan(client: httpx.AsyncClient, cve: str, repo: str,
            f"6b. OpenCode (real agent, {OPENCODE_MODEL}) analyzes the CVE → remediation plan",
            f"POST {OPENCODE_SERVER_URL}/session + /session/<id>/message  agent=plan")
 
-    # Cheap pre-probe so a missing local Ollama skips fast instead of timing out.
-    if provider == "ollama":
+    # Cheap pre-probe so an unreachable model server skips fast instead of
+    # timing out. Applies to any self-hosted OpenAI-compatible endpoint
+    # (local Ollama, on-prem vLLM/TGI/SGLang); built-in cloud providers
+    # authenticate via their own env vars and are not probed here.
+    if provider not in BUILTIN_PROVIDERS:
         try:
-            r = await client.get(f"{OLLAMA_BASE_URL}/models", timeout=2)
+            r = await client.get(f"{LLM_BASE_URL}/models", headers=_llm_headers(), timeout=3)
             r.raise_for_status()
         except Exception as exc:  # noqa: BLE001
             s.update(status="skipped", result={
-                "note": f"Ollama not reachable at {OLLAMA_BASE_URL} — plan skipped, "
-                        "identity chain continues (start Ollama on the host to enable)",
+                "note": f"model endpoint not reachable at {LLM_BASE_URL} — plan skipped, "
+                        "identity chain continues",
                 "error": str(exc)[:200],
             })
             return s

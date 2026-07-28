@@ -508,7 +508,11 @@ services:
     image: cd-opencode-server
     container_name: cd-opencode-server
     environment:
+      # Model server: local Ollama by default; set LLM_BASE_URL (+ optional
+      # LLM_API_KEY) to point at an on-prem vLLM/TGI/SGLang endpoint instead.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
       OPENCODE_MODEL: ${OPENCODE_MODEL:-ollama/qwen2.5-coder:7b}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     extra_hosts:
@@ -602,7 +606,11 @@ services:
       OPENCODE_SERVER_URL: http://opencode-server:4096
       OPENCODE_MODEL: ${OPENCODE_MODEL:-ollama/qwen2.5-coder:7b}
       OPENCODE_TIMEOUT: ${OPENCODE_TIMEOUT:-240}
+      # Same model-server settings as opencode-server — used only for the
+      # reachability pre-probe and /api/config reporting.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
       # Default scan target
       SCAN_REPO: ${SCAN_REPO:-demo-admin/payments-service}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
