@@ -35,7 +35,7 @@ if [ "$PROVIDER" = "ollama" ]; then
       "models": { "${MODEL_ID}": { "name": "${MODEL_ID}" } }
     }
   },
-  "permission": { "edit": "deny", "bash": "deny" }
+  "permission": { "edit": "deny", "bash": "deny", "external_directory": "deny" }
 }
 EOF
 else
@@ -46,7 +46,7 @@ else
   "\$schema": "https://opencode.ai/config.json",
   "model": "${PROVIDER}/${MODEL_ID}",
   "small_model": "${PROVIDER}/${MODEL_ID}",
-  "permission": { "edit": "deny", "bash": "deny" }
+  "permission": { "edit": "deny", "bash": "deny", "external_directory": "deny" }
 }
 EOF
 fi

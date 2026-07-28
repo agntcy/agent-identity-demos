@@ -36,11 +36,12 @@ Task lifecycle (POST /api/run):
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 
 import httpx
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from pydantic import BaseModel
 
@@ -91,6 +92,11 @@ FastAPIInstrumentor.instrument_app(app)
 class RunRequest(BaseModel):
     repo: str = ""
     cve_override: str = ""
+    # Real-LLM fallback: the identity/delegation chain (steps 1-5, 7-12) is
+    # unaffected by model-provider reliability — only opencode-plan (step 6b)
+    # makes a real LLM call. When the provider is flaky, callers can request
+    # a fast, clearly-labeled mock plan instead of waiting out a real attempt.
+    use_real_opencode: bool = True
 
 
 def _s(id: str, title: str, detail: str = "") -> dict:
@@ -188,16 +194,34 @@ async def _cimd_resolve(client: httpx.AsyncClient, cimd_id: str) -> dict:
 # ── Step 6b: real OpenCode remediation analysis ───────────────────────────────
 
 async def _opencode_plan(client: httpx.AsyncClient, cve: str, repo: str,
-                         scoped_intent: str) -> dict:
+                         scoped_intent: str, use_real: bool = True) -> dict:
     """Ask the real OpenCode agent (read-only `plan` agent) for a remediation plan.
 
     Non-fatal by design: reviewers without Ollama running still get a green
-    identity-chain run; this step then reports status=skipped.
+    identity-chain run; this step then reports status=skipped. Callers can
+    also request use_real=False up front — a deliberate, instant fallback to
+    a clearly-labeled mock plan, independent of whatever's currently making
+    the real model provider unreliable.
     """
     provider, model_id = _model_parts()
     s = _s("opencode-plan",
-           f"6b. OpenCode (real agent, {OPENCODE_MODEL}) analyzes the CVE → remediation plan",
+           f"6b. OpenCode ({'real agent, ' + OPENCODE_MODEL if use_real else 'mocked'}) analyzes the CVE → remediation plan",
            f"POST {OPENCODE_SERVER_URL}/session + /session/<id>/message  agent=plan")
+
+    if not use_real:
+        s.update(status="ok", result={
+            "mock": True,
+            "model": "mock",
+            "plan": (
+                "[MOCKED — real OpenCode call skipped by request]\n"
+                "- Affected dependency: example-lib (illustrative — not a real scan)\n"
+                "- Fix: bump to latest patched version\n"
+                f"- Branch: fix/{cve.lower()}\n"
+                f"- PR title: Security: remediate {cve} in {repo}\n"
+                "- Sub-agent: bump the dependency version and open the PR"
+            ),
+        })
+        return s
 
     # Cheap pre-probe so a missing local Ollama skips fast instead of timing out.
     if provider == "ollama":
@@ -275,6 +299,50 @@ async def _opencode_plan(client: httpx.AsyncClient, cve: str, repo: str,
     return s
 
 
+# ── Live token stream for opencode-plan ───────────────────────────────────────
+#
+# opencode-server exposes a real SSE event stream (GET /event) with genuine
+# incremental deltas (message.part.delta, field=text/reasoning) as the model
+# generates — this relays just those, reduced to a minimal shape, so the
+# webapp can show the actual plan text appearing live instead of a generic
+# spinner for the couple of minutes _opencode_plan's blocking call can take.
+# Not session-scoped: fine for this demo's single-operator use, not a
+# multi-tenant guarantee.
+
+async def _plan_event_gen():
+    yield "retry: 2000\n\n"
+    try:
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream("GET", f"{OPENCODE_SERVER_URL}/event") as r:
+                async for line in r.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    try:
+                        evt = json.loads(line[len("data: "):])
+                    except ValueError:
+                        continue
+                    etype = evt.get("type", "")
+                    props = evt.get("properties", {}) or {}
+                    if etype == "message.part.delta" and props.get("field") == "text":
+                        yield f"data: {json.dumps({'kind': 'delta', 'text': props.get('delta', '')})}\n\n"
+                    elif etype == "message.part.updated":
+                        part = props.get("part") or {}
+                        if part.get("type") == "reasoning":
+                            yield f"data: {json.dumps({'kind': 'reasoning', 'text': part.get('text', '')})}\n\n"
+                    elif etype == "session.next.step.started":
+                        yield f"data: {json.dumps({'kind': 'step', 'agent': props.get('agent', '')})}\n\n"
+                    elif etype == "server.heartbeat":
+                        yield ": heartbeat\n\n"
+    except Exception as exc:  # noqa: BLE001
+        yield f"data: {json.dumps({'kind': 'error', 'error': str(exc)[:200]})}\n\n"
+
+
+@app.get("/api/plan-stream")
+async def plan_stream():
+    return StreamingResponse(_plan_event_gen(), media_type="text/event-stream",
+                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 # ── Steps 7-8: AGNTCY Directory ───────────────────────────────────────────────
 
 async def _dir_push(cve: str, repo: str) -> dict:
@@ -343,6 +411,7 @@ async def run(body: RunRequest | None = None):
     policy-scoped badge → work → delegate cross-domain (steps 1-12)."""
     repo = (body.repo if body else "") or SCAN_REPO
     cve = (body.cve_override if body else "") or "CVE-2024-XXXX"
+    use_real_opencode = body.use_real_opencode if body else True
     steps: list[dict] = []
 
     def _fail() -> JSONResponse:
@@ -474,7 +543,7 @@ async def run(body: RunRequest | None = None):
         steps.append(s)
 
         # ── Step 6b: real OpenCode produces the remediation analysis ────────
-        plan_step = await _opencode_plan(client, cve, repo, scoped_intent)
+        plan_step = await _opencode_plan(client, cve, repo, scoped_intent, use_real_opencode)
         steps.append(plan_step)
         plan_text = (plan_step.get("result") or {}).get("plan", "")
 

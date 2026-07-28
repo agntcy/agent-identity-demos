@@ -21,10 +21,12 @@ GET  /                  — serve index.html
 GET  /api/health        — liveness probe
 GET  /api/config        — all service URLs / client IDs (informational)
 POST /api/run           — proxy to opencode-agent's /api/run
+GET  /api/plan-stream   — live SSE relay of opencode-agent's /api/plan-stream
 """
 
 from __future__ import annotations
 
+import json
 import os
 
 import httpx
@@ -32,7 +34,7 @@ from fastapi import FastAPI
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from tracing import current_trace_id, setup_tracing
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -94,6 +96,7 @@ FastAPIInstrumentor.instrument_app(app)
 class RunBody(BaseModel):
     cve: str = "CVE-2024-12345"
     repo: str = SCAN_REPO
+    use_real_opencode: bool = True
 
 
 # ── /api/run — proxy to the real OpenCode Agent ───────────────────────────────
@@ -106,7 +109,8 @@ async def run_all(body: RunBody) -> JSONResponse:
         async with httpx.AsyncClient(timeout=RUN_TIMEOUT) as client:
             r = await client.post(
                 f"{OPENCODE_AGENT_URL}/api/run",
-                json={"repo": body.repo, "cve_override": body.cve},
+                json={"repo": body.repo, "cve_override": body.cve,
+                      "use_real_opencode": body.use_real_opencode},
             )
         return JSONResponse(r.json(), status_code=r.status_code)
     except Exception as exc:  # noqa: BLE001
@@ -114,6 +118,25 @@ async def run_all(body: RunBody) -> JSONResponse:
             {"ok": False, "steps": [], "trace_id": current_trace_id(), "error": str(exc)},
             status_code=502,
         )
+
+
+# ── /api/plan-stream — live token stream for the opencode-plan step ───────────
+# Pure byte relay of opencode-agent's own SSE relay (see its own comment) —
+# no re-parsing, so the SSE framing is preserved exactly hop to hop.
+
+@app.get("/api/plan-stream")
+async def plan_stream():
+    async def relay():
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream("GET", f"{OPENCODE_AGENT_URL}/api/plan-stream") as r:
+                    async for chunk in r.aiter_raw():
+                        yield chunk
+        except Exception as exc:  # noqa: BLE001
+            yield f"data: {json.dumps({'kind': 'error', 'error': str(exc)[:200]})}\n\n".encode()
+
+    return StreamingResponse(relay(), media_type="text/event-stream",
+                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # ── Utility endpoints ─────────────────────────────────────────────────────────

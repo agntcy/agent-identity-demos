@@ -151,6 +151,15 @@
       border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%;
       vertical-align: middle; animation: status-spin .7s linear infinite; }
     @keyframes status-spin { to { transform: rotate(360deg); } }
+    .live-plan { margin: 0 0 4px; padding: 8px 10px; background: #0b0f14; border: 1px solid var(--border);
+      border-radius: 6px; font-size: 11.5px; color: #c9d1d9; white-space: pre-wrap; word-break: break-word;
+      max-height: 140px; overflow-y: auto; }
+    .live-plan .live-plan-label { color: var(--purple); font-weight: 700; text-transform: uppercase;
+      font-size: 10px; letter-spacing: .03em; display: block; margin-bottom: 4px; }
+    .live-plan .live-plan-reasoning { color: var(--muted); font-style: italic; }
+    .live-plan .live-plan-cursor { display: inline-block; width: 6px; height: 12px; margin-left: 1px;
+      background: var(--accent); vertical-align: text-bottom; animation: live-plan-blink 1s step-start infinite; }
+    @keyframes live-plan-blink { 50% { opacity: 0; } }
     #traceLink a { color: var(--teal); text-decoration: none; font-weight: 600; }
     #traceLink a:hover { text-decoration: underline; }
     #legend a { color: var(--accent); text-decoration: none; font-weight: 600; }
@@ -226,6 +235,7 @@
       <div class="field"><label>Repo:</label><input id="repo" value="demo-admin/payments-service" /></div>
       <div class="field"><label>Delay (ms):</label><input id="stepDelay" type="number" min="200" max="10000" step="100" value="2200" style="width:70px" /></div>
       <div class="field"><label style="gap:5px"><input id="autoZoom" type="checkbox" style="width:auto" /> Auto-zoom</label></div>
+      <div class="field"><label style="gap:5px" title="Turn off to use a fast, clearly-labeled mock plan instead — useful when the real model provider is being unreliable"><input id="useRealOpencode" type="checkbox" style="width:auto" checked /> Real OpenCode (LLM)</label></div>
     </div>
 
     <details class="config-wrap">
@@ -234,6 +244,7 @@
     </details>
     <div class="status-bar" id="legend" style="margin-top:-8px"></div>
     <div class="status-bar" id="status"></div>
+    <pre class="live-plan" id="livePlan" hidden></pre>
     <div class="status-bar" id="traceLink" style="margin-top:-8px"></div>
     <div class="run-progress"><div id="runProgressBar"></div></div>
 
@@ -773,7 +784,7 @@ POST /realms/org-b/protocol/openid-connect/token
     'badge-scope-check': "Before minting any badge, OpenCode presents Sarah's own OAuth token plus the task it wants to do to Envoy A + inline OPA. Policy — not the agent itself — decides how narrowly to scope the badge for this one task.",
     'resolve-badge': "vc-issuer mints and verifies OpenCode's VC delegation badge — a real signed vc+jwt (caps, delegating_user, intent, act_chain) scoped to exactly the intent the previous policy check returned. This badge becomes the actor_token in the RFC 8693 exchange below.",
     'scan': "Only now, under a task-scoped badge, does OpenCode scan the repo and find a HIGH-severity CVE. Mocked step — no real vulnerability scanner runs in this demo.",
-    'opencode-plan': "The real open-source OpenCode agent (opencode.ai), running headless in its own container, analyzes the CVE and produces an actual remediation plan via a real LLM call. Non-fatal by design — reviewers without a reachable model still get a green identity-chain run; this step then reports skipped.",
+    'opencode-plan': "The real open-source OpenCode agent (opencode.ai), running headless in its own container, analyzes the CVE and produces an actual remediation plan via a real LLM call — the plan text streams in live above as it's generated. Non-fatal by design — reviewers without a reachable model still get a green identity-chain run; this step then reports skipped. Turn off \"Real OpenCode (LLM)\" in the controls to use a fast, clearly-labeled mock plan instead — a deliberate fallback independent of model-provider reliability, not a workaround for a real bug.",
     'dir-push': "OpenCode records this remediation turn in the AGNTCY Directory. The record is content-addressed (a CID) — an immutable, tamper-evident audit entry.",
     'dir-search': "OpenCode looks up triage-agent in the Directory by name, discovering it before delegating any authority.",
     'kc-a-exchange': "OpenCode exchanges Sarah's token for its own via RFC 8693 at Keycloak A — a real network call. Keycloak validates subject_token for real; it doesn't itself verify actor_token into an act claim (a real Keycloak platform behavior, documented in the README) — delegation semantics are carried forward via the ID-JAG's act_chain instead.",
@@ -827,6 +838,7 @@ POST /realms/org-b/protocol/openid-connect/token
     if (r.record_name) facts.push({ label: 'Directory record', value: r.record_name });
     if (r.pull_request && r.pull_request.html_url) facts.push({ label: 'Pull request', value: r.pull_request.html_url, copyable: true });
     if (r.pushed && r.pushed.branch) facts.push({ label: 'Branch', value: r.pushed.branch });
+    if (r.plan) facts.push({ label: r.mock ? 'Remediation plan (MOCKED)' : `Remediation plan (${r.model || 'real'})`, value: r.plan, copyable: true });
     // Fallback: nothing was specifically curated above, but the step still
     // has a response payload — show it raw rather than nothing at all.
     if (!facts.length && r && Object.keys(r).length) {
@@ -1211,21 +1223,76 @@ POST /realms/org-b/protocol/openid-connect/token
     if (statusSpinnerTimer) { clearInterval(statusSpinnerTimer); statusSpinnerTimer = null; }
   }
 
+  // ── Live token stream for the opencode-plan step ───────────────────────────
+  // opencode-server really streams the model's output (SSE) — this relays it
+  // hop by hop (webapp -> opencode-agent -> opencode-server's own /event) and
+  // shows the actual remediation plan appearing live, not just a spinner, for
+  // the couple of minutes a real LLM call can take. Not session-scoped (fine
+  // for this demo's single-operator use): it shows whatever generation is in
+  // flight while connected, correlated by time with the run that opened it.
+  const livePlanEl = document.getElementById('livePlan');
+  let planStreamSource = null;
+  let livePlanDelta = '';
+  let livePlanReasoning = '';
+
+  function renderLivePlan() {
+    let html = '<span class="live-plan-label">OpenCode — live</span>';
+    if (livePlanReasoning) {
+      html += `<span class="live-plan-reasoning">${esc(livePlanReasoning)}</span>\n\n`;
+    }
+    html += esc(livePlanDelta) + '<span class="live-plan-cursor"></span>';
+    livePlanEl.innerHTML = html;
+    livePlanEl.hidden = false;
+    livePlanEl.scrollTop = livePlanEl.scrollHeight;
+  }
+
+  function startPlanStream() {
+    stopPlanStream();
+    livePlanDelta = '';
+    livePlanReasoning = '';
+    try {
+      planStreamSource = new EventSource('/api/plan-stream');
+      planStreamSource.onmessage = (ev) => {
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+        if (msg.kind === 'delta') {
+          livePlanDelta += msg.text || '';
+          renderLivePlan();
+        } else if (msg.kind === 'reasoning') {
+          livePlanReasoning = msg.text || '';
+          renderLivePlan();
+        }
+      };
+      planStreamSource.onerror = () => { /* connection drop is non-fatal — the run itself doesn't depend on this */ };
+    } catch (e) { /* EventSource unsupported or blocked — silently degrade to the plain spinner */ }
+  }
+
+  function stopPlanStream() {
+    if (planStreamSource) { planStreamSource.close(); planStreamSource = null; }
+    livePlanEl.hidden = true;
+    livePlanEl.innerHTML = '';
+  }
+
   // ── Fetch all steps ────────────────────────────────────────────────────────
   async function fetchAllSteps() {
     const cve  = document.getElementById('cve').value.trim()  || 'CVE-2024-12345';
     const repo = document.getElementById('repo').value.trim() || 'demo-admin/payments-service';
-    startStatusSpinner('Running full sequence — waiting on identity-node, Keycloak, and the real OpenCode/LLM call…');
+    const useRealOpencode = document.getElementById('useRealOpencode').checked;
+    startStatusSpinner(useRealOpencode
+      ? 'Running full sequence — waiting on identity-node, Keycloak, and the real OpenCode/LLM call…'
+      : 'Running full sequence — waiting on identity-node, Keycloak (OpenCode plan is mocked)…');
+    if (useRealOpencode) startPlanStream();
     try {
       const res = await fetch('/api/run', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({cve, repo})
+        body: JSON.stringify({cve, repo, use_real_opencode: useRealOpencode})
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     } finally {
       stopStatusSpinner();
+      stopPlanStream();
     }
   }
 

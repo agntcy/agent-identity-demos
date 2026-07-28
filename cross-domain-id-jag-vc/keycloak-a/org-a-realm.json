@@ -4,6 +4,7 @@
   "registrationAllowed": false,
   "resetPasswordAllowed": false,
   "sslRequired": "external",
+  "accessTokenLifespan": 900,
   "identityProviders": [
     {
       "alias": "id-jag",
