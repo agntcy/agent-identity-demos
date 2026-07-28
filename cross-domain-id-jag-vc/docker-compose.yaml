@@ -142,7 +142,13 @@ services:
   #   - Sarah's identity propagated via federated ID link (id-jag IdP)
   # ---------------------------------------------------------------------------
   keycloak-b:
-    image: quay.io/keycloak/keycloak:26.7
+    # Built with keycloak-idjag-spi baked in (see keycloak-b/Dockerfile) —
+    # Org B mints the narrowed Triage → Sub-Agent sub-badge natively via a
+    # real token-exchange call, mirroring Keycloak A's native ID-JAG mint.
+    build:
+      context: .
+      dockerfile: keycloak-b/Dockerfile
+    image: cd-keycloak-b-idjag
     container_name: cd-keycloak-b
     command: >
       start-dev --import-realm
@@ -620,24 +626,46 @@ services:
   triage-agent:
     build:
       context: ./triage-agent
+      additional_contexts:
+        dir_proto: ./proto
+        shared_lib: ./agntcy_identity_client
     image: cd-triage-agent
     container_name: cd-triage-agent
     depends_on:
+      keycloak-a:
+        condition: service_healthy
       keycloak-b:
         condition: service_healthy
-      idjag-issuer:
-        condition: service_healthy
       sub-agent:
+        condition: service_started
+      identity-node:
+        condition: service_healthy
+      identity-vault:
+        condition: service_healthy
+      identity-node-init:
+        condition: service_completed_successfully
+      dir-apiserver:
         condition: service_started
       jaeger:
         condition: service_healthy
     environment:
+      # Keycloak A JWKS — for in-agent verification of the inbound ID-JAG
+      KC_A_URL: ${KC_A_INTERNAL_URL:-http://keycloak-a:8080}
+      KC_A_REALM: org-a
       KC_B_URL: ${KC_B_INTERNAL_URL:-http://keycloak-b:8080}
       KC_B_REALM: org-b
       TRIAGE_CLIENT_ID: triage-agent
+      TRIAGE_CLIENT_SECRET: ${TRIAGE_CLIENT_SECRET:-demo-triage-secret-change-me}
       SUB_AGENT_CLIENT_ID: sub-agent
-      IDJAG_ISSUER_URL: http://idjag-issuer:9000
       IDENTITY_NODE_URL: http://identity-node:4000
+      DIR_APISERVER_URL: dir-apiserver:8888
+      # CIMD proof signing — org-b trust authority key in Vault Transit
+      VAULT_ADDR: http://identity-vault:8200
+      VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:?set VAULT_DEV_ROOT_TOKEN in .env}
+      VAULT_KEY_NAME: org-b-issuer
+      ORG_COMMON_NAME: org-b
+      # Org B PDP — sub-badge narrowing decided by Envoy B + inline OPA
+      SUBBADGE_PDP_URL: http://envoy-org-b:10000
       SUB_AGENT_URL: http://sub-agent:8300
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     networks:
@@ -797,8 +825,9 @@ services:
       IDENTITY_NODE_URL: http://identity-node:4000
       VAULT_ADDR: http://identity-vault:8200
       VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:?set VAULT_DEV_ROOT_TOKEN in .env}
-      VAULT_KEY_NAME: org-a-issuer
-      ORG_A_COMMON_NAME: org-a
+      # Each org gets its own Vault Transit key and registers as its own
+      # trust authority — org-a attests Org A agents, org-b Org B agents.
+      ISSUERS: org-a-issuer:org-a,org-b-issuer:org-b
     volumes:
       - ./identity-node-init.py:/init.py:ro
     networks:
