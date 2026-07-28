@@ -40,11 +40,15 @@ class VaultConfig:
 
     @classmethod
     def from_env(cls) -> "VaultConfig":
+        # ORG_COMMON_NAME is the generic form (each agent sets its own org);
+        # ORG_A_COMMON_NAME is honored for backward compatibility.
+        common_name = os.environ.get("ORG_COMMON_NAME") \
+            or os.environ.get("ORG_A_COMMON_NAME", "org-a")
         return cls(
             vault_addr=os.environ.get("VAULT_ADDR", "http://identity-vault:8200").rstrip("/"),
             vault_token=os.environ.get("VAULT_TOKEN", ""),
             key_name=os.environ.get("VAULT_KEY_NAME", "org-a-issuer"),
-            common_name=os.environ.get("ORG_A_COMMON_NAME", "org-a"),
+            common_name=common_name,
         )
 
 

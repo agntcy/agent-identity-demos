@@ -66,6 +66,55 @@ allow := {
 	startswith(input.body.cve, "CVE-")
 }
 
+# ── Sub-badge scope PDP ──────────────────────────────────────────────────────
+# Before Triage mints the narrowed sub-badge at Keycloak B, it must ask this
+# policy whether — and how narrowly — the delegation may be re-narrowed. It
+# presents the inbound Sarah-federated access token (verified by jwt_authn)
+# plus the narrowing it requests; the answer carries the policy-approved
+# scope/resource the sub-badge must be minted with. Least privilege decided
+# by policy, not by the agent.
+
+# Scopes Org B policy permits on a narrowed sub-badge.
+subbadge_scope_allowlist := {"openid", "gitea:write", "gitea:pr"}
+
+# Intents a sub-badge may be requested for.
+subbadge_intent_allowlist := {"create-pr-fix"}
+
+allow := {
+	"allowed": true,
+	"headers": {
+		"x-agntcy-policy-decision": "ALLOW",
+		"x-agntcy-policy-rule": "org-b-subbadge-scope",
+		"x-agntcy-policy-enforcer": "built-on-envoy-opa",
+		"x-agntcy-scoped-scope": requested_scope,
+		"x-agntcy-scoped-resource": requested_repo,
+	},
+} if {
+	input.attributes.request.http.method == "POST"
+	input.attributes.request.http.path == "/api/subbadge-scope-check"
+
+	access := verified_payload("x-verified-access-token-payload")
+
+	access.azp == "triage-agent"
+	scope_contains(access.scope, "triage:create")
+	sprintf("%s@org-a.example", [access.preferred_username]) == "sarah@org-a.example"
+
+	requested_scope := input.attributes.request.http.headers["x-agntcy-requested-scope"]
+	requested_repo := input.attributes.request.http.headers["x-agntcy-requested-repo"]
+	requested_intent := input.attributes.request.http.headers["x-agntcy-requested-intent"]
+
+	# Every requested scope must be within the narrowing allowlist — asking
+	# for triage:create (or anything broader) is escalation, denied.
+	every s in split(requested_scope, " ") {
+		s in subbadge_scope_allowlist
+	}
+	requested_intent in subbadge_intent_allowlist
+
+	startswith(requested_repo, "demo-admin/")
+	requested_repo != "demo-admin/demo-protected"
+	not endswith(requested_repo, "/demo-protected")
+}
+
 verified_payload(header_name) := payload if {
 	headers := input.attributes.request.http.headers
 	encoded := headers[header_name]
