@@ -237,15 +237,12 @@ async def _opencode_plan(client: httpx.AsyncClient, cve: str, repo: str,
             return s
 
     prompt = (
-        f"You are OpenCode, Org A's coding agent, acting on behalf of Sarah "
-        f"(sarah@org-a.example) under a policy-scoped badge (intent: "
-        f"{scoped_intent}). A dependency vulnerability {cve} (severity HIGH, "
-        f"known RCE) was found in the Org B repository {repo}. You cannot touch "
-        f"that repo directly — a bounded Org B sub-agent will push the fix and "
-        f"open the PR under delegated, narrowed credentials. Produce a concise "
-        f"remediation plan (at most 10 short lines): affected dependency, fix "
-        f"approach (version bump), suggested branch name, PR title, and exactly "
-        f"what the sub-agent should change. Plain text only."
+        f"Remediation plan needed: {cve} (HIGH, known RCE) in repository "
+        f"{repo}, scope={scoped_intent}. No file or tool access is "
+        f"available — do not read files or run tools; reason from general "
+        f"knowledge only. Reply in plain text, at most 5 short lines: "
+        f"affected dependency, fix (version bump), branch name, PR title, "
+        f"the change a sub-agent should make."
     )
     try:
         r = await client.post(
