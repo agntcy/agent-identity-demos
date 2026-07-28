@@ -9,7 +9,9 @@ name: cross-domain-stack
 #
 # Actors from the diagram:
 #   Sarah          → demo user (Org A), signs in via Keycloak A
-#   OpenCode       → Org A AI agent (mock), phases A+B steps 1-13
+#   OpenCode       → Org A AI agent: REAL OpenCode (opencode-server, headless)
+#                    + identity harness (opencode-agent), task lifecycle:
+#                    OAuth → identity → policy-scoped badge → work → delegate
 #   AGNTCY         → identity node (CIMD) + vc-issuer (badge mint) + idjag-issuer (assertion mint)
 #   Keycloak A     → Org A IdP (org-a realm), authenticates Sarah
 #   Envoy+OPA A    → egress inline policy (may Sarah delegate this scope to Org B?)
@@ -29,7 +31,8 @@ name: cross-domain-stack
 #   envoy-org-a     → host:12000 (egress)  admin:127.0.0.1:9902
 #   envoy-org-b     → host:10000 (ticket ingress) / 10001 (resource access)
 #                     admin:127.0.0.1:9901
-#   opencode-agent  → host:8100  (Org A mock agent)
+#   opencode-agent  → host:8100  (Org A identity harness for real OpenCode)
+#   opencode-server → internal :4096 (real OpenCode, headless)
 #   triage-agent    → internal only (behind Envoy)
 #   sub-agent       → host:8300  (Org B sub-agent)
 #   jaeger          → host:16686 (trace UI; every service exports via OTLP)
@@ -431,6 +434,9 @@ services:
     depends_on:
       idjag-issuer:
         condition: service_healthy
+      # badge-scope route verifies Sarah's KC-A access token via KC-A JWKS
+      keycloak-a:
+        condition: service_healthy
     ports:
       - "${ENVOY_A_EGRESS_PORT:-12000}:12000"
       - "127.0.0.1:${ENVOY_A_ADMIN_PORT:-9902}:9902"
@@ -483,17 +489,52 @@ services:
       start_period: 5s
 
   # ---------------------------------------------------------------------------
-  # OpenCode Agent (mock) — Org A AI agent
-  #   Phase A (steps 1-2): Sarah sign-in, mock CVE scan
-  #   Discovery (steps 3-6): badge resolution (mocked → identity-node)
-  #   Phase B (steps 7-13): mint ID-JAG, Org A egress PDP check, redeem at
-  #     KC-B, Envoy JWT + OPA enforcement, create ticket
+  # OpenCode Server — the REAL OpenCode coding agent (opencode.ai), headless
+  #   - Pinned npm release opencode-ai@1.18.7, `opencode serve` on :4096
+  #   - Model provider: host Ollama by default (OPENCODE_MODEL=ollama/...,
+  #     via host.docker.internal) or Anthropic (ANTHROPIC_API_KEY passthrough)
+  #   - Read-only for the demo: `plan` agent + permission edit/bash deny
+  #   - Internal-only on cd-net; driven by opencode-agent (identity harness)
+  # ---------------------------------------------------------------------------
+  opencode-server:
+    build:
+      context: ./opencode-server
+    image: cd-opencode-server
+    container_name: cd-opencode-server
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
+      OPENCODE_MODEL: ${OPENCODE_MODEL:-ollama/qwen2.5-coder:7b}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cd-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4096/global/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # OpenCode Agent — Org A identity harness for the real OpenCode agent
+  #   Task lifecycle (per delegated task from Sarah):
+  #     1     Sarah OIDC → Keycloak A → delegated access token
+  #     2-3   OpenCode registers its own identity (CIMD @ identity-node)
+  #     4     badge request → Envoy A + OPA → scoped-down intent
+  #     5     vc-issuer mints the task-scoped badge
+  #     6-6b  work: mock scan + real OpenCode remediation plan
+  #     7-8   Directory turn record + triage-agent discovery
+  #     9-12  RFC 8693 → ID-JAG → egress OPA → KC-B → ticket to Org B
   #
   # Trigger: POST http://localhost:8100/api/run
   # ---------------------------------------------------------------------------
   opencode-agent:
     build:
       context: ./opencode-agent
+      additional_contexts:
+        dir_proto: ./proto
+        shared_lib: ./agntcy_identity_client
     image: cd-opencode-agent
     container_name: cd-opencode-agent
     depends_on:
@@ -509,6 +550,16 @@ services:
         condition: service_healthy
       envoy-org-b:
         condition: service_healthy
+      opencode-server:
+        condition: service_healthy
+      identity-node:
+        condition: service_healthy
+      identity-vault:
+        condition: service_healthy
+      identity-node-init:
+        condition: service_completed_successfully
+      dir-apiserver:
+        condition: service_started
       jaeger:
         condition: service_healthy
     ports:
@@ -531,13 +582,26 @@ services:
       VC_ISSUER_URL: http://vc-issuer:9003
       IDJAG_ISSUER_URL: http://idjag-issuer:9000
       IDENTITY_NODE_URL: http://identity-node:4000
-      # Org A trust boundary; Envoy enforces the egress PDP before redemption.
+      DIR_APISERVER_URL: dir-apiserver:8888
+      # CIMD proof signing — org-a trust authority key in Vault Transit
+      VAULT_ADDR: http://identity-vault:8200
+      VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:?set VAULT_DEV_ROOT_TOKEN in .env}
+      VAULT_KEY_NAME: org-a-issuer
+      ORG_A_COMMON_NAME: org-a
+      # Org A trust boundary; Envoy enforces badge scoping + the egress PDP.
       EGRESS_PDP_URL: http://envoy-org-a:12000
       # Org B trust boundary; Envoy proxies the request to Triage.
       TRIAGE_AGENT_URL: http://envoy-org-b:10000
+      # Real OpenCode (headless) + model provider
+      OPENCODE_SERVER_URL: http://opencode-server:4096
+      OPENCODE_MODEL: ${OPENCODE_MODEL:-ollama/qwen2.5-coder:7b}
+      OPENCODE_TIMEOUT: ${OPENCODE_TIMEOUT:-240}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
       # Default scan target
       SCAN_REPO: ${SCAN_REPO:-demo-admin/payments-service}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - cd-net
     healthcheck:
@@ -704,6 +768,8 @@ services:
   agent-dir-init:
     build:
       context: ./agent-dir-init
+      additional_contexts:
+        dir_proto: ./proto
     image: cd-agent-dir-init
     container_name: cd-agent-dir-init
     depends_on:
@@ -745,6 +811,9 @@ services:
   webapp:
     build:
       context: ./webapp
+      additional_contexts:
+        dir_proto: ./proto
+        shared_lib: ./agntcy_identity_client
     image: cd-webapp
     container_name: cd-webapp
     depends_on:

@@ -8,6 +8,22 @@ can't act there directly — it asserts Sarah's delegation cross-domain using
 delegates a *narrowed* privilege to a bounded Sub-Agent that actually opens
 the pull request.
 
+OpenCode is the **real open-source OpenCode agent** ([opencode.ai](https://opencode.ai),
+pinned `opencode-ai@1.18.7`) running headless in the `opencode-server`
+container, driven by an **identity harness** (`opencode-agent`, port 8100)
+that executes the task lifecycle Sarah delegates:
+
+> **OAuth → register own identity (CIMD) → policy-scoped badge → work → delegate cross-domain**
+
+Before any task work runs, the harness presents Sarah's delegated access
+token to **Envoy A + inline OPA** (`/api/badge-scope-check`), which verifies
+the token against Keycloak A's JWKS and answers with a **scoped-down intent**
+(e.g. `scan-remediate:demo-admin/payments-service`); only then is the VC
+badge minted — bound to that one task — and only then does the agent work.
+The LLM behind OpenCode is the host's **Ollama** by default (free, local —
+`qwen2.5-coder:7b`), with optional `ANTHROPIC_API_KEY` passthrough; without
+either, runs still succeed and the plan step reports `skipped`.
+
 It also wires in two AGNTCY components for real:
 
 - **AGNTCY Directory Node** — every remediation turn is pushed as a
@@ -24,6 +40,8 @@ It also wires in two AGNTCY components for real:
 |---|---|---|
 | 1 | Sarah's OIDC login at Keycloak A | **Real** |
 | 2 | CVE scan | Mocked (no scanner integration) |
+| — | OpenCode remediation plan (headless `opencode-server`, Ollama/Anthropic) | **Real** agent + LLM call (`skipped` without a provider) |
+| — | Badge-scope PDP at Envoy A — verify Sarah's KC-A token, return task-scoped badge intent | **Real** JWT verification + inline OPA |
 | 3–4 | AGNTCY Directory push + search (gRPC) | **Real** |
 | 5–6 | CIMD generate/resolve id (Vault-signed proof JWT → identity-node) + VC badge issue/verify (signed `vc+jwt` → vc-issuer) | **Real** |
 | 7 | RFC 8693 token exchange at Keycloak A | **Real** call; see note below on `act` claims |
@@ -57,7 +75,15 @@ every service exports OpenTelemetry spans via OTLP to a local Jaeger container,
 and standard `httpx`/FastAPI auto-instrumentation propagates the W3C
 `traceparent` header across every hop (including transparently through Envoy,
 which just forwards it as an ordinary header) — so one browser-triggered run
-produces one real, inspectable trace end to end.
+produces one real, inspectable trace end to end. Milestone 8 replaces the
+mock Org A agent with the **real OpenCode** (headless `opencode-server`,
+Ollama/Anthropic provider) driven by an identity harness, reorders the task
+lifecycle to *OAuth → register own identity → policy-scoped badge → work →
+delegate*, and adds a second real Org A enforcement point: the
+**badge-scope PDP** (`/api/badge-scope-check` on Envoy A) verifies Sarah's
+Keycloak A access token and returns the narrowed, task-scoped intent the VC
+badge is minted with — least privilege decided by policy before any work
+runs.
 
 **A note on `actor_token` and the `act` claim**: Keycloak 26.7's standard
 token exchange (`standard.token.exchange.enabled`) validates `subject_token`
@@ -128,7 +154,7 @@ flowchart TB
     class Dir,IdNode,Vault,VC,IDJAG shared;
 ```
 
-22 services on one Docker network (`cd-net`):
+23 services on one Docker network (`cd-net`):
 
 | Service | Image | Host port(s) | Purpose |
 |---|---|---|---|
@@ -149,9 +175,10 @@ flowchart TB
 | `gitea` | `gitea/gitea:1.22` | `3002` (HTTP), `2223` (SSH) | Protected resource (repo server) |
 | `gitea-init` | `gitea/gitea:1.22` | _(one-shot)_ | Seeds the Gitea admin + demo repo |
 | `gitea-gateway` | built from `../archive/single-org-id-jag-app-access/gitea-gateway` | _(internal only)_ | Requires Envoy policy metadata, then rechecks token scope before using Gitea admin credentials |
-| `envoy-org-a` | built from `./envoy-org-a` (Envoy + Built On Envoy Composer) | `12000`; admin `127.0.0.1:9902` | Org A gateway; egress JWT + inline OPA policy (may Sarah delegate this scope to Org B?) |
+| `envoy-org-a` | built from `./envoy-org-a` (Envoy + Built On Envoy Composer) | `12000`; admin `127.0.0.1:9902` | Org A gateway; badge-scope PDP (KC-A JWT) + egress JWT + inline OPA policies |
 | `envoy-org-b` | built from `./envoy` (Envoy + Built On Envoy Composer) | `10000`, `10001`; admin `127.0.0.1:9901` | Org B gateway; separate ticket-ingress and resource-access JWT + inline OPA policies |
-| `opencode-agent` | built from `./opencode-agent` | `8101` | Org A mock agent (Phase A/B driver) |
+| `opencode-server` | built from `./opencode-server` | _(internal `:4096`)_ | **Real OpenCode agent** (opencode-ai@1.18.7, headless; Ollama/Anthropic provider) |
+| `opencode-agent` | built from `./opencode-agent` | `8100` | Org A identity harness driving the real OpenCode (task lifecycle steps 1-12) |
 | `triage-agent` | built from `./triage-agent` | _(internal only)_ | Org B mock agent; reachable from outside `cd-net` only through Envoy |
 | `sub-agent` | built from `./sub-agent` | `8300` | Org B bounded-privilege mock agent (push + PR) |
 | `webapp` | built from `./webapp` | `8090` | Animated sequence-diagram demo UI |
@@ -264,6 +291,24 @@ cp .env.example .env
 
 docker compose up -d --build
 ```
+
+### Ollama prerequisite (optional but recommended)
+
+The real OpenCode agent uses the **host's** Ollama as its free, local model
+provider (no API key). On your machine — not inside Docker:
+
+```bash
+ollama pull qwen2.5-coder:7b   # one-time (~4.7 GB)
+ollama serve                    # or keep the Ollama desktop app running
+```
+
+Containers reach it via `host.docker.internal:11434`. On Linux, Ollama must
+listen beyond loopback: `OLLAMA_HOST=0.0.0.0 ollama serve`. Tool-calling
+quality improves with a larger context window (Ollama's `num_ctx` ≥ 16k).
+Alternative provider: set `OPENCODE_MODEL=anthropic/claude-sonnet-4-5` and
+`ANTHROPIC_API_KEY` in `.env`. **Without Ollama or a key, every run still
+succeeds** — the `opencode-plan` step reports `status=skipped` and the
+identity chain completes normally.
 
 The first build pulls the pinned Envoy base image and Built On Envoy Composer
 artifact. To deliberately refresh those pinned inputs:
@@ -659,7 +704,7 @@ Docker, Docker Compose, `curl`, and `jq`.
      test /policies/egress.rego /policies/egress_test.rego -v
    ```
 
-   Expected: 10/10 tests pass.
+   Expected: 16/16 tests pass (10 egress + 6 badge-scope).
 
 2. Validate Compose, build the gateway, and validate its native config:
 
@@ -871,6 +916,69 @@ above: `subject_token` is validated, `actor_token` is not.
    configuration, documented above.
 
 
+### Real OpenCode + badge-scope PDP reviewer verification
+
+Verifies the real OpenCode integration and the new Org A badge-scope
+enforcement point (policy-scoped badge BEFORE any task work).
+
+1. Rego suite (includes the 6 badge-scope tests) — see Milestone 4 step 1
+   above; expected 16/16.
+
+2. Bring the stack up and confirm both OpenCode containers:
+
+   ```bash
+   cd cross-domain-id-jag-vc
+   docker compose up -d --build
+   curl -fsS http://localhost:8100/api/config | jq '{opencode_server, ollama, opencode_model}'
+   ```
+
+   Expected: `opencode_server.reachable=true` (real OpenCode headless);
+   `ollama.reachable` true only if Ollama is running on the host.
+
+3. Run the task lifecycle:
+
+   ```bash
+   RUN_OUTPUT="$(mktemp)"
+   curl -fsS -X POST http://localhost:8100/api/run \
+     -H 'Content-Type: application/json' \
+     -d '{"repo":"demo-admin/payments-service"}' -o "$RUN_OUTPUT"
+
+   jq '{ok, order: [.steps[].id],
+        badge_scope: [.steps[] | select(.id == "badge-scope-check")][0].result,
+        badge_intent: [.steps[] | select(.id == "resolve-badge")][0].result.badge_claims.intent,
+        plan: [.steps[] | select(.id == "opencode-plan")][0].status}' "$RUN_OUTPUT"
+   rm "$RUN_OUTPUT"
+   ```
+
+   Expected: `ok=true`; step order starts `sarah-login, cimd-generate-id,
+   cimd-resolve-id, badge-scope-check, resolve-badge, scan, opencode-plan, …`
+   (identity and policy-scoped badge BEFORE any work);
+   `badge_scope.scoped_intent` and `badge_intent` both equal
+   `scan-remediate:demo-admin/payments-service`; `plan` is `ok` with Ollama
+   running, `skipped` without.
+
+4. Prove the badge-scope PDP denies out-of-policy badge requests — a valid
+   Sarah token asking for a repo outside the org-a allowlist:
+
+   ```bash
+   SARAH_TOKEN="$(curl -s -X POST \
+     http://localhost:8082/realms/org-a/protocol/openid-connect/token \
+     -d grant_type=password -d client_id=opencode-agent \
+     -d client_secret=demo-opencode-secret-change-me \
+     -d username=sarah -d password=demo-sarah-password-change-me \
+     -d 'scope=openid profile email' | jq -r .access_token)"
+
+   curl -s --include -X POST http://localhost:12000/api/badge-scope-check \
+     -H "Authorization: Bearer $SARAH_TOKEN" \
+     -H 'x-agntcy-requested-action: scan-remediate' \
+     -H 'x-agntcy-requested-repo: demo-admin/other-service'
+   ```
+
+   Expected: HTTP 403 `policy_denied` (the token is valid — the *task* is
+   not). Repeat with `demo-admin/payments-service` to get 200 + the
+   `x-agntcy-scoped-intent` decision. A garbage bearer token gets 401 from
+   the JWT filter before OPA ever runs.
+
 ### Via the webapp (recommended)
 
 Open **http://localhost:8090**. Click **Run (animated)** to watch all 22
@@ -887,6 +995,12 @@ step in the diagram is also individually clickable — it opens that exact
 step's span in Jaeger, not just the trace root (see
 [Viewing traces](#viewing-traces)). Use **Next step ▶** to step through
 manually.
+
+Note: the webapp (8090) still animates the previous flow (badge attestation
+after discovery, mocked KC-A exchange, no badge-scope/egress checks). The
+new task lifecycle — real OpenCode + policy-scoped badge — lives on the
+agent itself (**8100**, above). Unifying the webapp UI with the new flow is
+a follow-up milestone.
 
 ### Via the API directly
 
@@ -981,9 +1095,11 @@ omit either and you'll get an opaque failure with no useful error message.
 
 ```
 cross-domain-id-jag-vc/
-├── docker-compose.yaml        # the 22-service stack (source of truth)
+├── docker-compose.yaml        # the 23-service stack (source of truth)
 ├── .env.example
-├── envoy-org-a/                # Org A egress gateway: Built On Envoy image + egress.rego
+├── agntcy_identity_client/    # shared lib: Vault proof-JWT signing, CIMD calls, Directory gRPC
+├── proto/                     # shared AGNTCY Directory proto tree (compiled at image build)
+├── envoy-org-a/                # Org A gateway: badge-scope PDP + egress.rego (+tests)
 ├── envoy/                     # Built On Envoy image, JWT filters, and Rego policies/tests
 ├── vc-issuer/                  # VC badge issuer (stand-in for identity-node's badge API)
 ├── identity-node-init.py      # Vault Transit bootstrap + org-a issuer registration
@@ -992,7 +1108,8 @@ cross-domain-id-jag-vc/
 ├── gitea/                     # Gitea admin/repo seed script
 ├── dir/                       # Zot OCI registry config
 ├── agent-dir-init/            # one-shot: pushes static OASF records for all agents
-├── opencode-agent/            # Org A mock agent (Phase A/B)
+├── opencode-server/           # REAL OpenCode (opencode-ai@1.18.7, headless, Ollama provider)
+├── opencode-agent/            # Org A identity harness (OAuth → identity → scoped badge → work → delegate)
 ├── triage-agent/              # Org B mock agent (ticket → sub-badge → spawn)
 ├── sub-agent/                 # Org B bounded-privilege mock agent
 └── webapp/                    # animated sequence-diagram demo UI (FastAPI + vanilla JS)

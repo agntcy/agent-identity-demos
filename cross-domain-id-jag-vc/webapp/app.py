@@ -31,6 +31,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from agntcy_identity_client import VaultConfig
+from agntcy_identity_client import cimd as cimd_api
+from agntcy_identity_client import directory as dir_api
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 KC_A_URL = os.environ.get("KC_A_URL", "http://keycloak-a:8080").rstrip("/")
 KC_A_REALM = os.environ.get("KC_A_REALM", "org-a")
@@ -64,10 +68,9 @@ KC_B_UI_URL = os.environ.get("KC_B_UI_URL", "")
 
 # CIMD — org-a's local trust authority, backed by a Vault transit signing key
 # (see identity-node-init.py for the registration bootstrap this depends on).
-VAULT_ADDR = os.environ.get("VAULT_ADDR", "http://identity-vault:8200").rstrip("/")
-VAULT_TOKEN = os.environ.get("VAULT_TOKEN", "")
-VAULT_KEY_NAME = os.environ.get("VAULT_KEY_NAME", "org-a-issuer")
-ORG_A_COMMON_NAME = os.environ.get("ORG_A_COMMON_NAME", "org-a")
+# The Vault/proof-JWT/CIMD primitives live in the shared agntcy_identity_client.
+VAULT_CFG = VaultConfig.from_env()
+ORG_A_COMMON_NAME = VAULT_CFG.common_name
 
 SCAN_REPO = os.environ.get("SCAN_REPO", "demo-admin/payments-service")
 
@@ -207,7 +210,7 @@ def _scan(cve: str) -> dict:
     )
 
 
-OASF_SCHEMA_VERSION = "1.1.0"
+OASF_SCHEMA_VERSION = dir_api.OASF_SCHEMA_VERSION
 
 
 async def _dir_push_turn(cve: str, repo: str) -> dict:
@@ -220,12 +223,8 @@ async def _dir_push_turn(cve: str, repo: str) -> dict:
             result={"cid": "", "note": "directory not configured"},
         )
     try:
-        import grpc
-        from datetime import datetime, timezone
-        from agntcy.dir.core.v1 import record_pb2
-        from agntcy.dir.store.v1 import store_service_pb2_grpc
-        from google.protobuf import struct_pb2
         import asyncio
+        from datetime import datetime, timezone
 
         record_dict = {
             "name": "opencode-agent",
@@ -243,19 +242,9 @@ async def _dir_push_turn(cve: str, repo: str) -> dict:
             ],
             "annotations": {"cve": cve, "repo": repo, "turn": "remediation"},
         }
-        record_data = struct_pb2.Struct()
-        record_data.update(record_dict)
-        record = record_pb2.Record(data=record_data)
-
-        def _push():
-            channel = grpc.insecure_channel(DIR_APISERVER_URL)
-            stub = store_service_pb2_grpc.StoreServiceStub(channel)
-            refs = list(stub.Push(iter([record])))
-            channel.close()
-            return refs
-
-        refs = await asyncio.get_event_loop().run_in_executor(None, _push)
-        cid = refs[0].cid if refs else ""
+        cid = await asyncio.get_event_loop().run_in_executor(
+            None, dir_api.push_record, DIR_APISERVER_URL, record_dict
+        )
         return _step(
             "dir-push",
             "3. Directory: push OpenCode turn record → CID",
@@ -277,39 +266,20 @@ async def _dir_search(agent_name: str = "triage-agent") -> dict:
             result={"found": False, "cid": "", "note": "directory not configured"},
         )
     try:
-        import grpc
-        from agntcy.dir.search.v1 import search_service_pb2, search_service_pb2_grpc
         import asyncio
 
-        req = search_service_pb2.SearchRecordsRequest(
-            queries=[search_service_pb2.RecordQuery(
-                type=search_service_pb2.RECORD_QUERY_TYPE_NAME,
-                value=agent_name,
-            )],
-            limit=5,
+        records = await asyncio.get_event_loop().run_in_executor(
+            None, dir_api.search_by_name, DIR_APISERVER_URL, agent_name
         )
-
-        def _search():
-            channel = grpc.insecure_channel(DIR_APISERVER_URL)
-            stub = search_service_pb2_grpc.SearchServiceStub(channel)
-            results = list(stub.SearchRecords(req))
-            channel.close()
-            return results
-
-        results = await asyncio.get_event_loop().run_in_executor(None, _search)
-        found = len(results) > 0
-        record_name = ""
-        record_dict: dict = {}
-        if found:
-            from google.protobuf.json_format import MessageToDict
-            record_dict = MessageToDict(results[0].record.data)
-            record_name = record_dict.get("name", "")
+        found = len(records) > 0
+        record_dict: dict = records[0] if found else {}
+        record_name = record_dict.get("name", "")
         return _step(
             "dir-search",
             f"4. Directory: search for {agent_name} → {'found' if found else 'not found'}",
             detail=f"gRPC SearchRecords({DIR_APISERVER_URL})  name={agent_name}",
             status="ok",
-            result={"found": found, "record_name": record_name, "count": len(results), "record": record_dict},
+            result={"found": found, "record_name": record_name, "count": len(records), "record": record_dict},
         )
     except Exception as exc:  # noqa: BLE001
         return _step("dir-search", f"4. Directory: search for {agent_name}", status="error", error=str(exc))
@@ -321,109 +291,8 @@ async def _dir_search(agent_name: str = "triage-agent") -> dict:
 # /v1alpha1/id/generate or /v1alpha1/id/resolve: iss=agntcy:org-a, a sub_jwk
 # claim, signed by the SAME keypair org-a registered at bootstrap time
 # (identity-node-init.py). The private key never leaves Vault — every proof
-# is signed via Vault's /transit/sign API.
-
-_org_a_jwk_cache: dict | None = None
-
-
-def _b64url(data: bytes) -> str:
-    import base64
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
-
-async def _vault_get_org_a_jwk(client: httpx.AsyncClient) -> dict:
-    """Fetch (and cache) org-a's public key from Vault transit, as a JWK."""
-    global _org_a_jwk_cache
-    if _org_a_jwk_cache is not None:
-        return _org_a_jwk_cache
-
-    import base64
-
-    r = await client.get(
-        f"{VAULT_ADDR}/v1/transit/keys/{VAULT_KEY_NAME}",
-        headers={"X-Vault-Token": VAULT_TOKEN},
-    )
-    r.raise_for_status()
-    keys = r.json()["data"]["keys"]
-    latest_version = max(keys, key=int)
-    pem = keys[latest_version]["public_key"]
-
-    lines = [ln for ln in pem.strip().splitlines() if "BEGIN" not in ln and "END" not in ln]
-    der = base64.b64decode("".join(lines))
-
-    def read_len(data: bytes, off: int) -> tuple[int, int]:
-        first = data[off]
-        if first & 0x80 == 0:
-            return first, off + 1
-        n = first & 0x7F
-        return int.from_bytes(data[off + 1:off + 1 + n], "big"), off + 1 + n
-
-    def read_tlv(data: bytes, off: int) -> tuple[int, bytes, int]:
-        length, val_off = read_len(data, off + 1)
-        return data[off], data[val_off:val_off + length], val_off + length
-
-    _, outer_seq, _ = read_tlv(der, 0)
-    _, _alg_id, off2 = read_tlv(outer_seq, 0)
-    _, bitstring, _ = read_tlv(outer_seq, off2)
-    inner = bitstring[1:]  # drop "unused bits" byte
-    _, rsa_pub_seq, _ = read_tlv(inner, 0)
-    _, n_bytes, off3 = read_tlv(rsa_pub_seq, 0)
-    _, e_bytes, _ = read_tlv(rsa_pub_seq, off3)
-
-    def strip_leading_zero(b: bytes) -> bytes:
-        return b[1:] if len(b) > 1 and b[0] == 0 else b
-
-    kid = f"{VAULT_KEY_NAME}-v1"
-    _org_a_jwk_cache = {
-        "kty": "RSA",
-        "n": _b64url(strip_leading_zero(n_bytes)),
-        "e": _b64url(strip_leading_zero(e_bytes)),
-        "alg": "RS256",
-        "use": "sig",
-        "kid": kid,
-    }
-    return _org_a_jwk_cache
-
-
-async def _vault_sign_rs256(client: httpx.AsyncClient, signing_input: str) -> str:
-    """Sign `signing_input` (RS256/PKCS1v15/SHA-256) via Vault transit — key never leaves Vault."""
-    import base64
-
-    input_b64 = base64.b64encode(signing_input.encode()).decode()
-    r = await client.post(
-        f"{VAULT_ADDR}/v1/transit/sign/{VAULT_KEY_NAME}",
-        json={"input": input_b64, "hash_algorithm": "sha2-256", "signature_algorithm": "pkcs1v15"},
-        headers={"X-Vault-Token": VAULT_TOKEN},
-    )
-    r.raise_for_status()
-    vault_sig = r.json()["data"]["signature"]  # "vault:v1:<base64-std>"
-    sig_bytes = base64.b64decode(vault_sig.split(":", 2)[2])
-    return _b64url(sig_bytes)
-
-
-async def _build_proof_jwt(client: httpx.AsyncClient, sub: str) -> str:
-    """Self-issued proof JWT: iss=agntcy:org-a, sub=<agent>, signed via Vault."""
-    import json
-    import time
-    import uuid
-
-    jwk = await _vault_get_org_a_jwk(client)
-    header = {"alg": "RS256", "typ": "JWT", "kid": jwk["kid"]}
-    now = int(time.time())
-    payload = {
-        "iss": f"agntcy:{ORG_A_COMMON_NAME}",
-        "sub": sub,
-        "aud": [sub],
-        "exp": now + 3600,
-        "iat": now,
-        "jti": str(uuid.uuid4()),
-        "sub_jwk": jwk,
-    }
-    header_b64 = _b64url(json.dumps(header, separators=(",", ":")).encode())
-    payload_b64 = _b64url(json.dumps(payload, separators=(",", ":")).encode())
-    signing_input = f"{header_b64}.{payload_b64}"
-    signature = await _vault_sign_rs256(client, signing_input)
-    return f"{signing_input}.{signature}"
+# is signed via Vault's /transit/sign API. The primitives live in the shared
+# agntcy_identity_client package (vault.py + cimd.py).
 
 
 async def _cimd_generate_id(client: httpx.AsyncClient, sub: str = "triage-agent") -> dict:
@@ -435,35 +304,21 @@ async def _cimd_generate_id(client: httpx.AsyncClient, sub: str = "triage-agent"
     """
     url = f"{IDENTITY_NODE_URL}/v1alpha1/id/generate"
     try:
-        proof_jwt = await _build_proof_jwt(client, sub)
-        r = await client.post(url, json={
-            "issuer": {"organization": ORG_A_COMMON_NAME, "commonName": ORG_A_COMMON_NAME},
-            "proof": {"type": "JWT", "proofValue": proof_jwt},
-        })
-        if r.status_code == 200:
-            data = r.json()
-            rm = data.get("resolverMetadata", {})
-            return _step(
-                "cimd-generate-id",
-                f"5. CIMD: generate id for {sub} (Vault-signed proof, org-a trust authority)",
-                detail=f"POST {url}  iss=agntcy:{ORG_A_COMMON_NAME}  sub={sub}",
-                status="ok",
-                result={"id": rm.get("id", ""), "controller": rm.get("controller", "")},
-            )
-        if r.status_code == 400 and "ID_ALREADY_REGISTERED" in r.text:
-            existing_id = f"AGNTCY-{sub}"
+        res = await cimd_api.generate_id(client, IDENTITY_NODE_URL, VAULT_CFG, sub)
+        if res["already_registered"]:
             return _step(
                 "cimd-generate-id",
                 f"5. CIMD: generate id for {sub} (already registered — reusing)",
                 detail=f"POST {url}  iss=agntcy:{ORG_A_COMMON_NAME}  sub={sub}",
                 status="ok",
-                result={"id": existing_id, "note": "already registered"},
+                result={"id": res["id"], "note": "already registered"},
             )
         return _step(
             "cimd-generate-id",
-            f"5. CIMD: generate id for {sub}",
-            status="error",
-            error=f"HTTP {r.status_code}: {r.text[:300]}",
+            f"5. CIMD: generate id for {sub} (Vault-signed proof, org-a trust authority)",
+            detail=f"POST {url}  iss=agntcy:{ORG_A_COMMON_NAME}  sub={sub}",
+            status="ok",
+            result={"id": res["id"], "controller": res["controller"]},
         )
     except Exception as exc:  # noqa: BLE001
         return _step("cimd-generate-id", f"5. CIMD: generate id for {sub}", status="error", error=str(exc))
@@ -473,28 +328,19 @@ async def _cimd_resolve_id(client: httpx.AsyncClient, cimd_id: str) -> dict:
     """Step 6 — Resolve the CIMD id back to its ResolverMetadata (VerificationMethod JWK)."""
     url = f"{IDENTITY_NODE_URL}/v1alpha1/id/resolve"
     try:
-        r = await client.post(url, json={"id": cimd_id})
-        if r.status_code == 200:
-            data = r.json()
-            rm = data.get("resolverMetadata", {})
-            vm = (rm.get("verificationMethod") or [{}])[0]
-            return _step(
-                "cimd-resolve-id",
-                f"6. CIMD: resolve id {cimd_id} → ResolverMetadata",
-                detail=f"POST {url}  id={cimd_id}",
-                status="ok",
-                result={
-                    "id": rm.get("id", ""),
-                    "controller": rm.get("controller", ""),
-                    "verification_method_id": vm.get("id", ""),
-                    "public_key_kid": (vm.get("publicKeyJwk") or {}).get("kid", ""),
-                },
-            )
+        rm = await cimd_api.resolve_id(client, IDENTITY_NODE_URL, cimd_id)
+        vm = (rm.get("verificationMethod") or [{}])[0]
         return _step(
             "cimd-resolve-id",
-            f"6. CIMD: resolve id {cimd_id}",
-            status="error",
-            error=f"HTTP {r.status_code}: {r.text[:300]}",
+            f"6. CIMD: resolve id {cimd_id} → ResolverMetadata",
+            detail=f"POST {url}  id={cimd_id}",
+            status="ok",
+            result={
+                "id": rm.get("id", ""),
+                "controller": rm.get("controller", ""),
+                "verification_method_id": vm.get("id", ""),
+                "public_key_kid": (vm.get("publicKeyJwk") or {}).get("kid", ""),
+            },
         )
     except Exception as exc:  # noqa: BLE001
         return _step("cimd-resolve-id", f"6. CIMD: resolve id {cimd_id}", status="error", error=str(exc))
@@ -975,7 +821,7 @@ def config() -> JSONResponse:
         "triage_agent_url": TRIAGE_AGENT_URL,
         "dir_apiserver_url": DIR_APISERVER_URL or "not configured",
         "org_a_common_name": ORG_A_COMMON_NAME,
-        "vault_key_name": VAULT_KEY_NAME,
+        "vault_key_name": VAULT_CFG.key_name,
         "scan_repo": SCAN_REPO,
         "jaeger_ui_url": JAEGER_UI_URL,
         "gitea_ui_url": GITEA_UI_URL,

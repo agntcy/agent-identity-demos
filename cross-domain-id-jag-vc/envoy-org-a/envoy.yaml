@@ -52,6 +52,16 @@ static_resources:
                                 key: content-type
                                 value: application/json
                         - match:
+                            path: "/api/badge-scope-check"
+                          direct_response:
+                            status: 200
+                            body:
+                              inline_string: '{"decision":"ALLOW","boundary":"org-a-badge-scope"}'
+                          response_headers_to_add:
+                            - header:
+                                key: content-type
+                                value: application/json
+                        - match:
                             prefix: "/"
                           direct_response:
                             status: 200
@@ -94,9 +104,26 @@ static_resources:
                             cache_duration: 300s
                           forward: false
                           forward_payload_header: x-verified-actor-token-payload
+                        kc_a_access_token:
+                          issuer: http://keycloak-a:8080/realms/org-a
+                          from_headers:
+                            - name: Authorization
+                              value_prefix: "Bearer "
+                          remote_jwks:
+                            http_uri:
+                              uri: http://keycloak-a:8080/realms/org-a/protocol/openid-connect/certs
+                              cluster: keycloak_a_jwks
+                              timeout: 5s
+                            cache_duration: 300s
+                          forward: false
+                          forward_payload_header: x-verified-user-token-payload
                       rules:
                         - match:
                             path: "/health"
+                        - match:
+                            path: "/api/badge-scope-check"
+                          requires:
+                            provider_name: kc_a_access_token
                         - match:
                             prefix: "/"
                           requires:
@@ -119,6 +146,9 @@ static_resources:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
   clusters:
+    # Shared by both jwt_authn providers: the ID-JAG is now minted natively
+    # by Keycloak A (keycloak-idjag-spi), and the badge-scope route verifies
+    # Sarah's KC-A access token — one JWKS endpoint serves both.
     - name: keycloak_a_jwks
       type: STRICT_DNS
       connect_timeout: 5s

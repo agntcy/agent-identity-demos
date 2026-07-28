@@ -107,3 +107,70 @@ test_act_chain_origin_mismatch_denied if {
 	result := allow with input as egress_input(headers)
 	not result.allowed
 }
+
+# ── Badge-scope PDP tests ────────────────────────────────────────────────────
+
+valid_user := {
+	"iss": "http://keycloak-a:8080/realms/org-a",
+	"sub": "8f7a2c1e-demo-user-id",
+	"azp": "opencode-agent",
+	"scope": "openid profile email",
+	"email": "sarah@org-a.example",
+	"preferred_username": "sarah",
+}
+
+badge_scope_input(user, extra_headers) := {"attributes": {"request": {"http": {
+	"method": "POST",
+	"path": "/api/badge-scope-check",
+	"headers": object.union(
+		{"x-verified-user-token-payload": base64url.encode(json.marshal(user))},
+		extra_headers,
+	),
+}}}}
+
+valid_badge_request_headers := {
+	"x-agntcy-requested-action": "scan-remediate",
+	"x-agntcy-requested-repo": "demo-admin/payments-service",
+}
+
+test_badge_scope_allowed_with_scoped_intent if {
+	result := allow with input as badge_scope_input(valid_user, valid_badge_request_headers)
+	result.allowed
+	result.headers["x-agntcy-policy-rule"] == "org-a-badge-scope"
+	result.headers["x-agntcy-scoped-intent"] == "scan-remediate:demo-admin/payments-service"
+	result.headers["x-agntcy-scoped-resource"] == "demo-admin/payments-service"
+}
+
+test_badge_scope_wrong_client_denied if {
+	user := object.union(valid_user, {"azp": "rogue-agent"})
+	result := allow with input as badge_scope_input(user, valid_badge_request_headers)
+	not result.allowed
+	result.http_status == 403
+}
+
+test_badge_scope_wrong_user_denied if {
+	user := object.union(valid_user, {"email": "mallory@org-a.example"})
+	result := allow with input as badge_scope_input(user, valid_badge_request_headers)
+	not result.allowed
+}
+
+test_badge_scope_repo_outside_allowlist_denied if {
+	headers := object.union(valid_badge_request_headers, {
+		"x-agntcy-requested-repo": "demo-admin/other-service",
+	})
+	result := allow with input as badge_scope_input(valid_user, headers)
+	not result.allowed
+}
+
+test_badge_scope_unsupported_action_denied if {
+	headers := object.union(valid_badge_request_headers, {
+		"x-agntcy-requested-action": "delete-repository",
+	})
+	result := allow with input as badge_scope_input(valid_user, headers)
+	not result.allowed
+}
+
+test_badge_scope_missing_task_headers_denied if {
+	result := allow with input as badge_scope_input(valid_user, {})
+	not result.allowed
+}
