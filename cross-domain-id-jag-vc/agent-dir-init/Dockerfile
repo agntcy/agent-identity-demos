@@ -6,7 +6,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y protobuf-compiler && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY proto/ proto/
+# Shared build context (compose build.additional_contexts):
+#   dir_proto → ../proto (Directory OASF/gRPC proto tree)
+COPY --from=dir_proto . proto/
 RUN python -m grpc_tools.protoc \
     -I proto \
     --python_out=. \

@@ -60,6 +60,48 @@ allow := {
 	actor.act.sub == "opencode-agent"
 }
 
+# ── Badge-scope PDP ──────────────────────────────────────────────────────────
+# Before any task work runs, the agent presents Sarah's verified Keycloak A
+# access token (jwt_authn, kc_a_access_token provider) plus the task it wants
+# a badge for. This policy decides whether Sarah may delegate that task to
+# the agent at all — and answers with the narrowed, task-scoped intent the
+# VC badge must be minted with (least privilege, decided by policy, not by
+# the agent).
+
+# Repositories org-a policy permits delegated remediation work on.
+badge_repo_allowlist := {"demo-admin/payments-service"}
+
+# Task actions a badge may be requested for.
+badge_action_allowlist := {"scan-remediate"}
+
+allow := {
+	"allowed": true,
+	"headers": {
+		"x-agntcy-policy-decision": "ALLOW",
+		"x-agntcy-policy-rule": "org-a-badge-scope",
+		"x-agntcy-policy-enforcer": "built-on-envoy-opa",
+		"x-agntcy-scoped-intent": scoped_intent,
+		"x-agntcy-scoped-resource": requested_repo,
+	},
+} if {
+	input.attributes.request.http.method == "POST"
+	input.attributes.request.http.path == "/api/badge-scope-check"
+
+	user := verified_payload("x-verified-user-token-payload")
+
+	user.email == "sarah@org-a.example"
+	user.azp == "opencode-agent"
+	scope_contains(user.scope, "openid")
+
+	requested_action := input.attributes.request.http.headers["x-agntcy-requested-action"]
+	requested_repo := input.attributes.request.http.headers["x-agntcy-requested-repo"]
+
+	requested_action in badge_action_allowlist
+	requested_repo in badge_repo_allowlist
+
+	scoped_intent := sprintf("%s:%s", [requested_action, requested_repo])
+}
+
 verified_payload(header_name) := payload if {
 	headers := input.attributes.request.http.headers
 	encoded := headers[header_name]
