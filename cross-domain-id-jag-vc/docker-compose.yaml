@@ -837,6 +837,8 @@ services:
         condition: service_healthy
       vc-issuer:
         condition: service_healthy
+      opencode-agent:
+        condition: service_healthy
       jaeger:
         condition: service_healthy
     ports:
@@ -847,11 +849,8 @@ services:
       KC_B_URL: ${KC_B_INTERNAL_URL:-http://keycloak-b:8080}
       KC_B_REALM: org-b
       OPENCODE_CLIENT_ID: opencode-agent
-      OPENCODE_CLIENT_SECRET: ${OPENCODE_CLIENT_SECRET:-demo-opencode-secret-change-me}
       TRIAGE_CLIENT_ID: triage-agent
-      TRIAGE_CLIENT_SECRET: ${TRIAGE_CLIENT_SECRET:-demo-triage-secret-change-me}
       SARAH_USER: ${SARAH_USER:-sarah}
-      SARAH_PASSWORD: ${SARAH_PASSWORD:?set SARAH_PASSWORD in .env}
       SARAH_EMAIL: ${SARAH_EMAIL:-sarah@org-a.example}
       IDJAG_ISSUER_URL: http://idjag-issuer:9000
       IDENTITY_NODE_URL: http://identity-node:4000
@@ -859,6 +858,10 @@ services:
       EGRESS_PDP_URL: http://envoy-org-a:12000
       TRIAGE_AGENT_URL: http://envoy-org-b:10000
       DIR_APISERVER_URL: dir-apiserver:8888
+      # The real task lifecycle — /api/run just proxies to this.
+      OPENCODE_AGENT_URL: http://opencode-agent:8100
+      OPENCODE_MODEL: ${OPENCODE_MODEL:-ollama/qwen2.5-coder:7b}
+      OPENCODE_TIMEOUT: ${OPENCODE_TIMEOUT:-240}
       VAULT_ADDR: http://identity-vault:8200
       VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:?set VAULT_DEV_ROOT_TOKEN in .env}
       VAULT_KEY_NAME: org-a-issuer
