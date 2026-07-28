@@ -122,6 +122,11 @@
     .badge.error { background: rgba(248,81,73,.15); color: var(--err); }
     .badge.denied { background: rgba(219,143,47,.18); color: var(--denied); }
     .badge.skip { background: rgba(139,148,158,.12); color: var(--muted); }
+    .spi-badge { display: inline-flex; align-items: center; gap: 5px;
+      font-size: 11px; font-weight: 700; text-decoration: none; white-space: nowrap;
+      padding: 3px 10px; border-radius: 20px; margin-top: 6px;
+      background: rgba(188,140,255,.14); color: var(--purple); border: 1px solid rgba(188,140,255,.4); }
+    .spi-badge:hover { background: rgba(188,140,255,.24); }
     pre { margin: 0; padding: 12px 14px; background: #0b0f14; border-top: 1px solid var(--border);
       font-size: 11.5px; overflow-x: auto; color: #c9d1d9; max-height: 280px; }
     .err-msg { color: var(--err); padding: 0 14px 12px; font-family: ui-monospace, monospace; font-size: 12px; }
@@ -204,6 +209,10 @@
   <div>
     <h1>Cross-Domain AI Agent Remediation &mdash; ID-JAG + AGNTCY Directory &amp; Identity</h1>
     <div class="sub">Sarah (Org A) &rarr; OpenCode &rarr; <b>ID-JAG</b> &rarr; Keycloak B &rarr; Triage (Org B) &rarr; Sub-Agent &rarr; Gitea PR &nbsp;|&nbsp; <b>AGNTCY</b> dir + identity-node for agent VC registry</div>
+    <a class="spi-badge" href="https://github.com/agntcy/agent-identity-demos/discussions/18" target="_blank" rel="noopener"
+       title="ID-JAG assertions are minted natively by Keycloak A via a custom SPI extension (keycloak-idjag-spi) — a real grant_type=token-exchange call, not a separate mock issuer service. See Discussion #18 for the design.">
+      &#9889; Native Keycloak SPI mints the ID-JAG (Discussion #18)
+    </a>
   </div>
   <nav class="tabs">
     <button class="tab active" data-tab="demo">Live demo</button>
