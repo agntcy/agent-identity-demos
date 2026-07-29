@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # assisted-by claude code claude-sonnet-4-6
-"""identity-node-init — bootstrap a Vault-backed local trust authority for org-a.
+"""identity-node-init — bootstrap Vault-backed local trust authorities.
 
 identity-node's real REST API (v0.0.23) requires a self-issued "proof" JWT to
 register an Issuer or generate an Id: a JWT whose `iss` is `agntcy:<commonName>`,
@@ -12,15 +12,15 @@ alongside the request. On registration the *submitted* public key — not the
 key embedded in the JWT — is what verifies the signature, so the same keypair
 must be reused for every subsequent proof.
 
-Steps
------
+Registers EVERY issuer listed in ISSUERS (comma-separated `key_name:common_name`
+pairs, default "org-a-issuer:org-a,org-b-issuer:org-b") so each org attests its
+own agents. For each issuer:
 1. Wait for identity-node's REST port and Vault to be reachable.
 2. Enable Vault's transit secrets engine (idempotent).
-3. Create (or reuse) an RSA-2048 signing key in transit: org-a-issuer.
+3. Create (or reuse) an RSA-2048 signing key in transit.
 4. Fetch its public key (PEM), convert to JWK (n/e) via a minimal stdlib DER parser.
-5. Self-sign a proof JWT (iss=agntcy:org-a, sub=org-a) using Vault's /transit/sign.
-6. POST /v1alpha1/issuer/register to register org-a as a self-issued trust
-   authority (idempotent — "issuer already exists" is treated as success).
+5. Self-sign a proof JWT (iss=agntcy:<org>, sub=<org>) using Vault's /transit/sign.
+6. POST /v1alpha1/issuer/register (idempotent — "already exists" is success).
 
 Uses only Python stdlib (no third-party packages) — Vault does the signing,
 so no local crypto library is needed; PEM/DER parsing is hand-rolled below.
@@ -41,9 +41,17 @@ import urllib.request
 IDENTITY_NODE_URL = os.environ.get("IDENTITY_NODE_URL", "http://identity-node:4000").rstrip("/")
 VAULT_ADDR = os.environ.get("VAULT_ADDR", "http://identity-vault:8200").rstrip("/")
 VAULT_TOKEN = os.environ.get("VAULT_TOKEN", "")
-VAULT_KEY_NAME = os.environ.get("VAULT_KEY_NAME", "org-a-issuer")
-ORG_A_COMMON_NAME = os.environ.get("ORG_A_COMMON_NAME", "org-a")
-KID = f"{VAULT_KEY_NAME}-v1"
+# "key_name:common_name" pairs; legacy VAULT_KEY_NAME/ORG_A_COMMON_NAME are
+# honored as a single-issuer fallback if ISSUERS is not set.
+_DEFAULT_ISSUERS = "org-a-issuer:org-a,org-b-issuer:org-b"
+_LEGACY = f"{os.environ['VAULT_KEY_NAME']}:{os.environ['ORG_A_COMMON_NAME']}" \
+    if "VAULT_KEY_NAME" in os.environ and "ORG_A_COMMON_NAME" in os.environ and "ISSUERS" not in os.environ \
+    else None
+ISSUERS = [
+    tuple(pair.split(":", 1))
+    for pair in (os.environ.get("ISSUERS") or _LEGACY or _DEFAULT_ISSUERS).split(",")
+    if ":" in pair
+]
 
 MAX_TRIES = 30
 POLL_INTERVAL = 3  # seconds
@@ -151,18 +159,18 @@ def enable_transit() -> None:
         sys.exit(1)
 
 
-def create_signing_key() -> None:
-    status, body = _vault("POST", f"transit/keys/{VAULT_KEY_NAME}", {"type": "rsa-2048"})
+def create_signing_key(key_name: str) -> None:
+    status, body = _vault("POST", f"transit/keys/{key_name}", {"type": "rsa-2048"})
     if status in (200, 204):
-        print(f"[init] Vault signing key '{VAULT_KEY_NAME}' created.", flush=True)
+        print(f"[init] Vault signing key '{key_name}' created.", flush=True)
     else:
         # Re-creating an existing key is a no-op in Vault (200); anything else is fatal.
         print(f"[init] ERROR: creating signing key — HTTP {status}: {body}", file=sys.stderr)
         sys.exit(1)
 
 
-def get_public_jwk() -> dict:
-    status, body = _vault("GET", f"transit/keys/{VAULT_KEY_NAME}")
+def get_public_jwk(key_name: str) -> dict:
+    status, body = _vault("GET", f"transit/keys/{key_name}")
     if status != 200:
         print(f"[init] ERROR: reading signing key — HTTP {status}: {body}", file=sys.stderr)
         sys.exit(1)
@@ -170,12 +178,13 @@ def get_public_jwk() -> dict:
     latest_version = max(keys, key=int)
     pem = keys[latest_version]["public_key"]
     n_b64, e_b64 = pem_rsa_pubkey_to_jwk_ne(pem)
-    return {"kty": "RSA", "n": n_b64, "e": e_b64, "alg": "RS256", "use": "sig", "kid": KID}
+    return {"kty": "RSA", "n": n_b64, "e": e_b64, "alg": "RS256", "use": "sig",
+            "kid": f"{key_name}-v1"}
 
 
-def vault_sign_rs256(signing_input: str) -> str:
+def vault_sign_rs256(key_name: str, signing_input: str) -> str:
     input_b64 = base64.b64encode(signing_input.encode()).decode()
-    status, body = _vault("POST", f"transit/sign/{VAULT_KEY_NAME}", {
+    status, body = _vault("POST", f"transit/sign/{key_name}", {
         "input": input_b64,
         "hash_algorithm": "sha2-256",
         "signature_algorithm": "pkcs1v15",
@@ -188,7 +197,7 @@ def vault_sign_rs256(signing_input: str) -> str:
     return base64.urlsafe_b64encode(sig_bytes).rstrip(b"=").decode()
 
 
-def build_self_issued_jwt(common_name: str, sub: str, jwk: dict) -> str:
+def build_self_issued_jwt(key_name: str, common_name: str, sub: str, jwk: dict) -> str:
     """Build a self-issued proof JWT per identity-node's expected scheme:
     iss=agntcy:<commonName>, sub_jwk claim carries the public key, kid on both
     the JWS header and the JWK (required for jwx's key-set matching)."""
@@ -209,16 +218,16 @@ def build_self_issued_jwt(common_name: str, sub: str, jwk: dict) -> str:
     header_b64 = b64url(json.dumps(header, separators=(",", ":")).encode())
     payload_b64 = b64url(json.dumps(payload, separators=(",", ":")).encode())
     signing_input = f"{header_b64}.{payload_b64}"
-    return f"{signing_input}.{vault_sign_rs256(signing_input)}"
+    return f"{signing_input}.{vault_sign_rs256(key_name, signing_input)}"
 
 
-def register_issuer(jwk: dict) -> None:
-    proof_jwt = build_self_issued_jwt(ORG_A_COMMON_NAME, ORG_A_COMMON_NAME, jwk)
+def register_issuer(key_name: str, common_name: str, jwk: dict) -> None:
+    proof_jwt = build_self_issued_jwt(key_name, common_name, common_name, jwk)
     url = f"{IDENTITY_NODE_URL}/v1alpha1/issuer/register"
     payload = {
         "issuer": {
-            "organization": ORG_A_COMMON_NAME,
-            "commonName": ORG_A_COMMON_NAME,
+            "organization": common_name,
+            "commonName": common_name,
             "publicKey": jwk,
         },
         "proof": {"type": "JWT", "proofValue": proof_jwt},
@@ -226,9 +235,9 @@ def register_issuer(jwk: dict) -> None:
     status, body = _request("POST", url, payload)
     decoded = body.decode(errors="replace")
     if status == 200:
-        print(f"[init] Issuer '{ORG_A_COMMON_NAME}' registered as a self-issued trust authority.", flush=True)
+        print(f"[init] Issuer '{common_name}' registered as a self-issued trust authority.", flush=True)
     elif status == 400 and "already exists" in decoded:
-        print(f"[init] Issuer '{ORG_A_COMMON_NAME}' already registered — skipping.", flush=True)
+        print(f"[init] Issuer '{common_name}' already registered — skipping.", flush=True)
     else:
         print(f"[init] ERROR: issuer registration failed — HTTP {status}: {decoded[:400]}", file=sys.stderr)
         sys.exit(1)
@@ -241,11 +250,13 @@ def main() -> None:
     wait_for("Vault", _vault_probe)
     wait_for("identity-node", _identity_node_probe)
     enable_transit()
-    create_signing_key()
-    jwk = get_public_jwk()
-    print(f"[init] Got JWK for '{VAULT_KEY_NAME}' (kid={jwk['kid']}).", flush=True)
-    register_issuer(jwk)
-    print("[init] Done. org-a is a registered, Vault-backed local trust authority.", flush=True)
+    for key_name, common_name in ISSUERS:
+        create_signing_key(key_name)
+        jwk = get_public_jwk(key_name)
+        print(f"[init] Got JWK for '{key_name}' (kid={jwk['kid']}).", flush=True)
+        register_issuer(key_name, common_name, jwk)
+    orgs = ", ".join(cn for _, cn in ISSUERS)
+    print(f"[init] Done. Registered Vault-backed local trust authorities: {orgs}.", flush=True)
 
 
 if __name__ == "__main__":

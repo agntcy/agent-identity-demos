@@ -41,6 +41,21 @@ static_resources:
                     - name: triage_agent
                       domains: ["*"]
                       routes:
+                        # Org B badge-scope PDP: Triage presents the inbound
+                        # (Sarah-federated) access token + the narrowing it
+                        # wants; inline OPA decides and answers with the
+                        # scoped-down sub-badge scope/resource. Decision-only
+                        # route — no upstream.
+                        - match:
+                            path: "/api/subbadge-scope-check"
+                          direct_response:
+                            status: 200
+                            body:
+                              inline_string: '{"decision":"ALLOW","boundary":"org-b-subbadge-scope"}'
+                          response_headers_to_add:
+                            - header:
+                                key: content-type
+                                value: application/json
                         - match:
                             prefix: "/"
                           route:
@@ -87,11 +102,21 @@ static_resources:
                               cluster: keycloak_a_jwks
                               timeout: 5s
                             cache_duration: 300s
-                          forward: false
+                          # Forwarded so Triage can independently verify the
+                          # ID-JAG in-agent (defense in depth) — Envoy's
+                          # verification here remains the enforcement gate.
+                          forward: true
                           forward_payload_header: x-verified-actor-token-payload
                       rules:
                         - match:
                             path: "/health"
+                        # The PDP route carries only Triage's replayed access
+                        # token — no actor token yet (that's what's being
+                        # decided).
+                        - match:
+                            path: "/api/subbadge-scope-check"
+                          requires:
+                            provider_name: org_b_access_token
                         - match:
                             prefix: "/"
                           requires:
@@ -172,7 +197,11 @@ static_resources:
                           forward: true
                           forward_payload_header: x-verified-access-token-payload
                         idjag_sub_badge:
-                          issuer: http://idjag-issuer:9000
+                          # Keycloak B itself now mints the narrowed sub-badge
+                          # (keycloak-idjag-spi baked into keycloak-b/Dockerfile)
+                          # via a real token-exchange call from Triage — the
+                          # idjag-issuer mock is no longer in this path.
+                          issuer: http://keycloak-b:8080/keycloak-b/realms/org-b
                           audiences:
                             - http://keycloak-b:8080/keycloak-b/realms/org-b
                           from_headers:
@@ -180,8 +209,8 @@ static_resources:
                               value_prefix: "Bearer "
                           remote_jwks:
                             http_uri:
-                              uri: http://idjag-issuer:9000/jwks
-                              cluster: idjag_issuer_jwks
+                              uri: http://keycloak-b:8080/keycloak-b/realms/org-b/protocol/openid-connect/certs
+                              cluster: keycloak_b_jwks
                               timeout: 5s
                             cache_duration: 300s
                           forward: false
@@ -239,22 +268,6 @@ static_resources:
                     socket_address:
                       address: keycloak-a
                       port_value: 8080
-
-    # Still used by idjag_sub_badge above — triage-agent's narrowed
-    # sub-badge minting stays on idjag-issuer (out of scope for
-    # keycloak-idjag-spi; see DelegationAuthorization's javadoc).
-    - name: idjag_issuer_jwks
-      type: STRICT_DNS
-      connect_timeout: 5s
-      load_assignment:
-        cluster_name: idjag_issuer_jwks
-        endpoints:
-          - lb_endpoints:
-              - endpoint:
-                  address:
-                    socket_address:
-                      address: idjag-issuer
-                      port_value: 9000
 
     - name: triage_agent
       type: STRICT_DNS

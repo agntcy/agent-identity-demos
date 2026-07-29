@@ -49,6 +49,7 @@ It also wires in two AGNTCY components for real:
 | 9–10 | Org A egress PDP — may Sarah delegate this scope to Org B? | **Real** single-token JWT verification + inline OPA policy |
 | 11 | Keycloak B `jwt-bearer` redemption | **Real** |
 | 12–13 | Envoy ingress, ticket creation, OPA check, plan, sub-badge mint | **Real** two-token JWT verification + inline delegation-aware OPA policy |
+| — | Triage identity lifecycle: in-agent ID-JAG verification (KC-A JWKS), own CIMD identity under the **org-b** trust authority, sub-badge scope PDP at Envoy B, **native KC-B sub-badge mint** (keycloak-idjag-spi) | **Real** |
 | 14 | Sub-Agent spawned with the narrowed badge | **Real** |
 | 15–18 | Sub-Agent `jwt-bearer` exchange, Envoy resource enforcement, push file, open PR | **Real** |
 | 19 | Resource-boundary OPA decision | **Real** two-token JWT verification + repository-bound policy |
@@ -83,7 +84,16 @@ delegate*, and adds a second real Org A enforcement point: the
 **badge-scope PDP** (`/api/badge-scope-check` on Envoy A) verifies Sarah's
 Keycloak A access token and returns the narrowed, task-scoped intent the VC
 badge is minted with — least privilege decided by policy before any work
-runs.
+runs. Milestone 9 gives the Triage agent the same identity lifecycle:
+Triage independently re-verifies the inbound ID-JAG against Keycloak A's
+JWKS (defense in depth — no more blind trust of gateway headers), registers
+its own CIMD identity (`AGNTCY-triage-agent`) under a second, real **org-b
+trust authority** (its own Vault Transit key, registered at identity-node by
+the multi-issuer bootstrap), asks the new **sub-badge scope PDP**
+(`/api/subbadge-scope-check` on Envoy B) how narrowly the delegation may be
+re-narrowed, and only then mints the sub-badge **natively at Keycloak B**
+(the same keycloak-idjag-spi, now baked into `keycloak-b/Dockerfile`) —
+retiring idjag-issuer from the live delegation path entirely.
 
 **A note on `actor_token` and the `act` claim**: Keycloak 26.7's standard
 token exchange (`standard.token.exchange.enabled`) validates `subject_token`
@@ -160,14 +170,14 @@ flowchart TB
 |---|---|---|---|
 | `keycloak-a` | built from `./keycloak-a` (`quay.io/keycloak/keycloak:26.7` + `keycloak-idjag-spi`) | `8082` | Org A IdP (`org-a` realm), authenticates Sarah, natively mints ID-JAG assertions via a custom token-exchange SPI |
 | `kc-a-init` | `quay.io/keycloak/keycloak:26.7` | _(one-shot)_ | Registers `triage:create` optional scope |
-| `keycloak-b` | `quay.io/keycloak/keycloak:26.7` | `8083` | Org B IdP (`org-b` realm), redeems ID-JAG assertions |
+| `keycloak-b` | built from `./keycloak-b` (`quay.io/keycloak/keycloak:26.7` + `keycloak-idjag-spi`) | `8083` | Org B IdP (`org-b` realm), redeems ID-JAG assertions, natively mints Triage's narrowed sub-badge |
 | `kc-b-init` | `quay.io/keycloak/keycloak:26.7` | _(one-shot)_ | Registers `triage:create`/`gitea:*` optional scopes |
 | `vc-issuer` | built from `./vc-issuer` | `9003` | Issues + verifies signed VC badges (stand-in — identity-node has no badge API) |
-| `idjag-issuer` | built from `../archive/single-org-id-jag-app-access/idjag-issuer` | `9002` | Mints Triage's narrowed sub-badge ID-JAG (the initial Org A→B assertion is now minted natively by `keycloak-a`) |
+| `idjag-issuer` | built from `../archive/single-org-id-jag-app-access/idjag-issuer` | `9002` | Legacy assertion minter — retired from the live delegation path (both mints are Keycloak-native now); kept for the webapp's older flow |
 | `identity-postgres` | `postgres:16` | _(internal)_ | DB for identity-node |
-| `identity-vault` | `hashicorp/vault:1.17` | _(internal)_ | Holds the org-a trust-authority signing key (Transit engine) |
+| `identity-vault` | `hashicorp/vault:1.17` | _(internal)_ | Holds the org-a and org-b trust-authority signing keys (Transit engine) |
 | `identity-node` | `ghcr.io/agntcy/identity/node:0.0.23` | `4005` (REST), `4006` (gRPC) | AGNTCY identity node — CIMD id generate/resolve |
-| `identity-node-init` | `python:3.12-slim` | _(one-shot)_ | Bootstraps Vault Transit + registers org-a as trust authority |
+| `identity-node-init` | `python:3.12-slim` | _(one-shot)_ | Bootstraps Vault Transit + registers org-a AND org-b as trust authorities |
 | `dir-postgres` | `postgres:16` | _(internal)_ | Search index DB for the Directory |
 | `dir-zot` | `ghcr.io/project-zot/zot:v2.1.17` | `5556` | OCI registry backing the Directory's content-addressed storage |
 | `dir-apiserver` | `ghcr.io/agntcy/dir-apiserver:v1.6.0` | `8888` | AGNTCY Directory Node (gRPC only) |
@@ -252,8 +262,8 @@ sequenceDiagram
     Envoy->>KCA: fetch/cached JWKS
     Note over Envoy: verify both JWTs; enforce scope, chain, signed intent, repo
     Envoy->>Triage: ALLOW + policy decision headers
-    Triage->>IDJAG: mint sub-badge (gitea:write/pr, resource=target repo)
-    IDJAG-->>Triage: sub-badge (act_chain: Sarah→OpenCode→Triage→Sub-Agent)
+    Triage->>KCB: mint sub-badge natively (token-exchange, requested_token_type=id-jag,<br/>scope/resource = the Envoy B OPA-approved narrowing)
+    KCB-->>Triage: sub-badge (act_chain: Sarah→OpenCode→Triage→Sub-Agent)
     Triage->>Sub: spawn with sub-badge
 
     Sub->>KCB: jwt-bearer exchange
@@ -305,10 +315,44 @@ ollama serve                    # or keep the Ollama desktop app running
 Containers reach it via `host.docker.internal:11434`. On Linux, Ollama must
 listen beyond loopback: `OLLAMA_HOST=0.0.0.0 ollama serve`. Tool-calling
 quality improves with a larger context window (Ollama's `num_ctx` ≥ 16k).
-Alternative provider: set `OPENCODE_MODEL=anthropic/claude-sonnet-4-5` and
-`ANTHROPIC_API_KEY` in `.env`. **Without Ollama or a key, every run still
-succeeds** — the `opencode-plan` step reports `status=skipped` and the
-identity chain completes normally.
+**Without any model server, every run still succeeds** — the `opencode-plan`
+step reports `status=skipped` and the identity chain completes normally.
+
+### Using your own model server (on-prem GPUs, vLLM/TGI/SGLang)
+
+Any endpoint that speaks the **OpenAI-compatible `/v1` API** works — point
+the stack at it instead of Ollama:
+
+```bash
+# .env
+LLM_BASE_URL=http://gemma.internal:8000/v1     # your endpoint's /v1 base
+LLM_API_KEY=                                    # optional bearer token
+OPENCODE_MODEL=onprem/gemma-3-27b-it            # <label>/<served model id>
+```
+
+The provider label before the `/` is free-form (it only names the provider
+block in the generated `opencode.json`); the part after it **must match the
+model id your server advertises** — check with:
+
+```bash
+curl -s $LLM_BASE_URL/models | jq -r '.data[].id'
+```
+
+Then `docker compose up -d opencode-server opencode-agent` and confirm:
+
+```bash
+curl -fsS http://localhost:8100/api/config | jq '{opencode_server, llm, opencode_model}'
+```
+
+Expected: `llm.reachable=true` with your `base_url`. The endpoint must be
+reachable **from the Docker host** (VPN or same network); `host.docker.internal`
+is only needed for services on your laptop. Cloud providers remain available
+via their built-in names (`OPENCODE_MODEL=anthropic/claude-sonnet-4-5` plus
+`ANTHROPIC_API_KEY`).
+
+Note: the demo's plan step only needs prose from OpenCode's read-only `plan`
+agent, so it is undemanding. If you later let OpenCode *edit code*, the
+serving stack's function-calling support becomes the limiting factor.
 
 The first build pulls the pinned Envoy base image and Built On Envoy Composer
 artifact. To deliberately refresh those pinned inputs:
@@ -1004,6 +1048,62 @@ enforcement point (policy-scoped badge BEFORE any task work).
    `x-agntcy-scoped-intent` decision. A garbage bearer token gets 401 from
    the JWT filter before OPA ever runs.
 
+### Triage identity lifecycle (Milestone 9) reviewer verification
+
+Verifies Org B's trust authority, the sub-badge scope PDP, and the native
+Keycloak B sub-badge mint.
+
+1. Rego suite (includes the 6 sub-badge scope tests):
+
+   ```bash
+   docker run --rm \
+     -v "$PWD/cross-domain-id-jag-vc/envoy/policies:/policies:ro" \
+     openpolicyagent/opa:1.8.0 \
+     test /policies/ticket-ingress.rego /policies/ticket-ingress_test.rego -v
+   ```
+
+   Expected: 15/15 (9 ticket-ingress + 6 sub-badge scope).
+
+2. Org B is a real registered trust authority:
+
+   ```bash
+   curl -fsS http://localhost:4005/v1alpha1/issuer/org-b/.well-known/jwks.json | jq .
+   ```
+
+3. Run the full sequence and check Triage's new steps:
+
+   ```bash
+   RUN_OUTPUT="$(mktemp)"
+   curl -fsS -X POST http://localhost:8100/api/run \
+     -H 'Content-Type: application/json' \
+     -d '{"repo":"demo-admin/payments-service"}' -o "$RUN_OUTPUT"
+   jq '{ok,
+        verify_idjag: [.steps[] | select(.id == "verify-idjag")][0].status,
+        triage_identity: [.steps[] | select(.id == "cimd-generate-id")] | map(.result.id),
+        subbadge_scope: [.steps[] | select(.id == "subbadge-scope-check")][0].result,
+        subbadge_issuer: ([.steps[] | select(.id == "mint-sub-badge")][0].token
+          | split(".")[1] | @base64d | fromjson | .iss)}' "$RUN_OUTPUT"
+   rm "$RUN_OUTPUT"
+   ```
+
+   Expected: `ok=true`; `verify_idjag=ok` (in-agent verification);
+   `triage_identity` includes both `AGNTCY-opencode-agent` and
+   `AGNTCY-triage-agent`; `subbadge_scope` shows ALLOW with
+   `scoped_scope="openid gitea:write gitea:pr"`; `subbadge_issuer` is
+   Keycloak B's realm URL (native mint), not idjag-issuer.
+
+4. Escalation is denied by the PDP — request `triage:create` on a sub-badge
+   (requires a valid inbound access token; simplest is re-running step 3 and
+   watching Envoy stats):
+
+   ```bash
+   curl -fsS 'http://127.0.0.1:9901/stats?filter=opa_requests_total'
+   ```
+
+   Both allowed and denied counters appear after exercising the negative
+   OPA tests in step 1 (policy-level proof of the escalation/protected-repo
+   denials).
+
 ### Via the webapp (recommended)
 
 Open **http://localhost:8090**. Click **Run (animated)** to watch all 22
@@ -1135,7 +1235,7 @@ cross-domain-id-jag-vc/
 ├── agent-dir-init/            # one-shot: pushes static OASF records for all agents
 ├── opencode-server/           # REAL OpenCode (opencode-ai@1.18.7, headless, Ollama provider)
 ├── opencode-agent/            # Org A identity harness (OAuth → identity → scoped badge → work → delegate)
-├── triage-agent/              # Org B mock agent (ticket → sub-badge → spawn)
+├── triage-agent/              # Org B agent: verify ID-JAG in-agent → own identity (org-b) → scoped sub-badge (KC-B native) → spawn
 ├── sub-agent/                 # Org B bounded-privilege mock agent
 └── webapp/                    # animated sequence-diagram demo UI (FastAPI + vanilla JS)
 ```

@@ -46,6 +46,27 @@
         "jwtAuthorizationGrantAssertionReuseAllowed": "false",
         "jwtAuthorizationGrantMaxAllowedAssertionExpiration": "300"
       }
+    },
+    {
+      "alias": "id-jag-keycloak-b",
+      "displayName": "ID-JAG Issuer (Keycloak B self, native — narrowed sub-badges)",
+      "providerId": "keycloak-oidc",
+      "enabled": true,
+      "trustEmail": true,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "config": {
+        "issuer": "http://keycloak-b:8080/keycloak-b/realms/org-b",
+        "authorizationUrl": "http://keycloak-b:8080/keycloak-b/realms/org-b/protocol/openid-connect/auth",
+        "tokenUrl": "http://keycloak-b:8080/keycloak-b/realms/org-b/protocol/openid-connect/token",
+        "jwksUrl": "http://keycloak-b:8080/keycloak-b/realms/org-b/protocol/openid-connect/certs",
+        "useJwksUrl": "true",
+        "clientId": "idjag-receiver",
+        "clientSecret": "demo-idjag-secret-change-me",
+        "jwtAuthorizationGrantEnabled": "true",
+        "jwtAuthorizationGrantAssertionReuseAllowed": "false",
+        "jwtAuthorizationGrantMaxAllowedAssertionExpiration": "300"
+      }
     }
   ],
   "clients": [
@@ -60,7 +81,10 @@
       "consentRequired": false,
       "attributes": {
         "oauth2.jwt.authorization.grant.enabled": "true",
-        "oauth2.jwt.authorization.grant.idp": "id-jag-keycloak-a"
+        "oauth2.jwt.authorization.grant.idp": "id-jag-keycloak-a",
+        "standard.token.exchange.enabled": "true",
+        "idjag.allowed.scopes": "openid gitea:write gitea:pr",
+        "idjag.allowed.audiences": "http://keycloak-b:8080/keycloak-b/realms/org-b"
       }
     },
     {
@@ -74,7 +98,7 @@
       "consentRequired": false,
       "attributes": {
         "oauth2.jwt.authorization.grant.enabled": "true",
-        "oauth2.jwt.authorization.grant.idp": "id-jag"
+        "oauth2.jwt.authorization.grant.idp": "id-jag-keycloak-b"
       }
     }
   ],
@@ -89,7 +113,8 @@
       "credentials": [],
       "federatedIdentities": [
         { "identityProvider": "id-jag", "userId": "sarah@org-a.example", "userName": "sarah" },
-        { "identityProvider": "id-jag-keycloak-a", "userId": "sarah@org-a.example", "userName": "sarah" }
+        { "identityProvider": "id-jag-keycloak-a", "userId": "sarah@org-a.example", "userName": "sarah" },
+        { "identityProvider": "id-jag-keycloak-b", "userId": "sarah@org-a.example", "userName": "sarah" }
       ]
     }
   ]
