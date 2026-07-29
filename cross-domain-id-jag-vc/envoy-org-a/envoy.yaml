@@ -57,20 +57,56 @@ static_resources:
                             status: 200
                             body:
                               inline_string: '{"decision":"ALLOW","boundary":"org-a-badge-scope"}'
+                          # io.builtonenvoy.opa's ALLOW path only ever adds the rego
+                          # decision's "headers" map onto the (upstream-bound) REQUEST
+                          # — see tetratelabs/built-on-envoy's opa/plugin.go, which
+                          # calls RequestHeaders().Set(...) on allow, never touches the
+                          # response. Since this route has no real upstream (a static
+                          # direct_response), those headers would otherwise vanish;
+                          # %REQ(...)% here copies them from the request Envoy just
+                          # decorated back onto the response we actually send.
                           response_headers_to_add:
                             - header:
                                 key: content-type
                                 value: application/json
+                            - header:
+                                key: x-agntcy-policy-decision
+                                value: "%REQ(x-agntcy-policy-decision)%"
+                            - header:
+                                key: x-agntcy-policy-rule
+                                value: "%REQ(x-agntcy-policy-rule)%"
+                            - header:
+                                key: x-agntcy-policy-enforcer
+                                value: "%REQ(x-agntcy-policy-enforcer)%"
+                            - header:
+                                key: x-agntcy-scoped-intent
+                                value: "%REQ(x-agntcy-scoped-intent)%"
+                            - header:
+                                key: x-agntcy-scoped-resource
+                                value: "%REQ(x-agntcy-scoped-resource)%"
                         - match:
                             prefix: "/"
                           direct_response:
                             status: 200
                             body:
                               inline_string: '{"decision":"ALLOW","boundary":"org-a-egress"}'
+                          # Same fix as /api/badge-scope-check above.
                           response_headers_to_add:
                             - header:
                                 key: content-type
                                 value: application/json
+                            - header:
+                                key: x-agntcy-policy-decision
+                                value: "%REQ(x-agntcy-policy-decision)%"
+                            - header:
+                                key: x-agntcy-policy-rule
+                                value: "%REQ(x-agntcy-policy-rule)%"
+                            - header:
+                                key: x-agntcy-policy-enforcer
+                                value: "%REQ(x-agntcy-policy-enforcer)%"
+                            - header:
+                                key: x-agntcy-delegation-depth
+                                value: "%REQ(x-agntcy-delegation-depth)%"
                 http_filters:
                   - name: envoy.filters.http.jwt_authn
                     typed_config:

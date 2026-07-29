@@ -115,6 +115,21 @@ def _ok(status: str) -> bool:
     return status in ("ok", "denied", "skipped")
 
 
+def _decode_jwt_payload_unverified(token: str) -> dict:
+    """Decode a JWT's payload for display only — no signature check. Used
+    purely so the webapp's step toast has real claims to show; never used
+    for a trust decision (every token here is independently, cryptographically
+    verified server-side by the service that consumes it)."""
+    import base64
+
+    try:
+        payload_b64 = token.split(".")[1]
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _model_parts() -> tuple[str, str]:
     provider, _, model_id = OPENCODE_MODEL.partition("/")
     return provider, model_id or OPENCODE_MODEL
@@ -453,7 +468,8 @@ async def run(body: RunRequest | None = None):
             })
             if r.status_code == 200:
                 sarah_token = r.json()["access_token"]
-                s.update(status="ok", token_preview=sarah_token[:48] + "…")
+                s.update(status="ok", token_preview=sarah_token[:48] + "…",
+                         result={"token": sarah_token})
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)
@@ -537,7 +553,7 @@ async def run(body: RunRequest | None = None):
             r = await client.post(f"{VC_ISSUER_URL}/vc/verify", json={"badge": badge})
             if r.status_code == 200 and r.json().get("valid"):
                 s.update(status="ok", token_preview=badge[:48] + "…",
-                         result={"badge_claims": r.json()["claims"]})
+                         result={"token": badge, "badge_claims": r.json()["claims"]})
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)
@@ -592,6 +608,7 @@ async def run(body: RunRequest | None = None):
             if r.status_code == 200:
                 exchanged_token = r.json()["access_token"]
                 s.update(status="ok", token_preview=exchanged_token[:48] + "…", result={
+                    "token": exchanged_token,
                     "subject": SARAH_EMAIL,
                     "actor": OPENCODE_CLIENT_ID,
                     "note": (
@@ -638,7 +655,10 @@ async def run(body: RunRequest | None = None):
             })
             if r.status_code == 200:
                 assertion = r.json()["access_token"]
-                s.update(status="ok", token_preview=assertion[:48] + "…")
+                s.update(status="ok", token_preview=assertion[:48] + "…", result={
+                    "assertion": assertion,
+                    "claims": _decode_jwt_payload_unverified(assertion),
+                })
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)
@@ -663,7 +683,13 @@ async def run(body: RunRequest | None = None):
                 headers={"Authorization": f"Bearer {assertion}"},
             )
             if r.status_code == 200:
-                s.update(status="ok", result=r.json() if r.content else {"decision": "ALLOW"})
+                result = r.json() if r.content else {"decision": "ALLOW"}
+                result.update({
+                    "rule": r.headers.get("x-agntcy-policy-rule", ""),
+                    "enforced_by": r.headers.get("x-agntcy-policy-enforcer", ""),
+                    "delegation_depth": r.headers.get("x-agntcy-delegation-depth", ""),
+                })
+                s.update(status="ok", result=result)
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)
@@ -688,7 +714,8 @@ async def run(body: RunRequest | None = None):
             })
             if r.status_code == 200:
                 triage_token = r.json()["access_token"]
-                s.update(status="ok", token_preview=triage_token[:48] + "…")
+                s.update(status="ok", token_preview=triage_token[:48] + "…",
+                         result={"token": triage_token})
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)
