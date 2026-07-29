@@ -528,9 +528,9 @@
     Because Org B has its own IdP and access control, OpenCode cannot act directly — it must
     <i>assert</i> Sarah's delegation cross-domain using the ID-JAG protocol.</p>
 
-    <p>Today's identity systems assume the caller is the user; an autonomous agent acting on
-    someone's behalf breaks that assumption. This demo is a working answer to the questions that
-    raises, built on three design principles:</p>
+    <p>Conventional identity systems assume the caller is the human principal; an autonomous agent
+    acting under delegated authority breaks that assumption. This is a reference implementation of
+    the alternative, built on three design principles:</p>
     <table>
       <tr><th>Principle</th><th>What it means here</th></tr>
       <tr><td><b>Identity ≠ Execution</b></td><td>Who initiated (Sarah's <code>sub</code>) and who
@@ -784,48 +784,50 @@ POST /realms/org-b/protocol/openid-connect/token
   }
 
   // ── Story overview (shown once, before the animated run starts) ───────────
-  const INTRO_STORY = "Sarah (Org A) found a CVE in a repo she has no access to — it lives in Org B. " +
-    "Watch her AI agent, OpenCode (a real open-source agent, not a mock), cross that boundary on " +
-    "her behalf, built on three principles: Identity ≠ Execution — Sarah's `sub` and the agent's " +
-    "`act` stay distinct at every hop, never collapsed into one identity. Independent Trust " +
-    "Domains — Org A and Org B each verify signatures and evaluate policy on their own terms, no " +
-    "shared IdP required. Complete Auditability — every hop is independently verified and recorded " +
-    "in the token's act-chain, not just logged. OpenCode registers its own Vault-backed identity, " +
-    "asks policy to scope a delegation badge to exactly this task before doing any work, mints a " +
-    "signed ID-JAG asserting Sarah's delegation, and hands off to Triage — who narrows the " +
-    "privilege even further before spawning a bounded Sub-Agent that opens the actual fix PR.";
+  const INTRO_STORY = "Sarah (Org A) identifies a CVE in a repository she cannot access directly — " +
+    "it belongs to Org B. Her AI agent, OpenCode (a real, non-mocked agent), crosses that trust " +
+    "boundary on her behalf, following three design principles. Identity ≠ Execution: Sarah's " +
+    "`sub` claim and the agent's `act` claim remain distinct at every hop and are never collapsed " +
+    "into a single identity. Independent Trust Domains: Org A and Org B each validate signatures " +
+    "against their own JWKS and evaluate policy independently, with no shared IdP. Complete " +
+    "Auditability: every hop is independently verified and recorded in the token's `act` chain, " +
+    "not merely logged. OpenCode registers its own Vault-backed identity, obtains policy approval " +
+    "to scope a delegation credential to this exact task before any work executes, mints a signed " +
+    "ID-JAG asserting Sarah's delegation, and hands off to Triage, which narrows the privilege " +
+    "further before spawning a bounded Sub-Agent that opens the remediation PR.";
 
   // ── Step explainer (right-side toast) ─────────────────────────────────────
-  // Each entry pairs the mechanics with the "why": which of the three design
-  // principles (Identity ≠ Execution — sub vs act; Independent Trust
-  // Domains — each org evaluates on its own terms; Complete Auditability —
-  // every hop produces a verifiable record) this step exists to serve, and
-  // what's actually being cryptographically verified, not just parsed.
+  // Each entry pairs the mechanics with the rationale: which of the three
+  // design principles (Identity ≠ Execution — sub vs act; Independent Trust
+  // Domains — each org evaluates unilaterally; Complete Auditability — every
+  // hop yields a verifiable record) this step serves, and what is actually
+  // being cryptographically verified, not merely parsed. Written for an
+  // audience already fluent in OAuth/OIDC/JWT — precision over exposition.
   const STEP_EXPLAIN = {
-    'sarah-login': "Sarah authenticates directly with Org A's Keycloak — the one and only step with a human in the loop. Her `sub` (sarah@org-a.example) is now anchored to a real, verifiable token; every claim from here on carries it forward untouched, kept distinct from whichever agent is actually executing (`act`). Who initiated and who executed must never collapse into one identity — that's the architecture's first design principle.",
-    'cimd-generate-id': "Before OpenCode can act for anyone, it needs its OWN provable identity, separate from Sarah's — an agent impersonating its human isn't accountability. Here's how that's proven: org-a holds a private signing key inside Vault (a secrets manager) that never leaves Vault. To register, OpenCode asks Vault to sign a short statement — \"this id belongs to org-a's opencode-agent\" — using that key. identity-node then checks the signature against org-a's public key, which it already has on file from an earlier registration. If the two match, the statement could only have come from Vault's key, so identity-node trusts it and mints the id. That signed statement is the cryptographic root every later `act` claim traces back to: proof the agent's identity was vouched for by org-a's own key, not just self-declared.",
-    'cimd-resolve-id': "OpenCode resolves its own id back to ResolverMetadata + public key — independently confirming the registration actually took, the same way any relying party would verify an identity before trusting it, rather than trusting its own say-so.",
-    'badge-scope-check': "This is where \"was it authorized?\" gets enforced, before any work happens. OpenCode presents Sarah's own OAuth token (cryptographic proof of who's really behind this) plus the specific task to Envoy A + inline OPA. Policy — not the agent — decides how narrowly to scope the badge. Least privilege is a policy decision made up front, not a promise the agent makes to self-limit.",
-    'resolve-badge': "vc-issuer mints a real signed W3C verifiable credential (vc+jwt) — the AGNTCY badge — scoped to exactly the intent policy just approved, and OpenCode verifies that signature immediately rather than trusting its own mint call. This badge is a capability attestation anchored in an external trust root (vc-issuer's signing key), not a self-asserted claim about what the agent is allowed to do.",
-    'scan': "Only now, under a badge policy already narrowed to this one task, does OpenCode scan the repo and find a HIGH-severity CVE. Mocked step — no real vulnerability scanner runs in this demo — everything upstream and downstream of it is real.",
-    'opencode-plan': "The real open-source OpenCode agent (opencode.ai), running headless in its own container, analyzes the CVE and produces an actual remediation plan via a real LLM call — the plan text streams in live above as it's generated. Non-fatal by design — reviewers without a reachable model still get a green identity-chain run; this step then reports skipped. Turn off \"Real OpenCode (LLM)\" in the controls to use a fast, clearly-labeled mock plan instead — a deliberate fallback independent of model-provider reliability, not a workaround for a real bug.",
-    'dir-push': "OpenCode records this remediation turn in the AGNTCY Directory as a content-addressed (CID) record — immutable and tamper-evident. This is \"can we prove it?\" starting to accumulate: every hop from here on produces a record that outlives the transaction itself.",
-    'dir-search': "OpenCode discovers triage-agent by name from a shared directory record, not a hardcoded URL or pre-shared network topology — organizations only need to publish who they are, not how to reach them.",
-    'kc-a-exchange': "This is the RFC 8693 token exchange by name. Keycloak validates Sarah's subject_token for real — cryptographic proof she's still the one behind this request — but, a real and documented Keycloak platform behavior, doesn't itself stamp an `act` claim onto the result. That gap is exactly why the ID-JAG gets minted as its own explicit, signed statement next: sub and act have to be carried forward on purpose, never assumed.",
-    'egress-check': "Org A's own trust boundary, evaluated independently before anything leaves the organization: may Sarah actually delegate this scope to Org B? Envoy verifies the ID-JAG's signature against Keycloak A's own JWKS — cryptographic proof it's genuinely Org A's — and inline OPA checks scope, intent, and delegation-chain depth. Org A enforces its own policy at its own boundary; it never has to take Org B's judgment on faith.",
-    'mint-idjag': "Keycloak A itself mints this ID-JAG — a real grant_type=token-exchange call handled by a custom SPI extension (keycloak-idjag-spi), not a separate mock issuer. Signed with Keycloak's own realm key, so Envoy and Keycloak B trust the same JWKS Keycloak already publishes. The resulting token carries sub=sarah@org-a.example (who initiated) and act_chain=[opencode-agent] (who's executing) side by side, cryptographically bound together — the sub≠act propagation the whole architecture depends on, made portable across the org boundary.",
-    'kc-b-exchange': "Org B's Keycloak independently verifies the ID-JAG's signature against Keycloak A's JWKS — no shared IdP, no pre-established trust beyond each side publishing its own keys — and only then issues its own scoped local access token. This is the actual cross-organizational trust boundary: Org B evaluates Org A's assertion on its own terms, not Org A's.",
-    'create-ticket': "OpenCode sends both the Org B access token and the original actor token through Envoy. Both signatures are verified independently — the access token against Keycloak B's keys, the actor token against Keycloak A's — before Org B's own inline OPA policy decides whether to admit the request based on subject, scope, chain, signed intent, and target repo.",
-    'opa-ingress': "Org B evaluates its OWN policy over the delegation chain, scope, intent, method, path, and repository — chain integrity and delegation depth enforced independently of whatever Org A already decided at its egress boundary. Two organizations, two separate policy evaluations, the same request.",
-    'plan': "Triage plans the fix and decides the actual code change should be delegated to a bounded sub-agent, not done itself.",
-    'mint-sub-badge': "Triage mints a narrower sub-badge for Sub-Agent — scoped only to gitea:write and gitea:pr, excluding triage:create, and cryptographically bound to the exact target repository. Capability can only narrow at each delegation hop, never widen: the sub-badge's scope is a strict subset of what Triage itself holds. The chain so far — Sarah → OpenCode → Triage → Sub-Agent — is carried forward intact.",
-    'spawn-sub-agent': "Triage spawns Sub-Agent with the narrowed badge. Even though Triage launched it, Sub-Agent can't exceed what that badge grants — the badge is the actual constraint, not whatever Triage's process happens to allow.",
-    'idjag-gitea': "Sub-Agent carries two independently-verified credentials to the resource boundary: its scoped Keycloak access token and the original signed sub-badge. Envoy checks both signatures separately — neither one alone is sufficient.",
-    'push-file': "Sub-Agent asks Envoy to push a fix to a fresh feature branch. Inline OPA requires gitea:write and checks the signed intent, delegation chain, ticket, operation, and exact repository before forwarding — the same kind of independent, per-boundary evaluation as every other hop.",
-    'open-pr': "Sub-Agent asks Envoy to open a pull request. The resource policy requires the separate gitea:pr scope, a main base branch, an agent feature branch, and the repository signed into the sub-badge — each a separate condition, all independently checked.",
-    'denied-pr-attempt': "Sub-Agent tries the same PR operation against demo-protected. Envoy refuses it because that repository is outside the signed resource claim, even though the token still carries gitea:pr. The denial is the point: the same chain-integrity check that allowed the real PR is applied here without exception, and the refusal itself becomes part of the audit trail.",
-    'opa-egress': "Org B's real inline resource policy verified both JWTs, delegation depth, narrowed scope, signed intent, operation shape, and exact repository before Gitea Gateway ever received the request.",
-    'pr-created': "The PR is live. The token's act_chain (Sarah → OpenCode → Triage → Sub-Agent) is the complete, cryptographically-signed audit trail: not a log entry that could be edited after the fact, but a chain of claims that were independently verified at every hop — actor, delegator, capability, resource, and policy decision, end to end.",
+    'sarah-login': "Sarah authenticates against Org A's Keycloak — the only step in this flow with a human principal. This establishes `sub=sarah@org-a.example` as the anchor claim; every downstream token carries it forward unaltered, kept distinct from whichever agent is actually executing (`act`). Identity and execution are not permitted to collapse into a single principal at any point in the chain.",
+    'cimd-generate-id': "OpenCode requires its own provable identity, independent of Sarah's — an agent asserting its principal's identity as its own would defeat accountability rather than establish it. Org A's private signing key resides in Vault's Transit secrets engine, which functions here as a signing oracle: the key never leaves Vault's boundary, is never exported, and is never held by any calling service. To register, OpenCode submits a claim to Vault's /transit/sign endpoint; Vault returns only the RS256 signature, never the key material. identity-node verifies that signature against org-a's previously registered public key before minting the id. This signature is the root of trust every subsequent `act` claim traces back to.",
+    'cimd-resolve-id': "OpenCode resolves its own id back to its ResolverMetadata and public key, independently confirming the registration rather than relying on the mint operation's own success response.",
+    'badge-scope-check': "Authorization is enforced here, prior to any work being performed. OpenCode presents Sarah's own OAuth access token, plus the requested action and resource, to Envoy A and inline OPA. Policy determines the narrowest permissible intent for this task — least privilege is a policy decision, not a constraint the agent self-imposes.",
+    'resolve-badge': "vc-issuer mints a W3C Verifiable Credential (vc+jwt) scoped to exactly the intent OPA approved; OpenCode verifies the signature before using it. This VC becomes the `actor_token` in the RFC 8693 exchange that follows — a capability attestation anchored in vc-issuer's signing key, not a self-asserted claim.",
+    'scan': "The scan executes only under the now task-scoped VC. This step is mocked — no vulnerability scanner is integrated in this demo.",
+    'opencode-plan': "The real OpenCode agent (opencode.ai), running headless in its own container, produces the remediation plan via an actual model completion, streamed live above through opencode-server's own SSE event API. This step is non-fatal by design: if the model backend is unreachable, it reports `skipped` rather than failing the run, since model availability is orthogonal to the correctness of the identity and delegation chain. The \"Real OpenCode (LLM)\" toggle forces a fast, explicitly labeled mock plan — a deliberate fallback, not error suppression.",
+    'dir-push': "OpenCode pushes an OASF turn record to the AGNTCY Directory, content-addressed by CID. This is the first entry in an audit trail that exists independently of the tokens' own claims.",
+    'dir-search': "OpenCode resolves triage-agent's endpoint via a directory lookup by name — service discovery through a shared record, not a hardcoded URL or pre-shared network topology.",
+    'kc-a-exchange': "RFC 8693 token exchange at Keycloak A: `subject_token` is Sarah's access token, `actor_token` is the VC. Keycloak validates `subject_token` cryptographically but — a documented platform behavior, not a workaround — does not itself emit an `act` claim derived from `actor_token`. This is precisely why the ID-JAG is minted as its own explicit, signed assertion in the next step.",
+    'egress-check': "Org A's own policy decision point, evaluated before the assertion crosses the org boundary: Envoy validates the ID-JAG's signature against Keycloak A's JWKS, and inline OPA checks scope, intent, and delegation-chain depth. This decision is made unilaterally by Org A; it does not defer to Org B's evaluation.",
+    'mint-idjag': "Keycloak A mints the ID-JAG natively via grant_type=token-exchange (keycloak-idjag-spi), with requested_token_type=urn:ietf:params:oauth:token-type:id-jag, signed with Keycloak's own realm key — so Envoy and Keycloak B validate against the same JWKS Keycloak already publishes, with no separate mock issuer. The resulting token carries sub=sarah@org-a.example and act_chain=[opencode-agent] as sibling claims under one signature — the sub/act separation made portable across the trust boundary.",
+    'kc-b-exchange': "Keycloak B independently validates the ID-JAG's signature against Keycloak A's JWKS — with no shared IdP and no pre-established federation beyond each side publishing its own JWKS — then issues its own scoped access token via a jwt-bearer grant (RFC 7523). This is the actual trust boundary: Org B's evaluation is authoritative, not Org A's assertion.",
+    'create-ticket': "Both the Org B access token and the original ID-JAG actor token are presented to Envoy. Each signature is validated independently against its own issuer's JWKS before Org B's inline OPA evaluates subject, scope, delegation chain, signed intent, and target repository.",
+    'opa-ingress': "Org B evaluates its own policy over delegation chain, scope, intent, method, path, and repository, independent of Org A's egress decision. Two unilateral policy evaluations are applied to the same request.",
+    'plan': "Triage plans the remediation and delegates execution to a bounded Sub-Agent rather than performing the change itself.",
+    'mint-sub-badge': "Triage's own policy decision point determines the narrowed scope, and Triage mints the sub-badge natively at Keycloak B, scoped to gitea:write/gitea:pr only — a strict subset of Triage's own grant, cryptographically bound to the target repository. The chain now carries Sarah → OpenCode → Triage → Sub-Agent.",
+    'spawn-sub-agent': "Sub-Agent is spawned with the narrowed badge as its actual capability boundary; Triage's own process privileges are not inherited — the badge, not the parent process, is what gets enforced downstream.",
+    'idjag-gitea': "Sub-Agent presents two independently issued and independently verified credentials at the resource boundary: its own Keycloak B access token and the signed sub-badge. Envoy validates both signatures separately; neither is sufficient alone.",
+    'push-file': "gitea:write, signed intent, delegation chain, and exact repository are all checked by inline OPA before the push is forwarded.",
+    'open-pr': "A separate gitea:pr scope is required, along with base/feature branch constraints and the repository bound into the sub-badge — evaluated as independent conditions, not implied by gitea:write.",
+    'denied-pr-attempt': "The same operation is attempted against a repository outside the sub-badge's signed resource claim, and is denied despite the token still carrying gitea:pr. The same chain-integrity check applied on the allow path is applied here without exception; the denial itself becomes part of the audit record.",
+    'opa-egress': "The final inline resource-policy evaluation checks both JWTs, delegation depth, narrowed scope, signed intent, operation shape, and exact repository before Gitea Gateway receives the request.",
+    'pr-created': "The completed act_chain (Sarah → OpenCode → Triage → Sub-Agent) is itself the audit artifact: claims independently verified at every hop, not a mutable log entry describing what occurred after the fact.",
   };
 
   const toastEl = document.getElementById('sideToast');
