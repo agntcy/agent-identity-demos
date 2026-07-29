@@ -469,7 +469,8 @@ async def run(body: RunRequest | None = None):
             if r.status_code == 200:
                 sarah_token = r.json()["access_token"]
                 s.update(status="ok", token_preview=sarah_token[:48] + "…",
-                         result={"token": sarah_token})
+                         result={"token": sarah_token,
+                                 "claims": _decode_jwt_payload_unverified(sarah_token)})
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)
@@ -553,7 +554,7 @@ async def run(body: RunRequest | None = None):
             r = await client.post(f"{VC_ISSUER_URL}/vc/verify", json={"badge": badge})
             if r.status_code == 200 and r.json().get("valid"):
                 s.update(status="ok", token_preview=badge[:48] + "…",
-                         result={"token": badge, "badge_claims": r.json()["claims"]})
+                         result={"token": badge, "claims": r.json()["claims"]})
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)
@@ -609,6 +610,7 @@ async def run(body: RunRequest | None = None):
                 exchanged_token = r.json()["access_token"]
                 s.update(status="ok", token_preview=exchanged_token[:48] + "…", result={
                     "token": exchanged_token,
+                    "claims": _decode_jwt_payload_unverified(exchanged_token),
                     "subject": SARAH_EMAIL,
                     "actor": OPENCODE_CLIENT_ID,
                     "note": (
@@ -715,7 +717,8 @@ async def run(body: RunRequest | None = None):
             if r.status_code == 200:
                 triage_token = r.json()["access_token"]
                 s.update(status="ok", token_preview=triage_token[:48] + "…",
-                         result={"token": triage_token})
+                         result={"token": triage_token,
+                                 "claims": _decode_jwt_payload_unverified(triage_token)})
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)

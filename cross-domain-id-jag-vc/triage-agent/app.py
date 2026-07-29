@@ -130,6 +130,22 @@ def agent_card():
     }
 
 
+def _decode_jwt_payload_unverified(token: str) -> dict:
+    """Decode a JWT's payload for display only — no signature check. Used
+    purely so the webapp's step toast has claims to show; never used for a
+    trust decision (every token here is independently, cryptographically
+    verified server-side by the service that consumes it)."""
+    import base64
+    import json
+
+    try:
+        payload_b64 = token.split(".")[1]
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _verify_idjag_sync(token: str, body: TicketRequest) -> dict:
     """Verify the inbound ID-JAG against Keycloak A's JWKS + delegation claims.
 
@@ -303,11 +319,11 @@ async def receive_ticket(
                 None, _verify_idjag_sync, actor_raw, body
             )
             s.update(status="ok", result={
-                "iss": claims.get("iss"),
-                "sub": claims.get("sub"),
-                "act_chain": (claims.get("act") or {}).get("act_chain", []),
-                "intent": claims.get("intent", []),
-                "note": "verified in-agent, independently of Envoy (defense in depth)",
+                "token": actor_raw,
+                "claims": claims,
+                "note": "verified in-agent, independently of Envoy (defense in depth) — "
+                        "claims shown here are from the real, signature-verified decode "
+                        "(pyjwt.decode), not an unverified base64 read",
             })
         except Exception as exc:  # noqa: BLE001
             s.update(status="error", error=f"in-agent ID-JAG verification failed: {exc}")
@@ -419,7 +435,10 @@ async def receive_ticket(
                     s.update(status="ok",
                              token_preview=sub_badge[:48] + "…",
                              token=sub_badge,
-                             result={"issued_token_type": r.json().get("issued_token_type", "")})
+                             result={
+                                 "issued_token_type": r.json().get("issued_token_type", ""),
+                                 "claims": _decode_jwt_payload_unverified(sub_badge),
+                             })
                 else:
                     s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                     steps.append(s)
