@@ -2,38 +2,43 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # assisted-by claude code claude-sonnet-4-6
-"""Cross-Domain AI Agent Remediation Demo — orchestration backend.
+"""Cross-Domain AI Agent Remediation Demo — webapp UI backend.
 
-Drives a 25-step sequence that spans Org A (Keycloak-A, OpenCode/Sarah) and
-Org B (Keycloak-B, Triage Agent, Sub-Agent) via ID-JAG assertions and A2A badges
-issued by identity-node.
+This file has no task-lifecycle logic of its own: /api/run proxies straight
+to the real OpenCode Agent (opencode-agent, port 8100) and the webapp
+animates whatever steps that real run actually produced. See
+opencode-agent/app.py for the authoritative lifecycle — authenticate →
+register own identity (CIMD) → policy-scoped badge (Envoy A + OPA) → work
+(real OpenCode) → delegate cross-domain (ID-JAG). An earlier version of
+this file reimplemented that whole lifecycle a second time for the diagram;
+that duplicated copy silently drifted out of sync once the real lifecycle
+was rewritten, so it was replaced with this proxy — the diagram can no
+longer show a step that didn't really happen.
 
 Endpoints
 ---------
 GET  /                  — serve index.html
 GET  /api/health        — liveness probe
-GET  /api/config        — all service URLs / client IDs
-POST /api/run           — run the full sequence end-to-end
-POST /api/step/{id}     — run a single named step (step-through mode)
+GET  /api/config        — all service URLs / client IDs (informational)
+POST /api/run           — proxy to opencode-agent's /api/run
+GET  /api/plan-stream   — live SSE relay of opencode-agent's /api/plan-stream
 """
 
 from __future__ import annotations
 
+import json
 import os
-from typing import Any
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-from tracing import current_trace_id, setup_tracing, step_span
-from fastapi.responses import FileResponse, JSONResponse
+from tracing import current_trace_id, setup_tracing
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from agntcy_identity_client import VaultConfig
-from agntcy_identity_client import cimd as cimd_api
-from agntcy_identity_client import directory as dir_api
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 KC_A_URL = os.environ.get("KC_A_URL", "http://keycloak-a:8080").rstrip("/")
@@ -42,21 +47,25 @@ KC_B_URL = os.environ.get("KC_B_URL", "http://keycloak-b:8080").rstrip("/")
 KC_B_REALM = os.environ.get("KC_B_REALM", "org-b")
 
 OPENCODE_CLIENT_ID = os.environ.get("OPENCODE_CLIENT_ID", "opencode-agent")
-OPENCODE_CLIENT_SECRET = os.environ.get("OPENCODE_CLIENT_SECRET", "")
 TRIAGE_CLIENT_ID = os.environ.get("TRIAGE_CLIENT_ID", "triage-agent")
-TRIAGE_CLIENT_SECRET = os.environ.get("TRIAGE_CLIENT_SECRET", "")
 
 SARAH_USER = os.environ.get("SARAH_USER", "sarah")
-SARAH_PASSWORD = os.environ.get("SARAH_PASSWORD", "sarah")
 SARAH_EMAIL = os.environ.get("SARAH_EMAIL", "sarah@org-a.example")
 
 IDJAG_ISSUER_URL = os.environ.get("IDJAG_ISSUER_URL", "http://idjag-issuer:9000").rstrip("/")
 IDENTITY_NODE_URL = os.environ.get("IDENTITY_NODE_URL", "http://identity-node:4000").rstrip("/")
-TRIAGE_AGENT_URL = os.environ.get("TRIAGE_AGENT_URL", "http://triage-agent:8200").rstrip("/")
+TRIAGE_AGENT_URL = os.environ.get("TRIAGE_AGENT_URL", "http://envoy-org-b:10000").rstrip("/")
 DIR_APISERVER_URL = os.environ.get("DIR_APISERVER_URL", "")  # e.g. "dir-apiserver:8888"
 VC_ISSUER_URL = os.environ.get("VC_ISSUER_URL", "http://vc-issuer:9003").rstrip("/")
 EGRESS_PDP_URL = os.environ.get("EGRESS_PDP_URL", "http://envoy-org-a:12000").rstrip("/")
 JAEGER_UI_URL = os.environ.get("JAEGER_UI_URL", "")  # e.g. "http://localhost:16686" — blank hides the trace link
+
+# The real task lifecycle — this is the only service /api/run actually calls.
+OPENCODE_AGENT_URL = os.environ.get("OPENCODE_AGENT_URL", "http://opencode-agent:8100").rstrip("/")
+OPENCODE_MODEL = os.environ.get("OPENCODE_MODEL", "ollama/qwen2.5-coder:7b")
+# Headroom over the agent's own OPENCODE_TIMEOUT (its opencode-plan LLM-call
+# budget) plus the rest of the lifecycle that runs after it.
+RUN_TIMEOUT = float(os.environ.get("OPENCODE_TIMEOUT", "240")) + 60
 
 # Public reference links for the "Access these services" legend — separate
 # from KC_A_URL/KC_B_URL above (those are for internal token calls). Blank
@@ -68,7 +77,8 @@ KC_B_UI_URL = os.environ.get("KC_B_UI_URL", "")
 
 # CIMD — org-a's local trust authority, backed by a Vault transit signing key
 # (see identity-node-init.py for the registration bootstrap this depends on).
-# The Vault/proof-JWT/CIMD primitives live in the shared agntcy_identity_client.
+# Only VAULT_CFG.key_name/common_name are shown here for reference; the
+# actual CIMD calls happen inside opencode-agent now.
 VAULT_CFG = VaultConfig.from_env()
 ORG_A_COMMON_NAME = VAULT_CFG.common_name
 
@@ -76,8 +86,6 @@ SCAN_REPO = os.environ.get("SCAN_REPO", "demo-admin/payments-service")
 
 KC_A_ISSUER = f"{KC_A_URL}/realms/{KC_A_REALM}"
 KC_B_ISSUER = f"{KC_B_URL}/realms/{KC_B_REALM}"
-KC_A_TOKEN_URL = f"{KC_A_ISSUER}/protocol/openid-connect/token"
-KC_B_TOKEN_URL = f"{KC_B_ISSUER}/protocol/openid-connect/token"
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Cross-Domain Demo", version="0.1.0")
@@ -85,713 +93,50 @@ setup_tracing("webapp")
 FastAPIInstrumentor.instrument_app(app)
 
 
-# ── Pydantic models for step-through bodies ───────────────────────────────────
-
-class ScanBody(BaseModel):
-    cve: str = "CVE-2024-12345"
-
-
-class CimdGenerateBody(BaseModel):
-    sub: str = "triage-agent"
-
-
-class CimdResolveBody(BaseModel):
-    id: str = "AGNTCY-triage-agent"
-
-
-class ResolveBadgeBody(BaseModel):
-    sarah_email: str = SARAH_EMAIL
-
-
-class KcAExchangeBody(BaseModel):
-    token: str  # Sarah's KC-A token (subject_token)
-    badge: str = ""  # verified badge JWT (actor_token)
-
-
-class EgressCheckBody(BaseModel):
-    assertion: str  # ID-JAG JWT from mint step
-
-
-class MintIdjagBody(BaseModel):
-    subject_token: str  # real KC-A access token (e.g. from the kc-a-exchange step)
-
-
-class KcBExchangeBody(BaseModel):
-    assertion: str  # ID-JAG JWT from mint step
-
-
-class CreateTicketBody(BaseModel):
-    triage_token: str
-    actor_token: str
-    cve: str = "CVE-2024-12345"
-    repo: str = SCAN_REPO
-
-
 class RunBody(BaseModel):
     cve: str = "CVE-2024-12345"
     repo: str = SCAN_REPO
+    use_real_opencode: bool = True
 
 
-class DirPushBody(BaseModel):
-    cve: str = "CVE-2024-12345"
-    repo: str = SCAN_REPO
-
-
-class DirSearchBody(BaseModel):
-    agent_name: str = "triage-agent"
-
-
-# ── Step helpers ──────────────────────────────────────────────────────────────
-
-def _step(
-    step_id: str,
-    title: str,
-    *,
-    status: str = "ok",
-    detail: str = "",
-    result: Any = None,
-    error: str = "",
-) -> dict:
-    s: dict = {"id": step_id, "title": title, "status": status}
-    if detail:
-        s["detail"] = detail
-    if result is not None:
-        s["result"] = result
-    if error:
-        s["error"] = error
-    return s
-
-
-# ── Step implementations ───────────────────────────────────────────────────────
-
-async def _login(client: httpx.AsyncClient) -> dict:
-    """Step 1 — KC-A password grant for Sarah (opencode-agent client)."""
-    try:
-        r = await client.post(
-            KC_A_TOKEN_URL,
-            data={
-                "grant_type": "password",
-                "client_id": OPENCODE_CLIENT_ID,
-                "client_secret": OPENCODE_CLIENT_SECRET,
-                "username": SARAH_USER,
-                "password": SARAH_PASSWORD,
-                "scope": "openid",
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        if r.status_code == 200:
-            data = r.json()
-            token = data["access_token"]
-            return _step(
-                "sarah-login",
-                "1. Sarah logs in → KC-A issues access token (opencode-agent client)",
-                detail=f"POST {KC_A_TOKEN_URL}  grant=password  client={OPENCODE_CLIENT_ID}",
-                result={"token_preview": token[:48] + "…", "token": token, "token_type": data.get("token_type", "Bearer")},
-                status="ok",
-            )
-        return _step(
-            "sarah-login",
-            "1. Sarah logs in → KC-A",
-            status="error",
-            error=f"HTTP {r.status_code}: {r.text[:300]}",
-        )
-    except Exception as exc:  # noqa: BLE001
-        return _step("sarah-login", "1. Sarah logs in → KC-A", status="error", error=str(exc))
-
-
-def _scan(cve: str) -> dict:
-    """Step 2 — Synthetic CVE scan (mock; no network call needed)."""
-    return _step(
-        "scan",
-        f"2. Scan detects {cve} in {SCAN_REPO}",
-        detail=f"repo={SCAN_REPO}  severity=HIGH  cve={cve}",
-        result={"cve": cve, "severity": "HIGH", "repo": SCAN_REPO, "note": "mocked scanner"},
-        status="ok",
-    )
-
-
-OASF_SCHEMA_VERSION = dir_api.OASF_SCHEMA_VERSION
-
-
-async def _dir_push_turn(cve: str, repo: str) -> dict:
-    """Step 3 — Push per-turn record to AGNTCY Directory Node → CID."""
-    if not DIR_APISERVER_URL:
-        return _step(
-            "dir-push",
-            "3. Directory: push turn record (skipped — DIR_APISERVER_URL not set)",
-            status="ok",
-            result={"cid": "", "note": "directory not configured"},
-        )
-    try:
-        import asyncio
-        from datetime import datetime, timezone
-
-        record_dict = {
-            "name": "opencode-agent",
-            "version": "0.1.0",
-            "schema_version": OASF_SCHEMA_VERSION,
-            "description": f"OpenCode agent turn: {cve} in {repo}",
-            "authors": ["cross-domain-demo"],
-            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "skills": [
-                {"name": "cybersecurity/vulnerability_management/dependency_security", "id": 100304},
-                {"name": "software_engineering/code_quality/code_review", "id": 60701},
-            ],
-            "domains": [
-                {"name": "technology/security", "id": 107},
-            ],
-            "annotations": {"cve": cve, "repo": repo, "turn": "remediation"},
-        }
-        cid = await asyncio.get_event_loop().run_in_executor(
-            None, dir_api.push_record, DIR_APISERVER_URL, record_dict
-        )
-        return _step(
-            "dir-push",
-            "3. Directory: push OpenCode turn record → CID",
-            detail=f"gRPC Push({DIR_APISERVER_URL})  schema_version={OASF_SCHEMA_VERSION}  cve={cve}  repo={repo}",
-            status="ok",
-            result={"cid": cid, "schema_version": OASF_SCHEMA_VERSION, "agent": "opencode-agent", "record": record_dict},
-        )
-    except Exception as exc:  # noqa: BLE001
-        return _step("dir-push", "3. Directory: push turn record", status="error", error=str(exc))
-
-
-async def _dir_search(agent_name: str = "triage-agent") -> dict:
-    """Step 4 — Search AGNTCY Directory for triage-agent OASF record."""
-    if not DIR_APISERVER_URL:
-        return _step(
-            "dir-search",
-            "4. Directory: search for triage-agent (skipped — DIR_APISERVER_URL not set)",
-            status="ok",
-            result={"found": False, "cid": "", "note": "directory not configured"},
-        )
-    try:
-        import asyncio
-
-        records = await asyncio.get_event_loop().run_in_executor(
-            None, dir_api.search_by_name, DIR_APISERVER_URL, agent_name
-        )
-        found = len(records) > 0
-        record_dict: dict = records[0] if found else {}
-        record_name = record_dict.get("name", "")
-        return _step(
-            "dir-search",
-            f"4. Directory: search for {agent_name} → {'found' if found else 'not found'}",
-            detail=f"gRPC SearchRecords({DIR_APISERVER_URL})  name={agent_name}",
-            status="ok",
-            result={"found": found, "record_name": record_name, "count": len(records), "record": record_dict},
-        )
-    except Exception as exc:  # noqa: BLE001
-        return _step("dir-search", f"4. Directory: search for {agent_name}", status="error", error=str(exc))
-
-
-# ── CIMD — Vault-backed local trust authority (org-a) ─────────────────────────
-#
-# identity-node's real REST API needs a self-issued "proof" JWT to call
-# /v1alpha1/id/generate or /v1alpha1/id/resolve: iss=agntcy:org-a, a sub_jwk
-# claim, signed by the SAME keypair org-a registered at bootstrap time
-# (identity-node-init.py). The private key never leaves Vault — every proof
-# is signed via Vault's /transit/sign API. The primitives live in the shared
-# agntcy_identity_client package (vault.py + cimd.py).
-
-
-async def _cimd_generate_id(client: httpx.AsyncClient, sub: str = "triage-agent") -> dict:
-    """Step 5 — Generate a CIMD id for triage-agent under org-a's trust authority.
-
-    Vault self-signs a proof JWT (iss=agntcy:org-a, sub=triage-agent);
-    identity-node verifies it against org-a's registered public key and mints
-    an id of the form AGNTCY-<sub>, idempotent via ERROR_REASON_ID_ALREADY_REGISTERED.
-    """
-    url = f"{IDENTITY_NODE_URL}/v1alpha1/id/generate"
-    try:
-        res = await cimd_api.generate_id(client, IDENTITY_NODE_URL, VAULT_CFG, sub)
-        if res["already_registered"]:
-            return _step(
-                "cimd-generate-id",
-                f"5. CIMD: generate id for {sub} (already registered — reusing)",
-                detail=f"POST {url}  iss=agntcy:{ORG_A_COMMON_NAME}  sub={sub}",
-                status="ok",
-                result={"id": res["id"], "note": "already registered"},
-            )
-        return _step(
-            "cimd-generate-id",
-            f"5. CIMD: generate id for {sub} (Vault-signed proof, org-a trust authority)",
-            detail=f"POST {url}  iss=agntcy:{ORG_A_COMMON_NAME}  sub={sub}",
-            status="ok",
-            result={"id": res["id"], "controller": res["controller"]},
-        )
-    except Exception as exc:  # noqa: BLE001
-        return _step("cimd-generate-id", f"5. CIMD: generate id for {sub}", status="error", error=str(exc))
-
-
-async def _cimd_resolve_id(client: httpx.AsyncClient, cimd_id: str) -> dict:
-    """Step 6 — Resolve the CIMD id back to its ResolverMetadata (VerificationMethod JWK)."""
-    url = f"{IDENTITY_NODE_URL}/v1alpha1/id/resolve"
-    try:
-        rm = await cimd_api.resolve_id(client, IDENTITY_NODE_URL, cimd_id)
-        vm = (rm.get("verificationMethod") or [{}])[0]
-        return _step(
-            "cimd-resolve-id",
-            f"6. CIMD: resolve id {cimd_id} → ResolverMetadata",
-            detail=f"POST {url}  id={cimd_id}",
-            status="ok",
-            result={
-                "id": rm.get("id", ""),
-                "controller": rm.get("controller", ""),
-                "verification_method_id": vm.get("id", ""),
-                "public_key_kid": (vm.get("publicKeyJwk") or {}).get("kid", ""),
-            },
-        )
-    except Exception as exc:  # noqa: BLE001
-        return _step("cimd-resolve-id", f"6. CIMD: resolve id {cimd_id}", status="error", error=str(exc))
-
-
-async def _resolve_badge(client: httpx.AsyncClient, sarah_email: str = SARAH_EMAIL) -> dict:
-    """Step 6b — Issue + verify OpenCode's VC delegation badge at vc-issuer.
-
-    identity-node's real REST API has no badge concept (CIMD id generate/
-    resolve only, steps 5-6 above) — vc-issuer stands in for it the same way
-    idjag-issuer stands in for the ID-JAG issuer: a real signed vc+jwt,
-    really verified.
-    """
-    try:
-        r = await client.post(f"{VC_ISSUER_URL}/vc/issue", json={
-            "id": OPENCODE_CLIENT_ID,
-            "caps": ["scan", "remediate", "delegate"],
-            "delegating_user": sarah_email,
-            "intent": "cross-domain-remediation",
-            "act_chain": [OPENCODE_CLIENT_ID],
-        })
-        if r.status_code != 200:
-            return _step("resolve-badge", "6b. Issue + verify VC badge → vc-issuer",
-                          status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
-        badge = r.json()["badge"]
-
-        r = await client.post(f"{VC_ISSUER_URL}/vc/verify", json={"badge": badge})
-        if r.status_code == 200 and r.json().get("valid"):
-            return _step(
-                "resolve-badge",
-                "6b. Issue + verify OpenCode's VC delegation badge → vc-issuer",
-                detail=f"POST {VC_ISSUER_URL}/vc/issue  +  POST {VC_ISSUER_URL}/vc/verify",
-                status="ok",
-                result={"token": badge, "claims": r.json()["claims"]},
-            )
-        return _step("resolve-badge", "6b. Issue + verify VC badge → vc-issuer",
-                      status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
-    except Exception as exc:  # noqa: BLE001
-        return _step("resolve-badge", "6b. Issue + verify VC badge → vc-issuer", status="error", error=str(exc))
-
-
-async def _kc_a_exchange(client: httpx.AsyncClient, sarah_token: str, badge: str) -> dict:
-    """Step 7 — RFC 8693 token exchange at KC-A.
-
-    NOTE: Keycloak 26.7's standard token exchange validates subject_token for
-    real, but does not itself verify actor_token or emit an RFC 8693 "act"
-    claim — confirmed live (garbage/absent actor_token produces a
-    byte-identical response). The badge was already independently verified
-    against vc-issuer in the previous step; delegation semantics continue to
-    be carried forward via the ID-JAG's act_chain claim next.
-    """
-    try:
-        r = await client.post(KC_A_TOKEN_URL, data={
-            "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
-            "client_id": OPENCODE_CLIENT_ID,
-            "client_secret": OPENCODE_CLIENT_SECRET,
-            "subject_token": sarah_token,
-            "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
-            "actor_token": badge,
-            "actor_token_type": "urn:ietf:params:oauth:token-type:jwt",
-        })
-        if r.status_code == 200:
-            data = r.json()
-            token: str = data["access_token"]
-            return _step(
-                "kc-a-exchange",
-                "7. KC-A: RFC 8693 token exchange — Sarah token + verified badge → exchanged token",
-                detail=f"POST {KC_A_TOKEN_URL}  grant_type=token-exchange",
-                status="ok",
-                result={"token_preview": token[:48] + "…", "token": token},
-            )
-        return _step("kc-a-exchange", "7. KC-A: RFC 8693 token exchange",
-                      status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
-    except Exception as exc:  # noqa: BLE001
-        return _step("kc-a-exchange", "7. KC-A: RFC 8693 token exchange", status="error", error=str(exc))
-
-
-async def _egress_check(client: httpx.AsyncClient, assertion: str) -> dict:
-    """Step 8b — Org A egress PDP: may Sarah delegate this scope to Org B?
-
-    Envoy A verifies the freshly-minted ID-JAG against Keycloak A's own
-    JWKS; inline OPA checks its scope, intent, and delegation-chain depth. A
-    policy violation is denied before ever reaching Keycloak B.
-    """
-    try:
-        r = await client.post(
-            f"{EGRESS_PDP_URL}/api/egress-check",
-            headers={"Authorization": f"Bearer {assertion}"},
-        )
-        if r.status_code == 200:
-            return _step(
-                "egress-check",
-                "8b. Org A egress PDP — may Sarah delegate this scope to Org B? → Envoy A + OPA",
-                detail=f"POST {EGRESS_PDP_URL}/api/egress-check",
-                status="ok",
-                result=r.json() if r.content else {"decision": "ALLOW"},
-            )
-        return _step("egress-check", "8b. Org A egress PDP check",
-                      status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
-    except Exception as exc:  # noqa: BLE001
-        return _step("egress-check", "8b. Org A egress PDP check", status="error", error=str(exc))
-
-
-def _decode_jwt_payload_unverified(token: str) -> dict:
-    """Decode a JWT's payload for display only — no signature check.
-
-    Keycloak's token-exchange response (unlike idjag-issuer's old /mint)
-    only returns the assertion string itself, not pre-decoded claims. This
-    reconstructs them purely so the webapp's "Decoded JWT claims" panel
-    still has something to show; it is never used for a trust decision.
-    """
-    import base64
-    import json as _json
-
-    try:
-        payload_b64 = token.split(".")[1]
-        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
-        return _json.loads(base64.urlsafe_b64decode(padded))
-    except Exception:  # noqa: BLE001
-        return {}
-
-
-async def _mint_idjag(client: httpx.AsyncClient, subject_token: str) -> dict:
-    """Step 8 — Mint an ID-JAG assertion via Keycloak A's native
-    grant_type=token-exchange (keycloak-idjag-spi), instead of the separate
-    idjag-issuer mock service — see
-    https://github.com/agntcy/agent-identity-demos/discussions/18.
-
-    subject_token is the real, live access token from step 7's exchange
-    (OpenCode acting as Sarah, verified via badge) — Keycloak A's provider
-    verifies its signature for real (session.tokens().decode(...)), it is
-    not a client-supplied free-text email like idjag-issuer accepted.
-    """
-    payload = {
-        "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
-        "client_id": OPENCODE_CLIENT_ID,
-        "client_secret": OPENCODE_CLIENT_SECRET,
-        "subject_token": subject_token,
-        "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
-        "requested_token_type": "urn:ietf:params:oauth:token-type:id-jag",
-        "audience": KC_B_ISSUER,
-        "scope": "openid triage:create",
-        "target_client_id": TRIAGE_CLIENT_ID,
-        "act_chain": OPENCODE_CLIENT_ID,
-        "intent": "create-pr-fix",
-    }
-    try:
-        r = await client.post(KC_A_TOKEN_URL, data=payload)
-        if r.status_code == 200:
-            data = r.json()
-            assertion: str = data.get("access_token", "")
-            return _step(
-                "mint-idjag",
-                "8. Mint ID-JAG assertion → Keycloak A (native issuance, keycloak-idjag-spi) (act_chain: opencode-agent → triage-agent)",
-                detail=f"POST {KC_A_TOKEN_URL}  grant_type=token-exchange  requested_token_type=id-jag  aud={KC_B_ISSUER}  scope=openid triage:create",
-                status="ok",
-                result={
-                    "assertion_preview": assertion[:48] + "…" if assertion else "",
-                    "assertion": assertion,
-                    "claims": _decode_jwt_payload_unverified(assertion),
-                },
-            )
-        return _step(
-            "mint-idjag",
-            "8. Mint ID-JAG assertion",
-            status="error",
-            error=f"HTTP {r.status_code}: {r.text[:300]}",
-        )
-    except Exception as exc:  # noqa: BLE001
-        return _step("mint-idjag", "8. Mint ID-JAG assertion", status="error", error=str(exc))
-
-
-async def _kc_b_exchange(client: httpx.AsyncClient, assertion: str) -> dict:
-    """Step 9 — KC-B jwt-bearer grant to get triage-agent access token."""
-    try:
-        r = await client.post(
-            KC_B_TOKEN_URL,
-            data={
-                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
-                "assertion": assertion,
-                "client_id": TRIAGE_CLIENT_ID,
-                "client_secret": TRIAGE_CLIENT_SECRET,
-                "scope": "triage:create",
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        if r.status_code == 200:
-            data = r.json()
-            token: str = data["access_token"]
-            step = _step(
-                "kc-b-exchange",
-                "9. KC-B: jwt-bearer exchange — ID-JAG assertion → triage-agent access token",
-                detail=f"POST {KC_B_TOKEN_URL}  grant=jwt-bearer  client={TRIAGE_CLIENT_ID}  scope=triage:create",
-                status="ok",
-                result={
-                    "token_preview": token[:48] + "…",
-                    "token": token,
-                    "token_type": data.get("token_type", "Bearer"),
-                    "scope": data.get("scope", ""),
-                },
-            )
-            step["_token"] = token  # used internally to chain into create-ticket (assertions are single-use)
-            return step
-        return _step(
-            "kc-b-exchange",
-            "9. KC-B: jwt-bearer exchange",
-            status="error",
-            error=f"HTTP {r.status_code}: {r.text[:300]}",
-        )
-    except Exception as exc:  # noqa: BLE001
-        return _step("kc-b-exchange", "9. KC-B: jwt-bearer exchange", status="error", error=str(exc))
-
-
-async def _create_ticket(
-    client: httpx.AsyncClient,
-    triage_token: str,
-    actor_token: str,
-    cve: str,
-    repo: str,
-) -> list[dict]:
-    """Step 10+ — POST /api/ticket to triage-agent; flatten all nested steps.
-
-    Returns a list of dicts: the create-ticket wrapper step followed by every
-    sub-step from the triage-agent response (including sub-agent steps).
-    """
-    url = f"{TRIAGE_AGENT_URL}/api/ticket"
-    wrapper = _step(
-        "create-ticket",
-        f"10. Send remediation ticket → triage-agent (cve={cve}, repo={repo})",
-        detail=f"POST {url}",
-    )
-    try:
-        r = await client.post(
-            url,
-            json={
-                "cve": cve,
-                "severity": "HIGH",
-                "repo": repo,
-                "intent": "create-pr-fix",
-                "delegating_agent": OPENCODE_CLIENT_ID,
-                "act_chain": [OPENCODE_CLIENT_ID],
-            },
-            headers={
-                "Authorization": f"Bearer {triage_token}",
-                "X-AGNTCY-Actor-Token": f"Bearer {actor_token}",
-            },
-            timeout=90,
-        )
-        if r.status_code in (200, 201):
-            triage_data = r.json()
-            ticket_id = triage_data.get("ticket_id", "")
-            wrapper["status"] = "ok" if triage_data.get("ok") else "error"
-            wrapper["result"] = {"ticket_id": ticket_id, "ok": triage_data.get("ok")}
-
-            # Flatten triage-agent steps
-            nested_steps: list[dict] = []
-            for ts in triage_data.get("steps", []):
-                nested_steps.append(ts)
-                # Also flatten sub-agent steps from spawn-sub-agent result
-                if ts.get("id") == "spawn-sub-agent" and isinstance(ts.get("result"), dict):
-                    for ss in ts["result"].get("steps", []):
-                        nested_steps.append(ss)
-
-            return [wrapper] + nested_steps
-        wrapper["status"] = "error"
-        wrapper["error"] = f"HTTP {r.status_code}: {r.text[:300]}"
-        return [wrapper]
-    except Exception as exc:  # noqa: BLE001
-        wrapper["status"] = "error"
-        wrapper["error"] = str(exc)
-        return [wrapper]
-
-
-# ── Full run ──────────────────────────────────────────────────────────────────
+# ── /api/run — proxy to the real OpenCode Agent ───────────────────────────────
 
 @app.post("/api/run")
 async def run_all(body: RunBody) -> JSONResponse:
-    """Run the complete cross-domain remediation sequence."""
-    steps: list[dict] = []
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        # 1. Sarah login
-        with step_span("sarah-login"):
-            login_step = await _login(client)
-        steps.append(login_step)
-        if login_step["status"] != "ok":
-            return JSONResponse({"ok": False, "steps": steps})
-        sarah_token: str = login_step["result"]["token_preview"]  # preview only in result
-        # Re-fetch full token (re-run login for the actual token value)
-        try:
+    """Run the real task lifecycle at opencode-agent and return its steps
+    verbatim for the webapp to animate."""
+    try:
+        async with httpx.AsyncClient(timeout=RUN_TIMEOUT) as client:
             r = await client.post(
-                KC_A_TOKEN_URL,
-                data={
-                    "grant_type": "password",
-                    "client_id": OPENCODE_CLIENT_ID,
-                    "client_secret": OPENCODE_CLIENT_SECRET,
-                    "username": SARAH_USER,
-                    "password": SARAH_PASSWORD,
-                    "scope": "openid",
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                f"{OPENCODE_AGENT_URL}/api/run",
+                json={"repo": body.repo, "cve_override": body.cve,
+                      "use_real_opencode": body.use_real_opencode},
             )
-            sarah_token = r.json()["access_token"]
-        except Exception:  # noqa: BLE001
-            pass
-
-        # 2. Scan
-        with step_span("scan"):
-            steps.append(_scan(body.cve))
-
-        # 3. Push turn record to directory
-        with step_span("dir-push"):
-            dir_push_step = await _dir_push_turn(body.cve, body.repo)
-        steps.append(dir_push_step)
-
-        # 4. Search directory for triage-agent
-        with step_span("dir-search"):
-            dir_search_step = await _dir_search("triage-agent")
-        steps.append(dir_search_step)
-
-        # 5. CIMD: generate id for triage-agent (Vault-signed proof, org-a trust authority)
-        with step_span("cimd-generate-id"):
-            generate_step = await _cimd_generate_id(client, "triage-agent")
-        steps.append(generate_step)
-        cimd_id: str = (generate_step.get("result") or {}).get("id", "AGNTCY-triage-agent")
-
-        # 6. CIMD: resolve id back to its ResolverMetadata
-        with step_span("cimd-resolve-id"):
-            resolve_step = await _cimd_resolve_id(client, cimd_id)
-        steps.append(resolve_step)
-
-        # 6b. Issue + verify OpenCode's VC delegation badge → vc-issuer
-        with step_span("resolve-badge"):
-            badge_step = await _resolve_badge(client, SARAH_EMAIL)
-        steps.append(badge_step)
-        badge = (badge_step.get("result") or {}).get("token", "")
-
-        # 7. KC-A exchange (real — subject=Sarah, actor_token=verified badge)
-        with step_span("kc-a-exchange"):
-            kc_a_step = await _kc_a_exchange(client, sarah_token, badge)
-        steps.append(kc_a_step)
-        kc_a_exchanged_token = (kc_a_step.get("result") or {}).get("token", "")
-
-        # 8. Mint ID-JAG assertion
-        with step_span("mint-idjag"):
-            mint_step = await _mint_idjag(client, kc_a_exchanged_token)
-        steps.append(mint_step)
-        if mint_step["status"] != "ok":
-            return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
-        # Retain the same signed assertion for Keycloak redemption and Envoy's
-        # independent actor-token verification.
-        assertion = mint_step["result"].get("assertion", "")
-
-        # 8b. Org A egress PDP — may Sarah delegate this scope to Org B?
-        with step_span("egress-check"):
-            egress_step = await _egress_check(client, assertion)
-        steps.append(egress_step)
-        if egress_step["status"] != "ok":
-            return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
-
-        # 9. KC-B jwt-bearer exchange (assertions are single-use — one call only)
-        with step_span("kc-b-exchange"):
-            exchange_step = await _kc_b_exchange(client, assertion)
-        triage_token = exchange_step.pop("_token", "")
-        steps.append(exchange_step)
-        if exchange_step["status"] != "ok":
-            return JSONResponse({"ok": False, "steps": steps, "trace_id": current_trace_id()})
-
-        # 10+. Create ticket + all nested steps
-        with step_span("create-ticket"):
-            ticket_steps = await _create_ticket(
-                client, triage_token, assertion, body.cve, body.repo
-            )
-        steps.extend(ticket_steps)
-
-    all_ok = all(s.get("status") in ("ok", "denied") for s in steps)
-    return JSONResponse({"ok": all_ok, "steps": steps, "trace_id": current_trace_id()})
-
-
-# ── Individual step endpoints (step-through mode) ─────────────────────────────
-
-@app.post("/api/step/sarah-login")
-async def step_sarah_login() -> JSONResponse:
-    async with httpx.AsyncClient(timeout=30) as client:
-        return JSONResponse(await _login(client))
-
-
-@app.post("/api/step/scan")
-async def step_scan(body: ScanBody) -> JSONResponse:
-    return JSONResponse(_scan(body.cve))
-
-
-@app.post("/api/step/cimd-generate-id")
-async def step_cimd_generate_id(body: CimdGenerateBody) -> JSONResponse:
-    async with httpx.AsyncClient(timeout=30) as client:
-        return JSONResponse(await _cimd_generate_id(client, body.sub))
-
-
-@app.post("/api/step/cimd-resolve-id")
-async def step_cimd_resolve_id(body: CimdResolveBody) -> JSONResponse:
-    async with httpx.AsyncClient(timeout=30) as client:
-        return JSONResponse(await _cimd_resolve_id(client, body.id))
-
-
-@app.post("/api/step/resolve-badge")
-async def step_resolve_badge(body: ResolveBadgeBody) -> JSONResponse:
-    async with httpx.AsyncClient(timeout=30) as client:
-        return JSONResponse(await _resolve_badge(client, body.sarah_email))
-
-
-@app.post("/api/step/kc-a-exchange")
-async def step_kc_a_exchange(body: KcAExchangeBody) -> JSONResponse:
-    async with httpx.AsyncClient(timeout=30) as client:
-        return JSONResponse(await _kc_a_exchange(client, body.token, body.badge))
-
-
-@app.post("/api/step/egress-check")
-async def step_egress_check(body: EgressCheckBody) -> JSONResponse:
-    async with httpx.AsyncClient(timeout=30) as client:
-        return JSONResponse(await _egress_check(client, body.assertion))
-
-
-@app.post("/api/step/mint-idjag")
-async def step_mint_idjag(body: MintIdjagBody) -> JSONResponse:
-    async with httpx.AsyncClient(timeout=30) as client:
-        return JSONResponse(await _mint_idjag(client, body.subject_token))
-
-
-@app.post("/api/step/kc-b-exchange")
-async def step_kc_b_exchange(body: KcBExchangeBody) -> JSONResponse:
-    async with httpx.AsyncClient(timeout=30) as client:
-        return JSONResponse(await _kc_b_exchange(client, body.assertion))
-
-
-@app.post("/api/step/dir-push")
-async def step_dir_push(body: DirPushBody) -> JSONResponse:
-    return JSONResponse(await _dir_push_turn(body.cve, body.repo))
-
-
-@app.post("/api/step/dir-search")
-async def step_dir_search(body: DirSearchBody) -> JSONResponse:
-    return JSONResponse(await _dir_search(body.agent_name))
-
-
-@app.post("/api/step/create-ticket")
-async def step_create_ticket(body: CreateTicketBody) -> JSONResponse:
-    async with httpx.AsyncClient(timeout=90) as client:
-        ticket_steps = await _create_ticket(
-            client, body.triage_token, body.actor_token, body.cve, body.repo
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse(
+            {"ok": False, "steps": [], "trace_id": current_trace_id(), "error": str(exc)},
+            status_code=502,
         )
-    return JSONResponse({"steps": ticket_steps})
+
+
+# ── /api/plan-stream — live token stream for the opencode-plan step ───────────
+# Pure byte relay of opencode-agent's own SSE relay (see its own comment) —
+# no re-parsing, so the SSE framing is preserved exactly hop to hop.
+
+@app.get("/api/plan-stream")
+async def plan_stream():
+    async def relay():
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream("GET", f"{OPENCODE_AGENT_URL}/api/plan-stream") as r:
+                    async for chunk in r.aiter_raw():
+                        yield chunk
+        except Exception as exc:  # noqa: BLE001
+            yield f"data: {json.dumps({'kind': 'error', 'error': str(exc)[:200]})}\n\n".encode()
+
+    return StreamingResponse(relay(), media_type="text/event-stream",
+                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # ── Utility endpoints ─────────────────────────────────────────────────────────
@@ -814,6 +159,8 @@ def config() -> JSONResponse:
         "triage_client_id": TRIAGE_CLIENT_ID,
         "sarah_user": SARAH_USER,
         "sarah_email": SARAH_EMAIL,
+        "opencode_agent_url": OPENCODE_AGENT_URL,
+        "opencode_model": OPENCODE_MODEL,
         "idjag_issuer_url": IDJAG_ISSUER_URL,
         "identity_node_url": IDENTITY_NODE_URL,
         "vc_issuer_url": VC_ISSUER_URL,

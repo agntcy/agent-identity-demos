@@ -36,11 +36,12 @@ Task lifecycle (POST /api/run):
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 
 import httpx
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from pydantic import BaseModel
 
@@ -99,6 +100,11 @@ FastAPIInstrumentor.instrument_app(app)
 class RunRequest(BaseModel):
     repo: str = ""
     cve_override: str = ""
+    # Real-LLM fallback: the identity/delegation chain (steps 1-5, 7-12) is
+    # unaffected by model-provider reliability — only opencode-plan (step 6b)
+    # makes a real LLM call. When the provider is flaky, callers can request
+    # a fast, clearly-labeled mock plan instead of waiting out a real attempt.
+    use_real_opencode: bool = True
 
 
 def _s(id: str, title: str, detail: str = "") -> dict:
@@ -107,6 +113,21 @@ def _s(id: str, title: str, detail: str = "") -> dict:
 
 def _ok(status: str) -> bool:
     return status in ("ok", "denied", "skipped")
+
+
+def _decode_jwt_payload_unverified(token: str) -> dict:
+    """Decode a JWT's payload for display only — no signature check. Used
+    purely so the webapp's step toast has real claims to show; never used
+    for a trust decision (every token here is independently, cryptographically
+    verified server-side by the service that consumes it)."""
+    import base64
+
+    try:
+        payload_b64 = token.split(".")[1]
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded))
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def _model_parts() -> tuple[str, str]:
@@ -207,16 +228,34 @@ async def _cimd_resolve(client: httpx.AsyncClient, cimd_id: str) -> dict:
 # ── Step 6b: real OpenCode remediation analysis ───────────────────────────────
 
 async def _opencode_plan(client: httpx.AsyncClient, cve: str, repo: str,
-                         scoped_intent: str) -> dict:
+                         scoped_intent: str, use_real: bool = True) -> dict:
     """Ask the real OpenCode agent (read-only `plan` agent) for a remediation plan.
 
     Non-fatal by design: reviewers without Ollama running still get a green
-    identity-chain run; this step then reports status=skipped.
+    identity-chain run; this step then reports status=skipped. Callers can
+    also request use_real=False up front — a deliberate, instant fallback to
+    a clearly-labeled mock plan, independent of whatever's currently making
+    the real model provider unreliable.
     """
     provider, model_id = _model_parts()
     s = _s("opencode-plan",
-           f"6b. OpenCode (real agent, {OPENCODE_MODEL}) analyzes the CVE → remediation plan",
+           f"6b. OpenCode ({'real agent, ' + OPENCODE_MODEL if use_real else 'mocked'}) analyzes the CVE → remediation plan",
            f"POST {OPENCODE_SERVER_URL}/session + /session/<id>/message  agent=plan")
+
+    if not use_real:
+        s.update(status="ok", result={
+            "mock": True,
+            "model": "mock",
+            "plan": (
+                "[MOCKED — real OpenCode call skipped by request]\n"
+                "- Affected dependency: example-lib (illustrative — not a real scan)\n"
+                "- Fix: bump to latest patched version\n"
+                f"- Branch: fix/{cve.lower()}\n"
+                f"- PR title: Security: remediate {cve} in {repo}\n"
+                "- Sub-agent: bump the dependency version and open the PR"
+            ),
+        })
+        return s
 
     # Cheap pre-probe so an unreachable model server skips fast instead of
     # timing out. Applies to any self-hosted OpenAI-compatible endpoint
@@ -235,15 +274,12 @@ async def _opencode_plan(client: httpx.AsyncClient, cve: str, repo: str,
             return s
 
     prompt = (
-        f"You are OpenCode, Org A's coding agent, acting on behalf of Sarah "
-        f"(sarah@org-a.example) under a policy-scoped badge (intent: "
-        f"{scoped_intent}). A dependency vulnerability {cve} (severity HIGH, "
-        f"known RCE) was found in the Org B repository {repo}. You cannot touch "
-        f"that repo directly — a bounded Org B sub-agent will push the fix and "
-        f"open the PR under delegated, narrowed credentials. Produce a concise "
-        f"remediation plan (at most 10 short lines): affected dependency, fix "
-        f"approach (version bump), suggested branch name, PR title, and exactly "
-        f"what the sub-agent should change. Plain text only."
+        f"Remediation plan needed: {cve} (HIGH, known RCE) in repository "
+        f"{repo}, scope={scoped_intent}. No file or tool access is "
+        f"available — do not read files or run tools; reason from general "
+        f"knowledge only. Reply in plain text, at most 5 short lines: "
+        f"affected dependency, fix (version bump), branch name, PR title, "
+        f"the change a sub-agent should make."
     )
     try:
         r = await client.post(
@@ -295,6 +331,50 @@ async def _opencode_plan(client: httpx.AsyncClient, cve: str, repo: str,
             "error": str(exc)[:300],
         })
     return s
+
+
+# ── Live token stream for opencode-plan ───────────────────────────────────────
+#
+# opencode-server exposes a real SSE event stream (GET /event) with genuine
+# incremental deltas (message.part.delta, field=text/reasoning) as the model
+# generates — this relays just those, reduced to a minimal shape, so the
+# webapp can show the actual plan text appearing live instead of a generic
+# spinner for the couple of minutes _opencode_plan's blocking call can take.
+# Not session-scoped: fine for this demo's single-operator use, not a
+# multi-tenant guarantee.
+
+async def _plan_event_gen():
+    yield "retry: 2000\n\n"
+    try:
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream("GET", f"{OPENCODE_SERVER_URL}/event") as r:
+                async for line in r.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    try:
+                        evt = json.loads(line[len("data: "):])
+                    except ValueError:
+                        continue
+                    etype = evt.get("type", "")
+                    props = evt.get("properties", {}) or {}
+                    if etype == "message.part.delta" and props.get("field") == "text":
+                        yield f"data: {json.dumps({'kind': 'delta', 'text': props.get('delta', '')})}\n\n"
+                    elif etype == "message.part.updated":
+                        part = props.get("part") or {}
+                        if part.get("type") == "reasoning":
+                            yield f"data: {json.dumps({'kind': 'reasoning', 'text': part.get('text', '')})}\n\n"
+                    elif etype == "session.next.step.started":
+                        yield f"data: {json.dumps({'kind': 'step', 'agent': props.get('agent', '')})}\n\n"
+                    elif etype == "server.heartbeat":
+                        yield ": heartbeat\n\n"
+    except Exception as exc:  # noqa: BLE001
+        yield f"data: {json.dumps({'kind': 'error', 'error': str(exc)[:200]})}\n\n"
+
+
+@app.get("/api/plan-stream")
+async def plan_stream():
+    return StreamingResponse(_plan_event_gen(), media_type="text/event-stream",
+                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 # ── Steps 7-8: AGNTCY Directory ───────────────────────────────────────────────
@@ -365,6 +445,7 @@ async def run(body: RunRequest | None = None):
     policy-scoped badge → work → delegate cross-domain (steps 1-12)."""
     repo = (body.repo if body else "") or SCAN_REPO
     cve = (body.cve_override if body else "") or "CVE-2024-XXXX"
+    use_real_opencode = body.use_real_opencode if body else True
     steps: list[dict] = []
 
     def _fail() -> JSONResponse:
@@ -387,7 +468,9 @@ async def run(body: RunRequest | None = None):
             })
             if r.status_code == 200:
                 sarah_token = r.json()["access_token"]
-                s.update(status="ok", token_preview=sarah_token[:48] + "…")
+                s.update(status="ok", token_preview=sarah_token[:48] + "…",
+                         result={"token": sarah_token,
+                                 "claims": _decode_jwt_payload_unverified(sarah_token)})
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)
@@ -471,7 +554,7 @@ async def run(body: RunRequest | None = None):
             r = await client.post(f"{VC_ISSUER_URL}/vc/verify", json={"badge": badge})
             if r.status_code == 200 and r.json().get("valid"):
                 s.update(status="ok", token_preview=badge[:48] + "…",
-                         result={"badge_claims": r.json()["claims"]})
+                         result={"token": badge, "claims": r.json()["claims"]})
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)
@@ -496,7 +579,7 @@ async def run(body: RunRequest | None = None):
         steps.append(s)
 
         # ── Step 6b: real OpenCode produces the remediation analysis ────────
-        plan_step = await _opencode_plan(client, cve, repo, scoped_intent)
+        plan_step = await _opencode_plan(client, cve, repo, scoped_intent, use_real_opencode)
         steps.append(plan_step)
         plan_text = (plan_step.get("result") or {}).get("plan", "")
 
@@ -526,6 +609,8 @@ async def run(body: RunRequest | None = None):
             if r.status_code == 200:
                 exchanged_token = r.json()["access_token"]
                 s.update(status="ok", token_preview=exchanged_token[:48] + "…", result={
+                    "token": exchanged_token,
+                    "claims": _decode_jwt_payload_unverified(exchanged_token),
                     "subject": SARAH_EMAIL,
                     "actor": OPENCODE_CLIENT_ID,
                     "note": (
@@ -572,7 +657,10 @@ async def run(body: RunRequest | None = None):
             })
             if r.status_code == 200:
                 assertion = r.json()["access_token"]
-                s.update(status="ok", token_preview=assertion[:48] + "…")
+                s.update(status="ok", token_preview=assertion[:48] + "…", result={
+                    "assertion": assertion,
+                    "claims": _decode_jwt_payload_unverified(assertion),
+                })
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)
@@ -597,7 +685,13 @@ async def run(body: RunRequest | None = None):
                 headers={"Authorization": f"Bearer {assertion}"},
             )
             if r.status_code == 200:
-                s.update(status="ok", result=r.json() if r.content else {"decision": "ALLOW"})
+                result = r.json() if r.content else {"decision": "ALLOW"}
+                result.update({
+                    "rule": r.headers.get("x-agntcy-policy-rule", ""),
+                    "enforced_by": r.headers.get("x-agntcy-policy-enforcer", ""),
+                    "delegation_depth": r.headers.get("x-agntcy-delegation-depth", ""),
+                })
+                s.update(status="ok", result=result)
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)
@@ -622,7 +716,9 @@ async def run(body: RunRequest | None = None):
             })
             if r.status_code == 200:
                 triage_token = r.json()["access_token"]
-                s.update(status="ok", token_preview=triage_token[:48] + "…")
+                s.update(status="ok", token_preview=triage_token[:48] + "…",
+                         result={"token": triage_token,
+                                 "claims": _decode_jwt_payload_unverified(triage_token)})
             else:
                 s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                 steps.append(s)

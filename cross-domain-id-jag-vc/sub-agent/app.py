@@ -69,6 +69,23 @@ def config():
     }
 
 
+def _decode_jwt_payload_unverified(token: str) -> dict:
+    """Decode a JWT's payload for display only — no signature check. Used
+    purely so the webapp's step toast has claims to show; never used for a
+    trust decision (this token is independently, cryptographically verified
+    server-side — Keycloak B issued it, and Envoy validates it against
+    Keycloak B's JWKS at the resource boundary next)."""
+    import base64
+    import json
+
+    try:
+        payload_b64 = token.split(".")[1]
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _expected_outcome(step: dict) -> bool:
     if step.get("id") == "denied-pr-attempt":
         return step.get("status") == "denied"
@@ -108,7 +125,8 @@ async def run(body: RunRequest):
                 })
                 if r.status_code == 200:
                     access_token = r.json()["access_token"]
-                    s.update(status="ok", token_preview=access_token[:48] + "…", token=access_token)
+                    s.update(status="ok", token_preview=access_token[:48] + "…", token=access_token,
+                             result={"claims": _decode_jwt_payload_unverified(access_token)})
                 else:
                     s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
                     steps.append(s)
