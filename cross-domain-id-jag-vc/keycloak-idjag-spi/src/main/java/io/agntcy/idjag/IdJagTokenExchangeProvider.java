@@ -86,6 +86,16 @@ public class IdJagTokenExchangeProvider implements TokenExchangeProvider {
             return oauthError(Response.Status.FORBIDDEN, "invalid_scope", e.getMessage());
         }
 
+        // Verify the VC delegation badge presented as actor_token, and require
+        // that it attests delegation by this very subject. Without this the
+        // badge is only ever checked by the agent it constrains, and the
+        // issuer signs whatever capabilities the caller declares.
+        try {
+            BadgeAttestation.verify(client, context.getFormParams().getFirst("actor_token"), sub);
+        } catch (BadgeAttestation.BadgeException e) {
+            return oauthError(Response.Status.FORBIDDEN, "invalid_grant", e.getMessage());
+        }
+
         // act_chain is trusted as supplied by the (already-authorized, per
         // DelegationAuthorization above) caller as-is — it is not built up
         // automatically here, matching idjag-issuer's original model where
