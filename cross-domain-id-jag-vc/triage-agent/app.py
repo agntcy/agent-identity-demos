@@ -22,6 +22,8 @@ Ticket lifecycle (POST /api/ticket):
        requested_token_type=id-jag, subject_token=the inbound access token) —
        scope/resource are the policy-approved values from t3
   t6   Push a turn record to the AGNTCY Directory
+  t6b  Discover the Sub-Agent in the Directory by name (same discovery step
+       OpenCode runs before delegating to Triage)
   t7   Spawn the Sub-Agent with the narrowed sub-badge
 """
 
@@ -452,6 +454,33 @@ async def receive_ticket(
         # ── t6: Directory turn record ─────────────────────────────────────
         with step_span("dir-push"):
             steps.append(await _dir_push_turn(body.cve, body.repo, ticket_id))
+
+        # ── t6b: discover the Sub-Agent in the Directory ──────────────────
+        # Same discovery step OpenCode does before delegating to Triage: look
+        # the delegate up by name rather than assuming a hardcoded endpoint.
+        s = {
+            "id": "dir-search",
+            "title": f"t6b. Directory: search name={SUB_AGENT_CLIENT_ID} → agent record",
+            "detail": f"gRPC SearchRecords({DIR_APISERVER_URL})  name={SUB_AGENT_CLIENT_ID}",
+        }
+        with step_span("dir-search"):
+            if not DIR_APISERVER_URL:
+                s.update(status="ok", result={"note": "directory not configured"})
+            else:
+                try:
+                    records = await asyncio.get_event_loop().run_in_executor(
+                        None, dir_api.search_by_name, DIR_APISERVER_URL, SUB_AGENT_CLIENT_ID
+                    )
+                    found = records[0] if records else {}
+                    s.update(status="ok", result={
+                        "matches": len(records),
+                        "record_name": found.get("name", ""),
+                        "skills": [sk.get("name", "") for sk in (found.get("skills") or [])],
+                        "note": "delegate discovered by name, not by hardcoded endpoint",
+                    })
+                except Exception as exc:  # noqa: BLE001
+                    s.update(status="error", error=str(exc))
+        steps.append(s)
 
         # ── t7: spawn Sub-Agent with the narrowed sub-badge ───────────────
         s = {

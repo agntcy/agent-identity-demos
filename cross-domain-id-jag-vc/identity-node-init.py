@@ -20,7 +20,9 @@ own agents. For each issuer:
 3. Create (or reuse) an RSA-2048 signing key in transit.
 4. Fetch its public key (PEM), convert to JWK (n/e) via a minimal stdlib DER parser.
 5. Self-sign a proof JWT (iss=agntcy:<org>, sub=<org>) using Vault's /transit/sign.
-6. POST /v1alpha1/issuer/register (idempotent — "already exists" is success).
+6. Check the key against any existing registration, then POST
+   /v1alpha1/issuer/register (idempotent — "already exists" is success, but
+   only once the keys are known to match; see assert_key_matches_registration).
 
 Uses only Python stdlib (no third-party packages) — Vault does the signing,
 so no local crypto library is needed; PEM/DER parsing is hand-rolled below.
@@ -221,6 +223,59 @@ def build_self_issued_jwt(key_name: str, common_name: str, sub: str, jwk: dict) 
     return f"{signing_input}.{vault_sign_rs256(key_name, signing_input)}"
 
 
+def published_issuer_modulus(common_name: str) -> str | None:
+    """The RSA modulus identity-node currently has registered for this issuer.
+
+    None if the issuer isn't registered (or publishes no usable key) — which is
+    the normal first-boot case.
+    """
+    status, body = _request(
+        "GET", f"{IDENTITY_NODE_URL}/v1alpha1/issuer/{common_name}/.well-known/jwks.json"
+    )
+    if status != 200:
+        return None
+    try:
+        keys = (json.loads(body).get("jwks") or {}).get("keys") or []
+    except json.JSONDecodeError:
+        return None
+    return next((k.get("n") for k in keys if k.get("n")), None)
+
+
+def assert_key_matches_registration(common_name: str, jwk: dict) -> None:
+    """Fail loudly when Vault's key and identity-node's registration disagree.
+
+    identity-node has no update-issuer API, so a mismatch cannot be self-healed
+    here — but it MUST NOT be ignored. Vault runs in dev mode (in-memory), so
+    its transit keys are destroyed by any restart of the container; the
+    identity-node database, however, is on a persistent volume and survives.
+    Re-running this script then creates a FRESH keypair while registration is
+    skipped as "already exists", leaving identity-node verifying every agent's
+    proof JWT against a public key whose private half no longer exists.
+
+    That surfaces much later as ERROR_REASON_INVALID_PROOF on the first CIMD
+    call of a run, with nothing pointing back to the restart that caused it —
+    so catch it here, at bootstrap, where the remedy is obvious.
+    """
+    registered = published_issuer_modulus(common_name)
+    if registered is None or registered == jwk["n"]:
+        return
+    print(
+        f"[init] ERROR: issuer '{common_name}' is registered at identity-node with a "
+        f"DIFFERENT public key than Vault currently holds.\n"
+        f"[init]   Vault's transit keys are in-memory (dev mode) and are lost whenever\n"
+        f"[init]   identity-vault restarts, while identity-node's database survives on a\n"
+        f"[init]   volume. Every proof JWT signed with the new key will now be rejected\n"
+        f"[init]   with ERROR_REASON_INVALID_PROOF.\n"
+        f"[init]   Remedy — drop the stale registrations and re-run this bootstrap:\n"
+        f"[init]     docker compose stop identity-node identity-postgres\n"
+        f"[init]     docker compose rm -f identity-node identity-postgres\n"
+        f"[init]     docker volume rm <project>_cd-identity-postgres-data\n"
+        f"[init]     docker compose up -d identity-node && docker compose run --rm identity-node-init",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
 def register_issuer(key_name: str, common_name: str, jwk: dict) -> None:
     proof_jwt = build_self_issued_jwt(key_name, common_name, common_name, jwk)
     url = f"{IDENTITY_NODE_URL}/v1alpha1/issuer/register"
@@ -237,7 +292,9 @@ def register_issuer(key_name: str, common_name: str, jwk: dict) -> None:
     if status == 200:
         print(f"[init] Issuer '{common_name}' registered as a self-issued trust authority.", flush=True)
     elif status == 400 and "already exists" in decoded:
-        print(f"[init] Issuer '{common_name}' already registered — skipping.", flush=True)
+        # Safe to skip only because the caller just proved the registered key
+        # still matches Vault's — see assert_key_matches_registration().
+        print(f"[init] Issuer '{common_name}' already registered with the same key — skipping.", flush=True)
     else:
         print(f"[init] ERROR: issuer registration failed — HTTP {status}: {decoded[:400]}", file=sys.stderr)
         sys.exit(1)
@@ -254,6 +311,7 @@ def main() -> None:
         create_signing_key(key_name)
         jwk = get_public_jwk(key_name)
         print(f"[init] Got JWK for '{key_name}' (kid={jwk['kid']}).", flush=True)
+        assert_key_matches_registration(common_name, jwk)
         register_issuer(key_name, common_name, jwk)
     orgs = ", ".join(cn for _, cn in ISSUERS)
     print(f"[init] Done. Registered Vault-backed local trust authorities: {orgs}.", flush=True)
