@@ -358,19 +358,19 @@
         </svg>
       </div><!-- /diagram-header-sticky -->
 
-      <svg id="seqSvg" viewBox="0 46 1432 1048" role="img" aria-label="Cross-domain remediation sequence diagram">
+      <svg id="seqSvg" viewBox="0 46 1432 2014" role="img" aria-label="Cross-domain remediation sequence diagram">
         <!-- Lifelines -->
-        <line class="seq-life" x1="62" y1="46" x2="62" y2="1064"/>
-        <line class="seq-life" x1="184" y1="46" x2="184" y2="1064"/>
-        <line class="seq-life" x1="306" y1="46" x2="306" y2="1064"/>
-        <line class="seq-life" x1="428" y1="46" x2="428" y2="1064"/>
-        <line class="seq-life" x1="550" y1="46" x2="550" y2="1064"/>
-        <line class="seq-life" x1="672" y1="46" x2="672" y2="1064"/>
-        <line class="seq-life" x1="794" y1="46" x2="794" y2="1064"/>
-        <line class="seq-life" x1="916" y1="46" x2="916" y2="1064"/>
-        <line class="seq-life" x1="1038" y1="46" x2="1038" y2="1064"/>
-        <line class="seq-life" x1="1160" y1="46" x2="1160" y2="1064"/>
-        <line class="seq-life" x1="1282" y1="46" x2="1282" y2="1064"/>
+        <line class="seq-life" x1="62" y1="46" x2="62" y2="2048"/>
+        <line class="seq-life" x1="184" y1="46" x2="184" y2="2048"/>
+        <line class="seq-life" x1="306" y1="46" x2="306" y2="2048"/>
+        <line class="seq-life" x1="428" y1="46" x2="428" y2="2048"/>
+        <line class="seq-life" x1="550" y1="46" x2="550" y2="2048"/>
+        <line class="seq-life" x1="672" y1="46" x2="672" y2="2048"/>
+        <line class="seq-life" x1="794" y1="46" x2="794" y2="2048"/>
+        <line class="seq-life" x1="916" y1="46" x2="916" y2="2048"/>
+        <line class="seq-life" x1="1038" y1="46" x2="1038" y2="2048"/>
+        <line class="seq-life" x1="1160" y1="46" x2="1160" y2="2048"/>
+        <line class="seq-life" x1="1282" y1="46" x2="1282" y2="2048"/>
 
         <g data-step="sarah-login" class="g">
           <text class="seq-num" x="72" y="64">1</text>
@@ -484,31 +484,158 @@
           <line class="seq-msg" x1="62" y1="802" x2="1160" y2="802" marker-end="url(#arr)"/>
         </g>
 
-        <g data-step="mint-sub-badge" class="g">
-          <text class="seq-label" x="1168" y="850">OPA ingress &#10003;  mint narrowed sub-badge</text>
-          <line class="seq-msg" x1="1160" y1="856" x2="794" y2="856" marker-end="url(#arr)"/>
-          <text class="seq-label" x="796" y="874">sub-badge (act_chain: sarah&#8594;opencode&#8594;triage&#8594;sub)</text>
-          <line class="seq-msg ret" x1="794" y1="880" x2="1156" y2="880" marker-end="url(#arr)"/>
+        <!-- ── Org B: Triage's own lifecycle (t1–t7) ────────────────────────
+             Same shape as OpenCode's in Org A — verify inbound credentials,
+             register its own identity, get the narrowing approved by policy,
+             work, then delegate narrower. Step ids repeat across orgs
+             (cimd-generate-id, dir-push, kc-b-exchange), so data-step is
+             namespaced tri:/sub: — see assignDiagramKeys() below.
+             This whole section is generated; see tasks/ for the row spec. -->
+
+        <g data-step="tri:opa-ingress" class="g">
+          <text class="seq-label" x="1154" y="826" text-anchor="end">Envoy B + inline OPA: both JWTs &#10003; chain &#10003; scope &#10003; intent &#10003; &#8594; ALLOW, forward to Triage</text>
+          <line class="seq-msg" x1="794" y1="832" x2="1156" y2="832" marker-end="url(#arr)"/>
         </g>
 
-        <g data-step="idjag-gitea" class="g">
-          <text class="seq-label" x="1168" y="902">Sub-Agent: jwt-bearer &#8594; gitea:write/pr token</text>
-          <line class="seq-msg" x1="1160" y1="908" x2="1038" y2="908" marker-end="url(#arr)"/>
-          <line class="seq-msg ret" x1="1038" y1="918" x2="1156" y2="918" marker-end="url(#arr)"/>
+        <g data-step="tri:verify-idjag" class="g">
+          <text class="seq-label" x="1154" y="860" text-anchor="end">Triage verifies the ID-JAG itself &#8212; signature vs Keycloak A's JWKS (defense in depth)</text>
+          <line class="seq-msg" x1="1160" y1="866" x2="184" y2="866" marker-end="url(#arr)"/>
+          <text class="seq-label" x="186" y="884">JWKS &#8594; iss &#10003; aud &#10003; act_chain=[opencode-agent]</text>
+          <line class="seq-msg ret" x1="184" y1="890" x2="1156" y2="890" marker-end="url(#arr)"/>
         </g>
 
-        <g data-step="open-pr" class="g">
-          <text class="seq-label" x="1168" y="942">Envoy OPA &#10003;  push fix + open PR</text>
-          <line class="seq-msg" x1="1160" y1="948" x2="1282" y2="948" marker-end="url(#arr)"/>
-          <text class="seq-label" x="1280" y="966" text-anchor="end">PR created &#10003;</text>
-          <line class="seq-msg ret" x1="1282" y1="972" x2="1156" y2="972" marker-end="url(#arr)"/>
+        <g data-step="tri:cimd-generate-id" class="g">
+          <text class="seq-label" x="1154" y="916" text-anchor="end">Triage registers its identity &#8212; generate id for triage-agent (Vault-signed proof, org-b authority)</text>
+          <line class="seq-msg" x1="1160" y1="922" x2="550" y2="922" marker-end="url(#arr)"/>
+          <text class="seq-label" x="552" y="940">RS256 signature (org-b key stays in Vault)</text>
+          <line class="seq-msg ret" x1="550" y1="946" x2="1156" y2="946" marker-end="url(#arr)"/>
+          <line class="seq-msg" x1="1160" y1="960" x2="428" y2="960" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="978">id = AGNTCY-triage-agent</text>
+          <line class="seq-msg ret" x1="428" y1="984" x2="1156" y2="984" marker-end="url(#arr)"/>
         </g>
 
-        <g data-step="pr-created" class="g">
-          <text class="seq-label" x="1168" y="994">OPA egress: depth &#10003; scope &#8838; parent &#10003; &#8594; ALLOW</text>
-          <path class="seq-msg" d="M1160,1000 L1188,1000 L1188,1010 L1162,1010" marker-end="url(#arr)"/>
-          <text class="seq-label" x="1154" y="1038" text-anchor="end">PR created &#10003; &#8212; Sarah &#8594; OpenCode &#8594; Triage &#8594; Sub-Agent</text>
-          <line class="seq-msg ret" x1="1152" y1="1044" x2="66" y2="1044" marker-end="url(#arr)"/>
+        <g data-step="tri:cimd-resolve-id" class="g">
+          <text class="seq-label" x="1154" y="1012" text-anchor="end">resolve id &#8594; ResolverMetadata + JWK (org-b issuer)</text>
+          <line class="seq-msg" x1="1160" y1="1018" x2="428" y2="1018" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="1036">ResolverMetadata + JWK</text>
+          <line class="seq-msg ret" x1="428" y1="1042" x2="1156" y2="1042" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="tri:subbadge-scope-check" class="g">
+          <text class="seq-label" x="1154" y="1068" text-anchor="end">sub-badge scope check &#8212; may this delegation be narrowed? &#8594; Envoy B + OPA</text>
+          <line class="seq-msg" x1="1160" y1="1074" x2="794" y2="1074" marker-end="url(#arr)"/>
+          <text class="seq-label" x="796" y="1092">ALLOW + scoped_scope=gitea:write gitea:pr, scoped_resource=repo</text>
+          <line class="seq-msg ret" x1="794" y1="1098" x2="1156" y2="1098" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="tri:plan" class="g">
+          <text class="seq-label" x="1154" y="1124" text-anchor="end">create ticket, plan the remediation, decide the sub-agent</text>
+          <path class="seq-msg" d="M1160,1130 Q1192,1136 1192,1144 Q1192,1152 1160,1152" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="tri:mint-sub-badge" class="g">
+          <text class="seq-label" x="1154" y="1172" text-anchor="end">mint narrowed sub-badge natively at Keycloak B (keycloak-idjag-spi)  scope from the policy decision</text>
+          <line class="seq-msg" x1="1160" y1="1178" x2="1038" y2="1178" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1040" y="1196">sub-badge (act_chain: sarah&#8594;opencode&#8594;triage)</text>
+          <line class="seq-msg ret" x1="1038" y1="1202" x2="1156" y2="1202" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="tri:dir-push" class="g">
+          <text class="seq-label" x="1154" y="1228" text-anchor="end">push Triage turn record (OASF) &#8594; CID</text>
+          <line class="seq-msg" x1="1160" y1="1234" x2="306" y2="1234" marker-end="url(#arr)"/>
+          <text class="seq-label" x="308" y="1252">CID (content-addressed)</text>
+          <line class="seq-msg ret" x1="306" y1="1258" x2="1156" y2="1258" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="tri:dir-search" class="g">
+          <text class="seq-label" x="1154" y="1284" text-anchor="end">search: name=sub-agent &#8212; discover the delegate before handing it authority</text>
+          <line class="seq-msg" x1="1160" y1="1290" x2="306" y2="1290" marker-end="url(#arr)"/>
+          <text class="seq-label" x="308" y="1308">agent record + skills</text>
+          <line class="seq-msg ret" x1="306" y1="1314" x2="1156" y2="1314" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="tri:spawn-sub-agent" class="g">
+          <text class="seq-label" x="1154" y="1340" text-anchor="end">spawn Sub-Agent with the narrowed sub-badge + intent</text>
+          <path class="seq-msg" d="M1160,1346 Q1192,1352 1192,1360 Q1192,1368 1160,1368" marker-end="url(#arr)"/>
+        </g>
+        <!-- ── Org B: the bounded Sub-Agent, same lifecycle one level down ── -->
+
+        <g data-step="sub:verify-subbadge" class="g">
+          <text class="seq-label" x="1154" y="1388" text-anchor="end">Sub-Agent verifies the sub-badge itself &#8212; vs Keycloak B JWKS, BEFORE redeeming it</text>
+          <line class="seq-msg" x1="1160" y1="1394" x2="1038" y2="1394" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1040" y="1412">typ=oauth-id-jag+jwt &#10003; client_id=sub-agent &#10003; scope &#8838; bound &#10003; repo &#10003;</text>
+          <line class="seq-msg ret" x1="1038" y1="1418" x2="1156" y2="1418" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="sub:cimd-generate-id" class="g">
+          <text class="seq-label" x="1154" y="1444" text-anchor="end">Sub-Agent registers its identity &#8212; generate id for sub-agent (Vault-signed proof, org-b authority)</text>
+          <line class="seq-msg" x1="1160" y1="1450" x2="550" y2="1450" marker-end="url(#arr)"/>
+          <text class="seq-label" x="552" y="1468">RS256 signature (org-b key stays in Vault)</text>
+          <line class="seq-msg ret" x1="550" y1="1474" x2="1156" y2="1474" marker-end="url(#arr)"/>
+          <line class="seq-msg" x1="1160" y1="1488" x2="428" y2="1488" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="1506">id = AGNTCY-sub-agent</text>
+          <line class="seq-msg ret" x1="428" y1="1512" x2="1156" y2="1512" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="sub:cimd-resolve-id" class="g">
+          <text class="seq-label" x="1154" y="1540" text-anchor="end">resolve id &#8594; ResolverMetadata + JWK (org-b issuer)</text>
+          <line class="seq-msg" x1="1160" y1="1546" x2="428" y2="1546" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="1564">ResolverMetadata + JWK</text>
+          <line class="seq-msg ret" x1="428" y1="1570" x2="1156" y2="1570" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="sub:kc-b-exchange" class="g">
+          <text class="seq-label" x="1154" y="1596" text-anchor="end">jwt-bearer grant (assertion = the verified sub-badge) &#8594; Keycloak B</text>
+          <line class="seq-msg" x1="1160" y1="1602" x2="1038" y2="1602" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1040" y="1620">access token (gitea:write, gitea:pr &#8212; no triage:create)</text>
+          <line class="seq-msg ret" x1="1038" y1="1626" x2="1156" y2="1626" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="sub:idjag-gitea" class="g">
+          <text class="seq-label" x="1154" y="1652" text-anchor="end">resource credentials: scoped access token + verified sub-badge</text>
+          <path class="seq-msg" d="M1160,1658 Q1192,1664 1192,1672 Q1192,1680 1160,1680" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="sub:push-file" class="g">
+          <text class="seq-label" x="1154" y="1700" text-anchor="end">push fix to agent branch (needs gitea:write) &#8212; via Envoy B + gitea-gateway</text>
+          <line class="seq-msg" x1="1160" y1="1706" x2="1282" y2="1706" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1280" y="1724" text-anchor="end">branch + commit &#10003;</text>
+          <line class="seq-msg ret" x1="1282" y1="1730" x2="1156" y2="1730" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="sub:open-pr" class="g">
+          <text class="seq-label" x="1154" y="1756" text-anchor="end">open PR (branch &#8594; main, needs the separate gitea:pr scope)</text>
+          <line class="seq-msg" x1="1160" y1="1762" x2="1282" y2="1762" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1280" y="1780" text-anchor="end">PR created &#10003;</text>
+          <line class="seq-msg ret" x1="1282" y1="1786" x2="1156" y2="1786" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="sub:denied-pr-attempt" class="g">
+          <text class="seq-label" x="1154" y="1812" text-anchor="end">same PR against demo-protected (deny-listed, outside the signed repo)</text>
+          <line class="seq-msg" x1="1160" y1="1818" x2="1282" y2="1818" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1280" y="1836" text-anchor="end">denied &#10007; (403 &#8212; scope alone isn&#39;t enough)</text>
+          <line class="seq-msg ret" x1="1282" y1="1842" x2="1156" y2="1842" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="sub:opa-egress" class="g">
+          <text class="seq-label" x="1154" y="1868" text-anchor="end">Envoy B resource policy: both JWTs &#10003; depth &#10003; scope &#8838; parent &#10003; repo &#10003;</text>
+          <line class="seq-msg" x1="1160" y1="1874" x2="794" y2="1874" marker-end="url(#arr)"/>
+          <text class="seq-label" x="796" y="1892">ALLOW + policy decision headers</text>
+          <line class="seq-msg ret" x1="794" y1="1898" x2="1156" y2="1898" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="sub:dir-push" class="g">
+          <text class="seq-label" x="1154" y="1924" text-anchor="end">push Sub-Agent turn record (OASF) &#8594; CID</text>
+          <line class="seq-msg" x1="1160" y1="1930" x2="306" y2="1930" marker-end="url(#arr)"/>
+          <text class="seq-label" x="308" y="1948">CID (content-addressed)</text>
+          <line class="seq-msg ret" x1="306" y1="1954" x2="1156" y2="1954" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="sub:pr-created" class="g">
+          <text class="seq-label" x="1154" y="1980" text-anchor="end">PR live &#8212; causal act-chain audit</text>
+          <path class="seq-msg" d="M1160,1986 L1188,1986 L1188,1996 L1162,1996" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1154" y="2024" text-anchor="end">PR created &#10003; &#8212; Sarah &#8594; OpenCode &#8594; Triage &#8594; Sub-Agent</text>
+          <line class="seq-msg ret" x1="1152" y1="2030" x2="66" y2="2030" marker-end="url(#arr)"/>
         </g>
 
         <circle id="travelDot" r="5"/>
@@ -654,15 +781,52 @@ POST /realms/org-b/protocol/openid-connect/token
     <h3>Org B — Triage agent &amp; bounded sub-agent (steps 13+)</h3>
     <p>OpenCode calls <code>POST /api/ticket</code> through Envoy with the scoped
     access token and signed actor token. Envoy validates both signatures and
-    runs the inline OPA delegation policy before Triage plans the fix and mints
-    a <b>narrowed sub-badge</b> for Sub-Agent:
-    caps ⊆ parent — only <code>gitea:write gitea:pr</code> (no <code>triage:create</code>),
-    with a nested act-chain: <code>Sarah → OpenCode → Triage → Sub-Agent</code>,
-    signed intent <code>create-pr-fix</code>, and signed resource
-    <code>demo-admin/payments-service</code>. Sub-Agent redeems the sub-badge at
-    Keycloak B, then sends both the access token and original sub-badge through
-    Envoy's resource listener. Inline OPA permits only the repo-bound push and
-    pull-request operations before Gitea Gateway can use its admin credential.</p>
+    runs the inline OPA delegation policy — and then Triage repeats, inside Org B,
+    exactly the lifecycle OpenCode just ran in Org A:</p>
+    <ol>
+      <li><b>Verify what it was handed.</b> Triage fetches Keycloak A's JWKS and
+      re-verifies the ID-JAG's signature, issuer, audience, and act-chain
+      <i>in-agent</i> — independently of the gateway that already checked it.</li>
+      <li><b>Register its own identity.</b> It mints and resolves its own CIMD id
+      (<code>AGNTCY-triage-agent</code>) at identity-node, proven with a JWT signed by
+      <b>org-b's</b> Vault key. Org B is a separate registered trust authority: two orgs,
+      two independent signing keys, one shared identity node.</li>
+      <li><b>Ask policy how far it may narrow.</b> Before any sub-badge exists, Triage
+      calls <code>/api/subbadge-scope-check</code> on <b>Envoy B + inline OPA</b>, which
+      returns the approved scope and the exact resource — the narrowing is policy's
+      decision, not the agent's.</li>
+      <li><b>Work</b> — create the ticket, plan the remediation, pick the sub-agent.</li>
+      <li><b>Delegate narrower.</b> <b>Keycloak B</b> natively mints the sub-badge
+      (same <code>keycloak-idjag-spi</code> extension, signed with org-b's realm key):
+      caps ⊆ parent — only <code>gitea:write gitea:pr</code>, no <code>triage:create</code> —
+      with the act-chain <code>Sarah → OpenCode → Triage</code>, signed intent
+      <code>create-pr-fix</code>, and signed resource <code>demo-admin/payments-service</code>.
+      Triage also pushes its own turn record to the Directory.</li>
+    </ol>
+    <p>Triage then looks Sub-Agent up in the Directory by name — delegates are discovered,
+    not hardcoded — and spawns it with the narrowed badge.</p>
+
+    <h3>The leaf of the chain — Sub-Agent's own lifecycle</h3>
+    <p>Sub-Agent runs the same shape a third time, one level down:</p>
+    <ol>
+      <li><b>Verify before redeeming.</b> It checks the sub-badge against <b>Keycloak B's</b>
+      JWKS <i>before</i> presenting it: really an ID-JAG (<code>typ=oauth-id-jag+jwt</code>),
+      addressed to this agent (<code>client_id=sub-agent</code>), act-chain matching the spawn,
+      bound to this repository, and — the point of the whole exercise — granting nothing beyond
+      <code>gitea:write gitea:pr</code>. A badge that fails any check never reaches Keycloak B.</li>
+      <li><b>Register its own identity</b> (<code>AGNTCY-sub-agent</code>) under the org-b trust
+      authority. Every agent in the demo, in both orgs, now holds a real cryptographic identity.</li>
+      <li><b>Work under the credential.</b> It redeems the badge for a local access token, then
+      sends both that token and the original sub-badge through Envoy's resource listener. Inline
+      OPA permits only the repo-bound push and pull-request operations before Gitea Gateway can
+      use its admin credential — and refuses the same PR against the deny-listed
+      <code>demo-protected</code> repo, even though the token still carries <code>gitea:pr</code>.</li>
+      <li><b>Record the turn</b> in the Directory. Three turn records now exist — OpenCode's,
+      Triage's, and Sub-Agent's — so the whole delegation is reconstructible from the Directory
+      alone, independently of the tokens.</li>
+    </ol>
+    <p>Sub-Agent delegates to nobody, so there is no narrowing for policy to approve and no
+    sub-badge for it to mint: the chain ends here, which is exactly what "bounded" means.</p>
 
     <h2>Architecture</h2>
     <div class="diagram doc">
@@ -818,16 +982,27 @@ POST /realms/org-b/protocol/openid-connect/token
     'mint-idjag': "Keycloak A mints the ID-JAG natively via grant_type=token-exchange (keycloak-idjag-spi), with requested_token_type=urn:ietf:params:oauth:token-type:id-jag, signed with Keycloak's own realm key — so Envoy and Keycloak B validate against the same JWKS Keycloak already publishes, with no separate mock issuer. The resulting token carries sub=sarah@org-a.example and act_chain=[opencode-agent] as sibling claims under one signature — the sub/act separation made portable across the trust boundary.",
     'kc-b-exchange': "Keycloak B independently validates the ID-JAG's signature against Keycloak A's JWKS — with no shared IdP and no pre-established federation beyond each side publishing its own JWKS — then issues its own scoped access token via a jwt-bearer grant (RFC 7523). This is the actual trust boundary: Org B's evaluation is authoritative, not Org A's assertion.",
     'create-ticket': "Both the Org B access token and the original ID-JAG actor token are presented to Envoy. Each signature is validated independently against its own issuer's JWKS before Org B's inline OPA evaluates subject, scope, delegation chain, signed intent, and target repository.",
-    'opa-ingress': "Org B evaluates its own policy over delegation chain, scope, intent, method, path, and repository, independent of Org A's egress decision. Two unilateral policy evaluations are applied to the same request.",
-    'plan': "Triage plans the remediation and delegates execution to a bounded Sub-Agent rather than performing the change itself.",
-    'mint-sub-badge': "Triage's own policy decision point determines the narrowed scope, and Triage mints the sub-badge natively at Keycloak B, scoped to gitea:write/gitea:pr only — a strict subset of Triage's own grant, cryptographically bound to the target repository. The chain now carries Sarah → OpenCode → Triage → Sub-Agent.",
-    'spawn-sub-agent': "Sub-Agent is spawned with the narrowed badge as its actual capability boundary; Triage's own process privileges are not inherited — the badge, not the parent process, is what gets enforced downstream.",
-    'idjag-gitea': "Sub-Agent presents two independently issued and independently verified credentials at the resource boundary: its own Keycloak B access token and the signed sub-badge. Envoy validates both signatures separately; neither is sufficient alone.",
-    'push-file': "gitea:write, signed intent, delegation chain, and exact repository are all checked by inline OPA before the push is forwarded.",
-    'open-pr': "A separate gitea:pr scope is required, along with base/feature branch constraints and the repository bound into the sub-badge — evaluated as independent conditions, not implied by gitea:write.",
-    'denied-pr-attempt': "The same operation is attempted against a repository outside the sub-badge's signed resource claim, and is denied despite the token still carrying gitea:pr. The same chain-integrity check applied on the allow path is applied here without exception; the denial itself becomes part of the audit record.",
-    'opa-egress': "The final inline resource-policy evaluation checks both JWTs, delegation depth, narrowed scope, signed intent, operation shape, and exact repository before Gitea Gateway receives the request.",
-    'pr-created': "The completed act_chain (Sarah → OpenCode → Triage → Sub-Agent) is itself the audit artifact: claims independently verified at every hop, not a mutable log entry describing what occurred after the fact.",
+    'tri:opa-ingress': "Org B evaluates its own policy over delegation chain, scope, intent, method, path, and repository, independent of Org A's egress decision. Two unilateral policy evaluations are applied to the same request.",
+    'tri:plan': "Triage plans the remediation and delegates execution to a bounded Sub-Agent rather than performing the change itself.",
+    'tri:mint-sub-badge': "Triage's own policy decision point determines the narrowed scope, and Triage mints the sub-badge natively at Keycloak B, scoped to gitea:write/gitea:pr only — a strict subset of Triage's own grant, cryptographically bound to the target repository. The chain now carries Sarah → OpenCode → Triage → Sub-Agent.",
+    'tri:spawn-sub-agent': "Sub-Agent is spawned with the narrowed badge as its actual capability boundary; Triage's own process privileges are not inherited — the badge, not the parent process, is what gets enforced downstream.",
+    'sub:idjag-gitea': "Sub-Agent presents two independently issued and independently verified credentials at the resource boundary: its own Keycloak B access token and the signed sub-badge. Envoy validates both signatures separately; neither is sufficient alone.",
+    'sub:push-file': "gitea:write, signed intent, delegation chain, and exact repository are all checked by inline OPA before the push is forwarded.",
+    'sub:open-pr': "A separate gitea:pr scope is required, along with base/feature branch constraints and the repository bound into the sub-badge — evaluated as independent conditions, not implied by gitea:write.",
+    'sub:denied-pr-attempt': "The same operation is attempted against a repository outside the sub-badge's signed resource claim, and is denied despite the token still carrying gitea:pr. The same chain-integrity check applied on the allow path is applied here without exception; the denial itself becomes part of the audit record.",
+    'sub:opa-egress': "The final inline resource-policy evaluation checks both JWTs, delegation depth, narrowed scope, signed intent, operation shape, and exact repository before Gitea Gateway receives the request.",
+    'sub:pr-created': "The completed act_chain (Sarah → OpenCode → Triage → Sub-Agent) is itself the audit artifact: claims independently verified at every hop, not a mutable log entry describing what occurred after the fact.",
+    'tri:verify-idjag': "Triage does not treat Envoy's decision as sufficient. It fetches Keycloak A's JWKS directly and re-validates the ID-JAG's signature, issuer, audience, and act_chain in-agent. Gateway and workload evaluate the same assertion independently — a compromised or misconfigured gateway does not silently become the only thing standing between the assertion and the workload.",
+    'tri:cimd-generate-id': "Triage registers its own identity under org-b's trust authority — a separate Vault Transit key and a separate registered issuer from org-a's. Two organizations, two independent roots of trust, one shared identity node: neither org can mint identities attributable to the other, which is what makes the cross-domain act_chain meaningful rather than decorative.",
+    'tri:cimd-resolve-id': "Triage resolves its own id back to its ResolverMetadata under the org-b issuer, confirming registration before it delegates any authority onward.",
+    'tri:subbadge-scope-check': "Org B's policy decision point evaluates the proposed narrowing before any sub-badge exists. Envoy B and inline OPA return the approved scope and the exact resource, so the boundary Sub-Agent will operate within is determined by policy rather than chosen by the agent that benefits from it.",
+    'tri:dir-push': "Triage records its own turn as a content-addressed OASF record — the second audit entry, written from the other side of the trust boundary and independent of Org A's.",
+    'tri:dir-search': "Triage resolves sub-agent through the same directory lookup by name that OpenCode used to find Triage. Delegation targets are discovered through a shared record, not hardcoded.",
+    'sub:verify-subbadge': "Sub-Agent validates the sub-badge against Keycloak B's JWKS before presenting it anywhere: that it is an ID-JAG (typ=oauth-id-jag+jwt), addressed to this client_id, carrying the act_chain it was spawned with, bound to this repository — and that its scope is a strict subset of what this agent may ever hold. A badge granting anything beyond that subset is refused outright rather than merely under-used, so an upstream narrowing failure is caught by the party it would privilege. Verification precedes redemption: a badge that fails never reaches Keycloak B.",
+    'sub:cimd-generate-id': "The leaf of the delegation chain holds a provable identity on the same terms as every other hop — its own id under org-b's trust authority, proven by a Vault-held key. No participant in the chain is anonymous.",
+    'sub:cimd-resolve-id': "Sub-Agent resolves its own id back to its ResolverMetadata, confirming registration before touching any resource.",
+    'sub:kc-b-exchange': "Sub-Agent redeems the now-verified sub-badge for a Keycloak B access token via jwt-bearer. The returned grant carries gitea:write and gitea:pr only — triage:create, held by its parent, is absent. Privilege strictly decreases along the chain, enforced at issuance rather than by convention.",
+    'sub:dir-push': "Sub-Agent records the third and final turn record. The full delegation is now reconstructible from the Directory alone, independently of the tokens and of any single service's logs.",
   };
 
   const toastEl = document.getElementById('sideToast');
@@ -974,8 +1149,16 @@ POST /realms/org-b/protocol/openid-connect/token
     'kc-a-exchange', 'mint-idjag', 'egress-check', 'kc-b-exchange', 'create-ticket',
     // The create-ticket cascade is split into sub-groups so the diagram lights
     // up at the same pace as the nested step cards reveal, instead of jumping
-    // to fully-green the instant step 12 (the outer POST) completes.
-    'mint-sub-badge', 'idjag-gitea', 'open-pr', 'pr-created'
+    // to fully-green the instant step 12 (the outer POST) completes. Triage
+    // runs the same lifecycle shape OpenCode does (verify -> register own
+    // identity -> policy-scoped credential -> work -> delegate narrower), so
+    // several ids repeat across orgs — hence the tri:/sub: namespace.
+    'tri:opa-ingress', 'tri:verify-idjag', 'tri:cimd-generate-id',
+    'tri:cimd-resolve-id', 'tri:subbadge-scope-check', 'tri:plan',
+    'tri:mint-sub-badge', 'tri:dir-push', 'tri:dir-search', 'tri:spawn-sub-agent',
+    'sub:verify-subbadge', 'sub:cimd-generate-id', 'sub:cimd-resolve-id',
+    'sub:kc-b-exchange', 'sub:idjag-gitea', 'sub:push-file', 'sub:open-pr',
+    'sub:denied-pr-attempt', 'sub:opa-egress', 'sub:dir-push', 'sub:pr-created'
   ];
 
   let allSteps  = [];   // full list from /api/run

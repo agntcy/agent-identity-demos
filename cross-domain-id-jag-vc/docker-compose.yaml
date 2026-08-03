@@ -686,8 +686,10 @@ services:
       start_period: 5s
 
   # ---------------------------------------------------------------------------
-  # Sub-Agent (mock) — Org B, bounded privilege
-  #   Steps 20-25: jwt-bearer exchange → Envoy OPA → push file → open PR → PR created
+  # Sub-Agent — Org B, bounded privilege, with its own identity lifecycle
+  #   s1 verify the sub-badge (KC-B JWKS, in-agent) → s2 register own CIMD
+  #   identity under the org-b trust authority → s3 jwt-bearer exchange →
+  #   s4-s5 Envoy OPA → push file → open PR → s6 Directory turn → s7 PR created
   #
   # Spawned by Triage with a narrowed sub-badge carrying:
   #   - caps ⊆ parent (gitea:write gitea:pr only, no triage:create)
@@ -697,25 +699,42 @@ services:
   sub-agent:
     build:
       context: ./sub-agent
+      additional_contexts:
+        dir_proto: ./proto
+        shared_lib: ./agntcy_identity_client
     image: cd-sub-agent
     container_name: cd-sub-agent
     depends_on:
       keycloak-b:
         condition: service_healthy
-      idjag-issuer:
-        condition: service_healthy
       gitea-gateway:
         condition: service_healthy
+      identity-node:
+        condition: service_healthy
+      identity-vault:
+        condition: service_healthy
+      identity-node-init:
+        condition: service_completed_successfully
+      dir-apiserver:
+        condition: service_started
       jaeger:
         condition: service_healthy
     ports:
       - "${SUB_AGENT_PORT:-8300}:8300"
     environment:
+      # Keycloak B JWKS — for in-agent verification of the inbound sub-badge
+      # (minted natively by Keycloak B since M9) before it is redeemed.
       KC_B_URL: ${KC_B_INTERNAL_URL:-http://keycloak-b:8080}
       KC_B_REALM: org-b
       SUB_AGENT_CLIENT_ID: sub-agent
       SUB_AGENT_CLIENT_SECRET: ${SUB_AGENT_CLIENT_SECRET:-demo-subagent-secret-change-me}
-      IDJAG_ISSUER_URL: http://idjag-issuer:9000
+      IDENTITY_NODE_URL: http://identity-node:4000
+      DIR_APISERVER_URL: dir-apiserver:8888
+      # CIMD proof signing — org-b trust authority key in Vault Transit
+      VAULT_ADDR: http://identity-vault:8200
+      VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:?set VAULT_DEV_ROOT_TOKEN in .env}
+      VAULT_KEY_NAME: org-b-issuer
+      ORG_COMMON_NAME: org-b
       # Org B resource boundary; direct Gitea Gateway access is not exposed.
       GITEA_GATEWAY_URL: http://envoy-org-b:10001
       GITEA_ADMIN_USER: ${GITEA_ADMIN_USER:-demo-admin}

@@ -50,7 +50,9 @@ It also wires in two AGNTCY components for real:
 | 11 | Keycloak B `jwt-bearer` redemption | **Real** |
 | 12–13 | Envoy ingress, ticket creation, OPA check, plan, sub-badge mint | **Real** two-token JWT verification + inline delegation-aware OPA policy |
 | — | Triage identity lifecycle: in-agent ID-JAG verification (KC-A JWKS), own CIMD identity under the **org-b** trust authority, sub-badge scope PDP at Envoy B, **native KC-B sub-badge mint** (keycloak-idjag-spi) | **Real** |
+| — | Triage discovers sub-agent in the Directory by name before delegating | **Real** gRPC search |
 | 14 | Sub-Agent spawned with the narrowed badge | **Real** |
+| — | Sub-Agent identity lifecycle: in-agent sub-badge verification (KC-B JWKS) **before** redemption, own CIMD identity under the org-b trust authority, own Directory turn record | **Real** |
 | 15–18 | Sub-Agent `jwt-bearer` exchange, Envoy resource enforcement, push file, open PR | **Real** |
 | 19 | Resource-boundary OPA decision | **Real** two-token JWT verification + repository-bound policy |
 | 20 | PR created, causal act-chain audit | **Real** |
@@ -93,7 +95,19 @@ the multi-issuer bootstrap), asks the new **sub-badge scope PDP**
 (`/api/subbadge-scope-check` on Envoy B) how narrowly the delegation may be
 re-narrowed, and only then mints the sub-badge **natively at Keycloak B**
 (the same keycloak-idjag-spi, now baked into `keycloak-b/Dockerfile`) —
-retiring idjag-issuer from the live delegation path entirely.
+retiring idjag-issuer from the live delegation path entirely. Milestone 10
+finishes the chain: the **Sub-Agent** — until now the only agent with no
+identity of its own, blindly redeeming whatever badge it was handed — gets the
+same lifecycle. It verifies the sub-badge against **Keycloak B's JWKS before
+redeeming it** (is this really an ID-JAG, addressed to me, matching the
+act-chain I was spawned with, bound to this repo, and — the point of the whole
+exercise — granting nothing beyond `gitea:write gitea:pr`?), registers its own
+CIMD identity (`AGNTCY-sub-agent`) under the org-b trust authority, and pushes
+its own Directory turn record. Triage also gains the one stage it was still
+missing versus OpenCode: it now **discovers** Sub-Agent in the Directory by
+name before handing it authority, instead of calling a hardcoded endpoint.
+Every agent in the demo, across both orgs, now holds a real cryptographic
+identity and verifies its inbound credential itself.
 
 **A note on `actor_token` and the `act` claim**: Keycloak 26.7's standard
 token exchange (`standard.token.exchange.enabled`) validates `subject_token`
@@ -126,7 +140,6 @@ flowchart TB
         IdNode["Identity Node\nCIMD"]
         Vault[("Vault\ntransit engine")]
         VC["VC Badge Issuer"]
-        IDJAG["ID-JAG Issuer"]
     end
 
     subgraph OrgB[" Org B "]
@@ -149,9 +162,15 @@ flowchart TB
     OC -->|"jwt-bearer exchange"| KCB
     OC -->|"POST /api/ticket"| Envoy
     Envoy -->|"verify both JWTs + enforce delegation"| Triage
-    Triage -->|"mint narrowed sub-badge"| IDJAG
+    Triage -->|"verify inbound ID-JAG (JWKS)"| KCA
+    Triage -->|"generate / resolve id (org-b)"| IdNode
+    Triage -->|"sub-badge scope check"| Envoy
+    Triage -->|"mint narrowed sub-badge (native, SPI)"| KCB
+    Triage -->|"push turn / discover delegate"| Dir
     Triage -->|"spawn"| Sub
-    Sub -->|"jwt-bearer exchange"| KCB
+    Sub -->|"verify sub-badge (JWKS), then jwt-bearer exchange"| KCB
+    Sub -->|"generate / resolve id (org-b)"| IdNode
+    Sub -->|"push turn record"| Dir
     Sub -->|"access token + sub-badge"| Envoy
     Envoy -->|"enforce operation + signed repository"| GW
     GW -->|"admin API"| Gitea
@@ -161,7 +180,7 @@ flowchart TB
     classDef shared fill:#f1e4ff,stroke:#8250df,color:#0d1117;
     class KCA,OC,EnvoyA orgA;
     class KCB,Triage,Sub,GW,Gitea orgB;
-    class Dir,IdNode,Vault,VC,IDJAG shared;
+    class Dir,IdNode,Vault,VC shared;
 ```
 
 23 services on one Docker network (`cd-net`):
@@ -189,8 +208,8 @@ flowchart TB
 | `envoy-org-b` | built from `./envoy` (Envoy + Built On Envoy Composer) | `10000`, `10001`; admin `127.0.0.1:9901` | Org B gateway; separate ticket-ingress and resource-access JWT + inline OPA policies |
 | `opencode-server` | built from `./opencode-server` | _(internal `:4096`)_ | **Real OpenCode agent** (opencode-ai@1.18.7, headless; Ollama/Anthropic provider) |
 | `opencode-agent` | built from `./opencode-agent` | `8100` | Org A identity harness driving the real OpenCode (task lifecycle steps 1-12) |
-| `triage-agent` | built from `./triage-agent` | _(internal only)_ | Org B mock agent; reachable from outside `cd-net` only through Envoy |
-| `sub-agent` | built from `./sub-agent` | `8300` | Org B bounded-privilege mock agent (push + PR) |
+| `triage-agent` | built from `./triage-agent` | _(internal only)_ | Org B remediation agent with its own identity lifecycle (in-agent ID-JAG verification, org-b CIMD identity, sub-badge scope PDP, native KC-B mint, Directory push/search); reachable from outside `cd-net` only through Envoy |
+| `sub-agent` | built from `./sub-agent` | `8300` | Org B bounded-privilege agent with its own identity lifecycle (in-agent sub-badge verification, org-b CIMD identity, push + PR, Directory push) |
 | `webapp` | built from `./webapp` | `8090` | Animated sequence-diagram demo UI |
 | `jaeger` | `jaegertracing/all-in-one:1.65.0` | `16686` | OpenTelemetry trace backend — collector (OTLP) + UI + storage |
 
@@ -212,7 +231,7 @@ sequenceDiagram
     participant IdNode as Identity Node
     participant Vault
     participant VC as VC Badge Issuer
-    participant IDJAG as ID-JAG Issuer
+    participant OCS as opencode-server (real OpenCode)
     participant EnvoyA as Envoy A + OPA (egress)
     participant KCB as Keycloak B
     participant Envoy as Built On Envoy + OPA
@@ -224,24 +243,33 @@ sequenceDiagram
     Sarah->>OC: "Fix the CVE in the Org B repo"
     OC->>KCA: OIDC password grant
     KCA-->>OC: access token
+
+    Note over OC,IdNode: OpenCode registers its OWN identity — before any work
+    OC->>Vault: sign proof JWT (transit/sign)
+    Vault-->>OC: RS256 signature — private key never leaves Vault
+    OC->>IdNode: generate id (proof JWT, org-a authority)
+    IdNode-->>OC: id = AGNTCY-opencode-agent
+    OC->>IdNode: resolve id
+    IdNode-->>OC: ResolverMetadata + public key
+
+    OC->>EnvoyA: POST /api/badge-scope-check (Sarah's access token + requested task)
+    Note over EnvoyA: verify KC-A JWT; OPA scopes the task down
+    EnvoyA-->>OC: ALLOW + x-agntcy-scoped-intent
+
+    OC->>VC: POST /vc/issue (id, caps, delegating_user, policy-scoped intent, act_chain)
+    VC-->>OC: signed badge (vc+jwt)
+    OC->>VC: POST /vc/verify (badge)
+    VC-->>OC: valid=true + claims
+
+    Note over OC: only now, under the task-scoped badge, does work begin
     Note over OC: mock CVE scan → HIGH severity (mocked)
+    OC->>OCS: remediation plan request (real agent, real LLM call)
+    OCS-->>OC: remediation plan (or skipped if no model provider)
 
     OC->>Dir: push turn record (OASF)
     Dir-->>OC: CID
     OC->>Dir: search "triage-agent"
     Dir-->>OC: agent record
-
-    OC->>Vault: sign proof JWT (transit/sign)
-    Vault-->>OC: RS256 signature — private key never leaves Vault
-    OC->>IdNode: generate id (proof JWT)
-    IdNode-->>OC: id = AGNTCY-triage-agent
-    OC->>IdNode: resolve id
-    IdNode-->>OC: ResolverMetadata + public key
-
-    OC->>VC: POST /vc/issue (id, caps, delegating_user, intent, act_chain)
-    VC-->>OC: signed badge (vc+jwt)
-    OC->>VC: POST /vc/verify (badge)
-    VC-->>OC: valid=true + claims
 
     OC->>KCA: token-exchange (subject_token=Sarah, actor_token=badge)
     Note over KCA: validates subject_token; does not process actor_token<br/>into an act claim (real Keycloak behavior, see README note)
@@ -262,10 +290,31 @@ sequenceDiagram
     Envoy->>KCA: fetch/cached JWKS
     Note over Envoy: verify both JWTs; enforce scope, chain, signed intent, repo
     Envoy->>Triage: ALLOW + policy decision headers
+
+    Note over Triage,IdNode: Triage runs the same lifecycle, one org over
+    Triage->>KCA: fetch JWKS — re-verify the ID-JAG in-agent (defense in depth)
+    KCA-->>Triage: JWKS → signature ✓ iss ✓ aud ✓ act_chain ✓
+    Triage->>Vault: sign proof JWT (org-b key)
+    Vault-->>Triage: RS256 signature
+    Triage->>IdNode: generate + resolve id (org-b authority)
+    IdNode-->>Triage: id = AGNTCY-triage-agent
+    Triage->>Envoy: POST /api/subbadge-scope-check (may this be narrowed?)
+    Envoy-->>Triage: ALLOW + scoped scope/resource
     Triage->>KCB: mint sub-badge natively (token-exchange, requested_token_type=id-jag,<br/>scope/resource = the Envoy B OPA-approved narrowing)
-    KCB-->>Triage: sub-badge (act_chain: Sarah→OpenCode→Triage→Sub-Agent)
+    KCB-->>Triage: sub-badge (act_chain: Sarah→OpenCode→Triage)
+    Triage->>Dir: push Triage turn record (OASF)
+    Dir-->>Triage: CID
+    Triage->>Dir: search "sub-agent"
+    Dir-->>Triage: agent record
     Triage->>Sub: spawn with sub-badge
 
+    Note over Sub,IdNode: the leaf of the chain has an identity too
+    Sub->>KCB: fetch JWKS — verify the sub-badge BEFORE redeeming it
+    KCB-->>Sub: JWKS → typ ✓ client_id ✓ act_chain ✓ scope ⊆ bound ✓ repo ✓
+    Sub->>Vault: sign proof JWT (org-b key)
+    Vault-->>Sub: RS256 signature
+    Sub->>IdNode: generate + resolve id (org-b authority)
+    IdNode-->>Sub: id = AGNTCY-sub-agent
     Sub->>KCB: jwt-bearer exchange
     KCB-->>Sub: scoped token (gitea:write, gitea:pr)
     Sub->>Envoy: push fix (access token + signed sub-badge)
@@ -284,6 +333,8 @@ sequenceDiagram
     Envoy--xSub: 403 policy_deny — outside signed resource
 
     Note over Sub,Triage: resource OPA decision is real and inline
+    Sub->>Dir: push Sub-Agent turn record (OASF)
+    Dir-->>Sub: CID
     Sub-->>Triage: PR link + denied-attempt result
     Triage-->>OC: ticket complete
     OC-->>Sarah: PR ready — full act-chain audit trail
@@ -1104,15 +1155,74 @@ Keycloak B sub-badge mint.
    OPA tests in step 1 (policy-level proof of the escalation/protected-repo
    denials).
 
+### Sub-Agent identity lifecycle (Milestone 10) reviewer verification
+
+Verifies that the leaf of the delegation chain has its own identity and
+verifies its inbound credential itself, and that Triage discovers its
+delegate rather than assuming it.
+
+1. Every agent in both orgs now has a CIMD identity, and all three turn
+   records land in the Directory:
+
+   ```bash
+   RUN_OUTPUT="$(mktemp)"
+   curl -fsS -X POST http://localhost:8100/api/run \
+     -H 'Content-Type: application/json' \
+     -d '{"repo":"demo-admin/payments-service"}' -o "$RUN_OUTPUT"
+   jq '{ok,
+        identities: [.steps[] | select(.id == "cimd-generate-id") | .result.id],
+        turn_records: [.steps[] | select(.id == "dir-push") | .result.agent],
+        discovered: [.steps[] | select(.id == "dir-search")][-1].result}' "$RUN_OUTPUT"
+   ```
+
+   Expected: `ok=true`; `identities` = `AGNTCY-opencode-agent`,
+   `AGNTCY-triage-agent`, `AGNTCY-sub-agent`; `turn_records` = `opencode-agent`,
+   `triage-agent`, `sub-agent`; `discovered.record_name` = `sub-agent`.
+
+2. The Sub-Agent verified the sub-badge itself, before redeeming it — note
+   `verify-subbadge` precedes `kc-b-exchange` in the step order:
+
+   ```bash
+   jq '{verify: [.steps[] | select(.id == "verify-subbadge")][0].result,
+        order: [.steps[] | .id | select(. == "verify-subbadge" or . == "kc-b-exchange")]}' "$RUN_OUTPUT"
+   rm "$RUN_OUTPUT"
+   ```
+
+   Expected: `verify.client_id="sub-agent"`, `verify.scope` without
+   `triage:create`, `verify.resource` containing the target repo, and
+   `verify-subbadge` appearing before the Sub-Agent's `kc-b-exchange`.
+
+3. Fail-closed check — a badge the Sub-Agent can't verify is never redeemed:
+
+   ```bash
+   curl -s -X POST http://localhost:8300/api/run \
+     -H 'Content-Type: application/json' \
+     -d '{"sub_badge":"not-a-jwt","repo":"demo-admin/payments-service","act_chain":["opencode-agent","triage-agent","sub-agent"]}' \
+     | jq '{ok, steps: [.steps[] | {id, status}]}'
+   ```
+
+   Expected: `ok=false` with a single `verify-subbadge` step in `error` —
+   no `cimd-generate-id`, no `kc-b-exchange`, nothing reached Keycloak B.
+
 ### Via the webapp (recommended)
 
-Open **http://localhost:8090**. Click **Run (animated)** to watch all 22
-steps execute — including the real VC badge issuance, the real Keycloak A
-exchange, and the Org A egress check — with the active step highlighted in
-the sequence diagram, a traveling pulse along the live arrow, an overall
-progress bar, and a step-by-step explainer toast. Check **Auto-zoom to
-active step** if you'd rather have the diagram zoom in on whichever step is
-currently running instead of always showing the full diagram.
+Open **http://localhost:8090**. Click **Run (animated)** to watch the whole
+lifecycle execute — every agent's full lifecycle in both orgs, including the
+real VC badge issuance, the real Keycloak A exchange, the Org A egress check,
+Triage's Org B lifecycle (in-agent ID-JAG verification, its own CIMD identity
+under the org-b trust authority, the sub-badge scope check, the native
+Keycloak B sub-badge mint), and Sub-Agent's own (verifying the sub-badge
+before redeeming it, registering its own identity) — with the active step
+highlighted in the sequence diagram, a traveling
+pulse along the live arrow, an overall progress bar, and a step-by-step
+explainer toast. Check **Auto-zoom to active step** if you'd rather have the
+diagram zoom in on whichever step is currently running instead of always
+showing the full diagram.
+
+`/api/run` on the webapp is a thin proxy to `opencode-agent`'s own `/api/run`
+(port 8100) and animates its steps verbatim — there is no second copy of the
+lifecycle to drift out of sync. The step count isn't pinned: it's whatever the
+agent actually returns.
 
 A **View trace in Jaeger** link appears once the run finishes (set
 `JAEGER_UI_URL` in `.env` to enable it). Once a run has a `trace_id`, every
@@ -1197,11 +1307,42 @@ omit either and you'll get an opaque failure with no useful error message.
 - **CIMD steps return `ERROR_REASON_INVALID_PROOF` / `INVALID_ISSUER`** — the
   proof JWT's `iss` common name must exactly match a *registered* issuer's
   common name, and the JWK must include a `kid` (see above).
-  If this appears after recreating containers while retaining old volumes,
-  the persisted identity-node registration may refer to the previous
-  ephemeral Vault key. Intentionally reset the demo with
-  `docker compose down -v`, then start it again. This deletes all local demo
-  data, including seeded Gitea state.
+
+  The usual cause is a **Vault restart**. `identity-vault` runs in dev mode,
+  so its transit keys are in-memory and are destroyed whenever that container
+  restarts (a laptop sleeping/shutting down is enough), while identity-node's
+  registrations live on a persistent volume and survive. Re-running the
+  bootstrap then mints a *fresh* keypair while registration is skipped as
+  "already exists", leaving identity-node verifying every agent's proof JWT
+  against a public key whose private half no longer exists.
+
+  `identity-node-init` now detects exactly this and **fails at bootstrap with
+  the remedy**, instead of letting it surface mid-run as an opaque
+  `ERROR_REASON_INVALID_PROOF`. To fix, drop the stale registrations only —
+  no need for `docker compose down -v`, which would also wipe seeded Gitea
+  state:
+
+  ```bash
+  docker compose stop identity-node identity-postgres
+  docker compose rm -f identity-node identity-postgres
+  docker volume rm "$(basename "$PWD" | tr -d '.-')_cd-identity-postgres-data"   # or: docker volume ls | grep identity-postgres
+  docker compose up -d identity-node
+  docker compose run --rm identity-node-init
+  ```
+- **A step fails in a way the code plainly shouldn't allow** — check the
+  running image isn't stale before debugging the code. `docker compose up -d`
+  reuses existing images, so a container can quietly run a build from before
+  the fix you're looking at. This has produced three separate red herrings in
+  this stack: ~10-minute runs and an "expired" Sarah token (both pre-`7ac84e6`
+  `opencode-agent`), and Triage reporting `X-AGNTCY-Actor-Token header
+  missing` (a pre-M9 `envoy-org-b` whose config still had `forward: false` on
+  the actor-token JWT provider). After pulling changes, rebuild before
+  investigating:
+
+  ```bash
+  docker compose build opencode-agent triage-agent sub-agent webapp envoy-org-a envoy-org-b
+  docker compose up -d --force-recreate keycloak-a keycloak-b   # realm JSON changes only re-import into a fresh container
+  ```
 - **Directory push fails with an OASF schema validation error** — the real
   `schema.oasf.agntcy.org` may not resolve from your network; the compose
   file points `DIRECTORY_SERVER_OASF_API_VALIDATION_SCHEMA_URL` at
