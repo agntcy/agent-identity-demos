@@ -118,10 +118,38 @@ a genuine platform behavior in this configuration, not a shortcut taken
 here. Getting Keycloak to emit its own `act` claim would require a custom
 protocol-mapper SPI (compiled Java, mounted into the container) — a much
 larger, riskier undertaking than closing the "no HTTP call was ever made"
-gap this milestone addresses. The badge (`actor_token`) is independently,
-cryptographically verified against vc-issuer one step earlier, and
-delegation semantics continue to be carried forward for real via the
-ID-JAG's `act_chain` claim, unaffected by this limitation.
+gap this milestone addresses. Delegation semantics continue to be carried
+forward for real via the ID-JAG's `act_chain` claim, unaffected by this
+limitation.
+
+That remains true of the **standard** exchange (step 9). The **ID-JAG mint**
+(step 10) is a different matter: it is handled by `keycloak-idjag-spi`, which
+*does* verify `actor_token`. The badge is fetched, its `vc+jwt` signature
+checked against vc-issuer's published JWKS, and its `delegating_user` required
+to match the verified `subject_token`'s subject — so Keycloak A will not mint
+an assertion on the strength of a badge that is forged, expired, or attests
+somebody else's delegation. Enabled per client via the
+`idjag.badge.jwks.url` attribute; clients without it keep the previous
+behaviour.
+
+**Known limitations of that check** (deliberate, not oversights):
+
+- **Capability containment is not enforced.** The requested `scope`,
+  `resource`, and `intent` are still not required to be a subset of what the
+  badge attests. A caller may present a valid badge and request authority
+  broader than it describes; only the static per-client allowlist
+  (`idjag.allowed.scopes`) bounds that today.
+- **`act_chain` is caller-declared**, not constructed by the issuer. A
+  production implementation would append the authenticated client itself
+  rather than accept an asserted ancestry.
+- **`delegating_user` is self-asserted at issuance.** `vc-issuer` authenticates
+  nobody on `/vc/issue` — it signs whatever principal it is handed. Its
+  signature therefore attests "vc-issuer emitted this", not "this delegation
+  occurred". The binding above is what gives the badge meaning, by tying it to
+  a subject whose token *was* verified.
+- **Keycloak B's sub-badge mint has no equivalent check.** The symmetric
+  property — an issuer never minting authority exceeding a verified inbound
+  attestation — is not yet enforced for Org B's re-narrowing.
 
 ## Architecture
 

@@ -24,9 +24,12 @@ Task lifecycle (POST /api/run):
   7    Directory: push turn record (OASF) → CID
   8    Directory: discover triage-agent
   9    RFC 8693 exchange (subject=Sarah, actor_token=badge) → Keycloak A
+       (Keycloak's standard exchange; it does not process actor_token)
   10   Mint ID-JAG natively at Keycloak A (keycloak-idjag-spi,
        requested_token_type=id-jag, act_chain=[opencode],
-       scope=triage:create)
+       scope=triage:create). The badge rides along as actor_token here too —
+       this is where authority is created, and the SPI verifies the badge
+       against vc-issuer's JWKS and binds it to Sarah before signing.
   10b  Org A egress PDP check on the ID-JAG (Envoy A + OPA) before it
        leaves the org
   11   jwt-bearer redemption at Keycloak B → scoped access token
@@ -648,6 +651,12 @@ async def run(body: RunRequest | None = None):
                 "client_secret": OPENCODE_CLIENT_SECRET,
                 "subject_token": exchanged_token,
                 "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
+                # The badge travels with the request that MINTS authority, not
+                # just with step 9's standard exchange (which Keycloak ignores).
+                # keycloak-idjag-spi verifies it against vc-issuer's JWKS and
+                # requires that it attests delegation by this same subject.
+                "actor_token": badge,
+                "actor_token_type": "urn:ietf:params:oauth:token-type:jwt",
                 "requested_token_type": "urn:ietf:params:oauth:token-type:id-jag",
                 "audience": KC_B_ISSUER,
                 "scope": "openid triage:create",
