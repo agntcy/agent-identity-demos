@@ -607,10 +607,61 @@ location /vault/ {
 This never exposes `VAULT_DEV_ROOT_TOKEN` — the OAuth gate controls who can
 reach Vault's HTTP listener at all, but every Vault API call still requires
 its own valid `X-Vault-Token` beyond unauthenticated endpoints like
-`/v1/sys/health`. Note Vault's bundled web UI (`/vault/ui/`) is not
-subpath-aware the way Keycloak/Jaeger are — its bundled JS references
-absolute `/v1/...`/`/ui/...` paths, so the UI itself won't render correctly
-behind this prefix; use the API directly, or the webapp's own panel, instead.
+`/v1/sys/health`.
+
+Vault's bundled web UI does **not** work behind the `/vault/` prefix above —
+it ships as a production Ember build with `rootURL` baked in as the absolute
+path `/ui/`, and every asset/API reference (script/css hrefs, XHR calls) is
+hardcoded to `/ui/...`/`/v1/...` from the domain root, unlike Keycloak/Jaeger
+which take an explicit relative-path option. Prefix-stripping alone can't
+relocate it. Instead, proxy Vault's own absolute paths through *unchanged*,
+at the domain root, behind the same OAuth gate:
+
+```nginx
+location /ui/ {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/sign_in?rd=$scheme://$host$request_uri;
+    proxy_pass http://127.0.0.1:8200;  # no trailing slash — path passed through unchanged
+    proxy_set_header Host $host;
+}
+
+location /v1/ {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/sign_in?rd=$scheme://$host$request_uri;
+    proxy_pass http://127.0.0.1:8200;  # no trailing slash — Vault's API root really is /v1/
+    proxy_set_header Host $host;
+}
+```
+
+With both in place, `/vault/` above becomes a convenient entry point too —
+Vault's own `GET /` handler 307s to absolute `/ui/`, which now resolves
+correctly. `/v1/` is planted at the domain root because that's where the UI's
+own bundle expects Vault's API, not because it's namespaced to Vault; keep
+that in mind if this domain ever needs a `/v1/` route for anything else.
+
+### Exposing the Identity Node's REST API under a subpath
+
+The webapp's "Registered agents (Identity Node)" panel (`GET
+/api/registered-agents`) links out to each agent's raw `.well-known/vcs.json`.
+Unlike Vault, the Identity Node has no bundled web UI at all — it's a plain
+JSON REST API — so simple prefix-stripping works with none of Vault's
+absolute-path problems:
+
+```nginx
+location /identity-node/ {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/sign_in?rd=$scheme://$host$request_uri;
+    proxy_pass http://127.0.0.1:4005/;  # trailing slash — STRIPS /identity-node/ before forwarding
+    proxy_set_header Host $host;
+}
+```
+
+`4005` is `IDENTITY_NODE_REST_PORT` from `docker-compose.yaml`, already
+published on the host for internal use; this just fronts it with the same
+OAuth gate as everything else. Note there is no "list all registered
+identities" API on either the Identity Node or the Directory — the panel
+above is a curated view over this demo's known agents (OpenCode, Triage,
+Sub-Agent), not a live enumeration.
 
 ### Reverse-proxying `/api/run` — raise the read timeout
 

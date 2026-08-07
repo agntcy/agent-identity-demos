@@ -23,10 +23,12 @@ GET  /api/config        — all service URLs / client IDs (informational)
 POST /api/run           — proxy to opencode-agent's /api/run
 GET  /api/plan-stream   — live SSE relay of opencode-agent's /api/plan-stream
 GET  /api/vault-keys    — read-only Transit key metadata (no key material)
+GET  /api/registered-agents — CIMD ids + published credentials for known agents
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 
@@ -49,6 +51,7 @@ KC_B_REALM = os.environ.get("KC_B_REALM", "org-b")
 
 OPENCODE_CLIENT_ID = os.environ.get("OPENCODE_CLIENT_ID", "opencode-agent")
 TRIAGE_CLIENT_ID = os.environ.get("TRIAGE_CLIENT_ID", "triage-agent")
+SUB_AGENT_CLIENT_ID = os.environ.get("SUB_AGENT_CLIENT_ID", "sub-agent")
 
 SARAH_USER = os.environ.get("SARAH_USER", "sarah")
 SARAH_EMAIL = os.environ.get("SARAH_EMAIL", "sarah@org-a.example")
@@ -184,6 +187,78 @@ async def vault_keys() -> JSONResponse:
             })
 
     return JSONResponse({"reachable": True, "vault_addr": VAULT_CFG.vault_addr, "keys": keys})
+
+
+# ── /api/registered-agents — CIMD ids + published credentials ─────────────────
+# The W3C VC roles, mapped onto this demo's real components: the org's Vault
+# trust authority is the Issuer (signs via /transit/sign — the private key
+# never leaves Vault); the agent named below is the Holder (built its own
+# credential, published it, and presents it at handoffs); the Verifier is
+# whoever checks it before trusting it — the Identity Node on /vc/verify,
+# Keycloak A's SPI before minting an ID-JAG, and the other side of every
+# handoff since M14. There is no "list all registered identities" API on
+# either the Identity Node or the Directory, so this is a curated view over
+# this demo's known agents rather than a live enumeration.
+_KNOWN_AGENTS = [
+    ("OpenCode Agent", OPENCODE_CLIENT_ID, "org-a"),
+    ("Triage Agent", TRIAGE_CLIENT_ID, "org-b"),
+    ("Sub-Agent", SUB_AGENT_CLIENT_ID, "org-b"),
+]
+
+
+def _decode_jws_payload_unverified(jws: str) -> dict:
+    """Decode a JOSE-enveloped VC's payload without checking its signature —
+    display only, mirroring the same pattern used for JWTs elsewhere."""
+    try:
+        payload_b64 = jws.split(".")[1]
+        padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+@app.get("/api/registered-agents")
+async def registered_agents() -> JSONResponse:
+    async with httpx.AsyncClient(timeout=5) as client:
+        agents = []
+        for name, client_id, org in _KNOWN_AGENTS:
+            cimd_id = f"AGNTCY-{client_id}"
+            entry = {
+                "name": name, "client_id": client_id, "org": org,
+                "holder_id": cimd_id, "resolved": False, "credential": None,
+                "vcs_url": f"{IDENTITY_NODE_URL}/v1alpha1/vc/{cimd_id}/.well-known/vcs.json",
+            }
+            try:
+                r = await client.post(f"{IDENTITY_NODE_URL}/v1alpha1/id/resolve",
+                                       json={"id": cimd_id})
+                if r.status_code == 200:
+                    rm = r.json().get("resolverMetadata", {})
+                    vm = (rm.get("verificationMethod") or [{}])[0]
+                    entry["resolved"] = True
+                    entry["verification_method_id"] = vm.get("id", "")
+                    entry["issuer_kid"] = (vm.get("publicKeyJwk") or {}).get("kid", "")
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                r = await client.get(entry["vcs_url"])
+                if r.status_code == 200:
+                    vcs = r.json().get("vcs", [])
+                    if vcs:
+                        payload = _decode_jws_payload_unverified(vcs[-1].get("value", ""))
+                        subj = payload.get("credentialSubject", {})
+                        entry["credential"] = {
+                            "issuer": payload.get("issuer"),
+                            "issuanceDate": payload.get("issuanceDate"),
+                            "expirationDate": payload.get("expirationDate"),
+                            "caps": subj.get("caps", []),
+                            "delegatable": subj.get("delegatable", []),
+                            "act_chain": subj.get("act_chain", []),
+                        }
+            except Exception:  # noqa: BLE001
+                pass
+            agents.append(entry)
+
+    return JSONResponse({"identity_node_url": IDENTITY_NODE_URL, "agents": agents})
 
 
 # ── Utility endpoints ─────────────────────────────────────────────────────────

@@ -82,7 +82,7 @@
     .g.error .seq-label, .g.error .seq-num { fill: var(--err); }
     .g.denied .seq-msg { stroke: var(--denied); }
     .g.denied .seq-label, .g.denied .seq-num { fill: var(--denied); }
-    /* clickable steps — jump to this step's span in Jaeger */
+    /* clickable steps — choose explainer toast or Jaeger trace */
     .g[data-step] { cursor: pointer; }
     .g[data-step]:hover .seq-msg { stroke: var(--teal); stroke-width: 2.2; }
     .g[data-step]:hover .seq-label, .g[data-step]:hover .seq-num { fill: var(--teal); }
@@ -210,6 +210,15 @@
     .side-toast .toast-bar { height: 3px; border-radius: 2px; background: #21262d; margin-top: 12px; overflow: hidden; flex-shrink: 0; }
     .side-toast .toast-bar > div { height: 100%; background: var(--accent); width: 0%; transition: width linear; }
     @media (max-width: 980px) { .side-toast { display: none; } }
+
+    /* Popup shown when a diagram step is clicked — pick explainer vs. trace */
+    .step-menu { position: fixed; z-index: 10000; background: #161b22; border: 1px solid var(--border);
+      border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.4); padding: 4px; min-width: 200px; }
+    .step-menu button { display: block; width: 100%; text-align: left; padding: 8px 10px; border: none;
+      background: none; color: var(--text); font-size: 13px; border-radius: 5px; cursor: pointer; }
+    .step-menu button:hover { background: #21262d; }
+    .step-menu button:disabled { color: var(--muted); cursor: not-allowed; }
+    .step-menu button:disabled:hover { background: none; }
   </style>
 </head>
 <body>
@@ -245,6 +254,10 @@
     <details class="config-wrap">
       <summary>Vault (Transit signing keys)</summary>
       <div class="config" id="vaultKeys"><div><i>Loading…</i></div></div>
+    </details>
+    <details class="config-wrap">
+      <summary>Registered agents (Identity Node)</summary>
+      <div class="config" id="registeredAgents"><div><i>Loading…</i></div></div>
     </details>
     <div class="status-bar" id="legend" style="margin-top:-8px"></div>
     <div class="status-bar" id="status"></div>
@@ -725,6 +738,29 @@
     trusting a handoff. Where a step says "sub-badge" it means an assertion — the JWT header type is
     always authoritative.</div>
 
+    <p>The credential side follows the standard W3C VC roles — <b>Issuer</b>, <b>Holder</b>,
+    <b>Verifier</b> — each mapped onto a specific component here, not left abstract:</p>
+    <table>
+      <tr><th>Role</th><th>Who, in this demo</th><th>What it actually does</th></tr>
+      <tr><td><b>Issuer</b></td><td>The org's Vault trust authority
+        (<code>org-a-issuer</code> / <code>org-b-issuer</code>)</td><td>Signs the credential via
+        <code>/transit/sign</code> — a signing oracle, the private key never leaves Vault. The
+        Identity Node itself is <i>not</i> the issuer: its <code>/vc/publish</code> has no
+        <code>issue</code> verb, it only registers a credential the issuer already signed, so the
+        trust anchor is the org's registered issuer JWKS, not any one service's keypair.</td></tr>
+      <tr><td><b>Holder</b></td><td>The agent the credential is about
+        (OpenCode, Triage, or Sub-Agent)</td><td>Builds its own <code>AgentBadge</code>, gets it
+        signed by its org's issuer key, publishes it to the Identity Node, and later <i>presents</i>
+        it — as the <code>actor_token</code> at an ID-JAG mint, or resolved by a counterparty at a
+        handoff. One live credential per identity; publish-once, not re-issued per task.</td></tr>
+      <tr><td><b>Verifier</b></td><td>Whoever must trust the credential before acting on
+        it</td><td>Not one party — this demo verifies at every boundary that relies on the badge:
+        the Identity Node on <code>/vc/verify</code>, Keycloak A's SPI before it will mint an
+        ID-JAG on that badge's authority, and — since M14 — the <i>other side of every handoff</i>
+        (Triage resolves and checks OpenCode's credential; Sub-Agent resolves and checks Triage's)
+        rather than trusting the assertion alone.</td></tr>
+    </table>
+
     <p>Conventional identity systems assume the caller is the human principal; an autonomous agent
     acting under delegated authority breaks that assumption. This is a reference implementation of
     the alternative, built on three design principles:</p>
@@ -788,7 +824,8 @@ POST /v1alpha1/vc/verify              # the node verifies, not the issuer
 → {"status": true, "document": {"type": ["VerifiableCredential", "AgentBadge"], …}}</code></pre>
 
     <h3>The work — scan + a real OpenCode agent (steps 6–6b)</h3>
-    <p>Only now, under the task-scoped badge, does the actual work begin: a mocked CVE scan, then a
+    <p>Only now, under the task-scoped badge, does the actual work begin: a scan of source actually
+    fetched from Org B through the delegation chain (a real Gitea read, not a hardcoded finding), then a
     real remediation analysis from the <b>real open-source OpenCode agent</b> (opencode.ai, headless
     in its own <code>opencode-server</code> container) — a genuine LLM call, not a canned response.
     This step is deliberately non-fatal: without a reachable model provider it reports
@@ -994,9 +1031,9 @@ POST /realms/org-b/protocol/openid-connect/token
          <div><b>OpenCode agent:</b> ${esc(c.opencode_agent_url)} (model: ${esc(c.opencode_model)})</div>
          <div><b>Triage client:</b> ${esc(c.triage_client_id)}</div>
          <div><b>User:</b> ${esc(c.sarah_user)} (${esc(c.sarah_email)})</div>
-         <div><b>ID-JAG issuer:</b> ${esc(c.idjag_issuer_url)}</div>
+         <div><b>ID-JAG issuer:</b> Keycloak A, natively (keycloak-idjag-spi) — no separate service</div>
          <div><b>Identity node:</b> ${esc(c.identity_node_url)}</div>
-         <div><b>VC badge issuer:</b> ${esc(c.vc_issuer_url)}</div>
+         <div><b>VC badge issuer:</b> org trust authority, Vault-signed — see the Vault Keys panel below</div>
          <div><b>Egress PDP:</b> ${esc(c.egress_pdp_url)}</div>
          <div><b>Directory:</b> ${esc(c.dir_apiserver_url)}</div>
          <div><b>Trust authority:</b> ${esc(c.org_a_common_name)} (Vault key: ${esc(c.vault_key_name)})</div>
@@ -1034,6 +1071,46 @@ POST /realms/org-b/protocol/openid-connect/token
         `<div style="margin-top:6px"><i>Vault: ${esc(v.vault_addr)} — private key material never leaves Vault; only signatures come back out.</i></div>`;
     } catch(e) {
       el.innerHTML = '<div style="color:var(--err)">Could not reach /api/vault-keys.</div>';
+    }
+  }
+
+  // ── Registered agents (Identity Node) ─────────────────────────────────────
+  // There is no "list all registered identities" API on the Identity Node or
+  // the Directory, so this is a curated view over this demo's known agents,
+  // not a live enumeration. Each row separates the three W3C VC roles: the
+  // Holder (the agent itself), its Issuer (the org's Vault trust authority —
+  // shown via the credential's kid), and the fact that this credential gets
+  // independently Verified at multiple points downstream (not shown per-row,
+  // since verification is an action other components take, not a property
+  // of the credential itself — see the How It Works tab for who does it).
+  async function loadRegisteredAgents() {
+    const el = document.getElementById('registeredAgents');
+    try {
+      const data = await (await fetch('/api/registered-agents')).json();
+      const agents = data.agents || [];
+      if (!agents.length) {
+        el.innerHTML = '<div><i>No known agents configured.</i></div>';
+        return;
+      }
+      el.innerHTML = agents.map(a => {
+        const vcsLink = `/identity-node/v1alpha1/vc/${encodeURIComponent(a.holder_id)}/.well-known/vcs.json`;
+        if (!a.resolved) {
+          return `<div><b>${esc(a.name)}</b> (${esc(a.org)}) — <span style="color:var(--err)">not resolved at identity-node</span></div>`;
+        }
+        const c = a.credential;
+        const cred = c
+          ? `caps=[${(c.caps||[]).join(', ')}] delegatable=[${(c.delegatable||[]).join(', ')}] expires ${esc(c.expirationDate)}`
+          : '<span style="color:var(--muted)">no live credential published</span>';
+        return `<div style="margin-bottom:8px">
+          <b>${esc(a.name)}</b> — Holder id <code>${esc(a.holder_id)}</code> (${esc(a.org)})<br/>
+          <span style="color:var(--muted)">Issuer:</span> ${esc(a.issuer_kid || 'unknown')} (Vault-signed)<br/>
+          <span style="color:var(--muted)">Credential:</span> ${cred}
+          &nbsp;<a href="${esc(vcsLink)}" target="_blank" rel="noopener">view raw &#8594;</a>
+        </div>`;
+      }).join('') +
+        '<div style="margin-top:6px"><i>Curated view over this demo\'s known agents — neither the Identity Node nor the Directory expose a list-all API. Issuer/Holder/Verifier roles follow the W3C VC model; see the How It Works tab for the full mapping.</i></div>';
+    } catch (e) {
+      el.innerHTML = '<div style="color:var(--err)">Could not reach /api/registered-agents.</div>';
     }
   }
 
@@ -1170,6 +1247,14 @@ POST /realms/org-b/protocol/openid-connect/token
     toastTitle.textContent = step.title || step.id;
     toastBody.textContent = STEP_EXPLAIN[step.id] || 'See the step card below for the raw request/response.';
 
+    if (step.detail) {
+      toastDetail.textContent = step.detail;
+      toastDetail.hidden = false;
+    } else {
+      toastDetail.textContent = '';
+      toastDetail.hidden = true;
+    }
+
     const facts = extractFacts(step);
     if (facts.length) {
       toastFact.innerHTML = facts.map((f, i) => {
@@ -1214,6 +1299,8 @@ POST /realms/org-b/protocol/openid-connect/token
     toastProgress.textContent = '';
     toastTitle.textContent = 'Cross-domain remediation, step by step';
     toastBody.textContent = INTRO_STORY;
+    toastDetail.textContent = '';
+    toastDetail.hidden = true;
     toastFact.hidden = true;
     toastFact.innerHTML = '';
     toastEl.classList.add('show');
@@ -1456,15 +1543,68 @@ POST /realms/org-b/protocol/openid-connect/token
     return `${base}?uiFind=${encodeURIComponent('step:' + stepId)}`;
   }
 
+  // Clicking a step offers a choice — the explainer toast (same one the
+  // animated run shows) or the step's own span in Jaeger — rather than
+  // always jumping straight to Jaeger.
+  let stepMenuEl = null;
+  function closeStepMenu() {
+    if (stepMenuEl) { stepMenuEl.remove(); stepMenuEl = null; }
+    document.removeEventListener('click', closeStepMenuOnOutsideClick, true);
+    document.removeEventListener('keydown', closeStepMenuOnEscape, true);
+  }
+  function closeStepMenuOnOutsideClick(e) {
+    if (stepMenuEl && !stepMenuEl.contains(e.target)) closeStepMenu();
+  }
+  function closeStepMenuOnEscape(e) {
+    if (e.key === 'Escape') closeStepMenu();
+  }
+
+  function openStepMenu(stepId, x, y) {
+    closeStepMenu();
+    const svgIndex = SVG_STEPS.indexOf(stepId);
+    const step = svgIndex >= 0 ? allSteps[svgIndex] : null;
+    const traceUrl = traceUrlForStep(stepId);
+
+    const menu = document.createElement('div');
+    menu.className = 'step-menu';
+    menu.innerHTML = `
+      <button type="button" data-action="toast" ${step ? '' : 'disabled'}>Show explainer</button>
+      <button type="button" data-action="trace" ${traceUrl ? '' : 'disabled'}>View trace in Jaeger &#8594;</button>
+    `;
+    document.body.appendChild(menu);
+    // Keep the menu on-screen — clamp against the viewport, not just the click point.
+    const menuW = menu.offsetWidth, menuH = menu.offsetHeight;
+    menu.style.left = `${Math.min(x, window.innerWidth - menuW - 8)}px`;
+    menu.style.top = `${Math.min(y, window.innerHeight - menuH - 8)}px`;
+    stepMenuEl = menu;
+
+    menu.querySelector('[data-action="toast"]').addEventListener('click', () => {
+      closeStepMenu();
+      if (!step) return;
+      activeStepId = stepId;
+      updateDiagram();
+      showToast(step, svgIndex, allSteps.length);
+    });
+    menu.querySelector('[data-action="trace"]').addEventListener('click', () => {
+      closeStepMenu();
+      if (traceUrl) window.open(traceUrl, '_blank', 'noopener');
+    });
+
+    // Deferred so the click that opened the menu doesn't immediately close it.
+    setTimeout(() => {
+      document.addEventListener('click', closeStepMenuOnOutsideClick, true);
+      document.addEventListener('keydown', closeStepMenuOnEscape, true);
+    }, 0);
+  }
+
   document.getElementById('seqSvg').addEventListener('click', (e) => {
     const g = e.target.closest('.g[data-step]');
     if (!g) return;
-    const url = traceUrlForStep(g.dataset.step);
-    if (!url) {
-      setStatus('Run the demo, then click a step to view its trace in Jaeger.');
+    if (!allSteps.length) {
+      setStatus('Run the demo, then click a step for its explainer or Jaeger trace.');
       return;
     }
-    window.open(url, '_blank', 'noopener');
+    openStepMenu(g.dataset.step, e.clientX, e.clientY);
   });
 
   // Each step group only draws thin lines/text with no fill, so by default
@@ -1483,7 +1623,7 @@ POST /realms/org-b/protocol/openid-connect/token
     g.insertBefore(rect, g.firstChild);
 
     const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-    title.textContent = "Click to view this step's trace in Jaeger";
+    title.textContent = 'Click to show the explainer or view this step\'s trace in Jaeger';
     g.appendChild(title);
   });
 
@@ -1722,6 +1862,7 @@ POST /realms/org-b/protocol/openid-connect/token
   // ── Init ───────────────────────────────────────────────────────────────────
   loadConfig();
   loadVaultKeys();
+  loadRegisteredAgents();
   updateButtons();
 </script>
 </body>
