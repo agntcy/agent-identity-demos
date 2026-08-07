@@ -553,6 +553,44 @@ location /keycloak-b/ {
 }
 ```
 
+### Exposing Vault's HTTP API under a subpath
+
+The webapp's "Vault (Transit signing keys)" panel (`GET /api/vault-keys`)
+already shows what's stored — key names, type, version count, creation
+time, `supports_signing` — without needing direct Vault access; that curated
+view is the recommended way to inspect Vault, since it can never return key
+material (Transit's own API has no endpoint that does).
+
+If you also want the raw Vault HTTP API reachable directly (e.g. to `curl
+/vault/v1/sys/health` yourself), bind Transit's dev listener to loopback only
+and proxy it behind the same OAuth gate as everything else, with the
+`/vault/` prefix stripped (Vault's API expects paths like `/v1/...` at its
+own root, so this uses the same stripping pattern as `/gitea/` above):
+
+```yaml
+# docker-compose.yaml
+identity-vault:
+  ports:
+    - "127.0.0.1:8200:8200"
+```
+
+```nginx
+location /vault/ {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/sign_in?rd=$scheme://$host$request_uri;
+    proxy_pass http://127.0.0.1:8200/;  # trailing slash — STRIPS /vault/ before forwarding
+    proxy_set_header Host $host;
+}
+```
+
+This never exposes `VAULT_DEV_ROOT_TOKEN` — the OAuth gate controls who can
+reach Vault's HTTP listener at all, but every Vault API call still requires
+its own valid `X-Vault-Token` beyond unauthenticated endpoints like
+`/v1/sys/health`. Note Vault's bundled web UI (`/vault/ui/`) is not
+subpath-aware the way Keycloak/Jaeger are — its bundled JS references
+absolute `/v1/...`/`/ui/...` paths, so the UI itself won't render correctly
+behind this prefix; use the API directly, or the webapp's own panel, instead.
+
 ### Reverse-proxying `/api/run` — raise the read timeout
 
 Since Milestone 8, `opencode-plan` makes a real LLM call, and one call

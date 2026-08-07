@@ -287,6 +287,13 @@ services:
       - IPC_LOCK
     networks:
       - cd-net
+    # Loopback-only, same pattern as envoy-org-a/-b's admin ports below —
+    # reachable through nginx's OAuth-gated /vault/ location, never bound to
+    # a public interface directly. No root token is served through this path;
+    # the Vault UI/API themselves still require a valid X-Vault-Token for
+    # anything beyond unauthenticated status endpoints.
+    ports:
+      - "127.0.0.1:8200:8200"
     healthcheck:
       test: ["CMD-SHELL", "vault status -address=http://127.0.0.1:8200 || exit 1"]
       interval: 5s
