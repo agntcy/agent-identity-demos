@@ -41,7 +41,11 @@
     .field { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--muted); white-space: nowrap; }
     .field input { background: var(--panel); border: 1px solid var(--border); border-radius: 5px;
       color: var(--text); padding: 5px 8px; font-size: 12.5px; font-family: ui-monospace, monospace; width: 150px; }
-    .config-wrap { margin-bottom: 16px; }
+    /* Row of collapsible panels — collapsed ones sit side by side instead of
+       each claiming a full line; opening one expands it to full width. */
+    .config-row { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-bottom: 16px; }
+    .config-wrap { margin-bottom: 0; }
+    .config-wrap[open] { flex: 1 1 100%; }
     .config-wrap summary { cursor: pointer; font-size: 12px; color: var(--muted);
       padding: 4px 2px; user-select: none; }
     .config-wrap summary:hover { color: var(--text); }
@@ -247,18 +251,20 @@
       <div class="field"><label style="gap:5px" title="Turn off to use a fast, clearly-labeled mock plan instead — useful when the real model provider is being unreliable"><input id="useRealOpencode" type="checkbox" style="width:auto" checked /> Real OpenCode (LLM)</label></div>
     </div>
 
-    <details class="config-wrap">
-      <summary>Service config</summary>
-      <div class="config" id="config"><div><i>Loading config…</i></div></div>
-    </details>
-    <details class="config-wrap">
-      <summary>Vault (Transit signing keys)</summary>
-      <div class="config" id="vaultKeys"><div><i>Loading…</i></div></div>
-    </details>
-    <details class="config-wrap">
-      <summary>Registered agents (Identity Node)</summary>
-      <div class="config" id="registeredAgents"><div><i>Loading…</i></div></div>
-    </details>
+    <div class="config-row">
+      <details class="config-wrap">
+        <summary>Service config</summary>
+        <div class="config" id="config"><div><i>Loading config…</i></div></div>
+      </details>
+      <details class="config-wrap">
+        <summary>Vault (Transit signing keys)</summary>
+        <div class="config" id="vaultKeys"><div><i>Loading…</i></div></div>
+      </details>
+      <details class="config-wrap">
+        <summary>Registered agents (Identity Node)</summary>
+        <div class="config" id="registeredAgents"><div><i>Loading…</i></div></div>
+      </details>
+    </div>
     <div class="status-bar" id="legend" style="margin-top:-8px"></div>
     <div class="status-bar" id="status"></div>
     <pre class="live-plan" id="livePlan" hidden></pre>
