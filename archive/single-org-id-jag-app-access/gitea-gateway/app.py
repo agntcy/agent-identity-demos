@@ -50,6 +50,11 @@ REQUIRE_ENVOY_POLICY = os.environ.get(
 ).lower() in {"1", "true", "yes"}
 RESOURCE_POLICY_RULE = "org-b-resource-delegation"
 RESOURCE_POLICY_ACTIONS = frozenset({"push-file", "open-pr"})
+# Source reads are a different delegation shape from the sub-agent's writes:
+# Org A's agent reads directly under a read-scoped assertion, so the chain is
+# one hop (opencode-agent) rather than three, and the rule is distinct.
+SOURCE_READ_POLICY_RULE = "org-b-source-read"
+SOURCE_READ_ACTIONS = frozenset({"read-source"})
 
 # Repos the gateway denies PR creation for regardless of token scope.
 DENY_LIST: frozenset[str] = frozenset(
@@ -223,6 +228,113 @@ def require_policy_context(
             },
         )
     return policy
+
+
+def require_source_read_token(
+    authorization: str | None = Header(default=None),
+    policy_decision: str | None = Header(default=None, alias="x-agntcy-policy-decision"),
+    policy_rule: str | None = Header(default=None, alias="x-agntcy-policy-rule"),
+    policy_enforcer: str | None = Header(default=None, alias="x-agntcy-policy-enforcer"),
+    policy_action: str | None = Header(default=None, alias="x-agntcy-policy-action"),
+    policy_repository: str | None = Header(default=None, alias="x-agntcy-policy-repository"),
+    delegation_depth: str | None = Header(default=None, alias="x-agntcy-delegation-depth"),
+) -> dict:
+    """Envoy-policy gate for source reads.
+
+    Deliberately separate from require_token(): that one encodes the sub-agent
+    write path, which is three hops deep (opencode -> triage -> sub-agent) and
+    carries the resource-delegation rule. A source read is Org A's own agent
+    acting one hop deep under a read-scoped assertion, so it needs its own
+    expected rule, action, and depth rather than a loosening of the write gate.
+    """
+    claims = _verify_token(authorization)
+    policy_depth = (
+        int(delegation_depth)
+        if delegation_depth is not None and delegation_depth.isdecimal()
+        else 0
+    )
+    if REQUIRE_ENVOY_POLICY:
+        valid_policy = (
+            policy_decision == "ALLOW"
+            and policy_rule == SOURCE_READ_POLICY_RULE
+            and policy_enforcer == "built-on-envoy-opa"
+            and policy_action in SOURCE_READ_ACTIONS
+            and bool(policy_repository)
+            and policy_depth == 1
+        )
+        if not valid_policy:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "envoy_policy_required",
+                    "message": "source reads must pass the Org B Envoy policy gateway",
+                },
+            )
+    claims["_envoy_policy"] = {
+        "decision": policy_decision,
+        "rule": policy_rule,
+        "enforced_by": policy_enforcer,
+        "action": policy_action,
+        "repository": policy_repository,
+        "delegation_depth": policy_depth,
+    }
+    return claims
+
+
+@app.get("/api/gitea/source/{owner}/{repo}/{path:path}")
+async def read_source(
+    owner: str,
+    repo: str,
+    path: str,
+    claims: dict = Depends(require_source_read_token),
+):
+    """Return one file's source. Requires the narrow ``gitea:read`` scope.
+
+    Read-only by construction: it can fetch a single file and cannot create a
+    branch, commit, or PR. The deny-list applies here too — a repo Org B has
+    placed off limits is not readable either, not merely unwritable.
+    """
+    require_scope(claims, READ_SCOPE)
+    repository = f"{owner}/{repo}"
+    policy = claims.get("_envoy_policy", {})
+    if REQUIRE_ENVOY_POLICY and policy.get("repository") != repository:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "envoy_policy_context_mismatch",
+                "expected_repository": repository,
+                "signed_repository": policy.get("repository"),
+            },
+        )
+    if repo in DENY_LIST:
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "policy_denied", "reason": f"{repo} is deny-listed"},
+        )
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(
+            f"{GITEA_URL}/api/v1/repos/{owner}/{repo}/contents/{path}",
+            auth=_gitea_auth(),
+        )
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"gitea error: {r.text[:200]}")
+    payload = r.json()
+    try:
+        source = base64.b64decode(payload.get("content", "")).decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail="could not decode file content")
+    return {
+        "subject": claims.get("sub"),
+        "scope": sorted(_scopes(claims)),
+        "policy": policy,
+        "file": {
+            "repository": repository,
+            "path": path,
+            "sha": payload.get("sha"),
+            "size": payload.get("size"),
+            "source": source,
+        },
+    }
 
 
 @app.get("/api/gitea/repos")

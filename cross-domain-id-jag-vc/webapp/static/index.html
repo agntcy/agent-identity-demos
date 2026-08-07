@@ -260,7 +260,7 @@
            (1432) and are scaled via the same `.diagram svg { width:100% }`
            rule, so their columns stay pixel-aligned at any container width. -->
       <div class="diagram-header-sticky">
-        <svg viewBox="0 0 1432 50" role="img" aria-label="Sequence diagram actors">
+        <svg viewBox="0 0 1310 50" role="img" aria-label="Sequence diagram actors">
         <defs>
           <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="context-stroke" />
@@ -335,46 +335,41 @@
         <use href="#ico-vault" class="actor-icon" x="526.10" y="21.5" width="14" height="14"/>
         <text class="seq-actor" x="545.10" y="28" style="text-anchor:start">Vault</text>
         <text class="seq-actor-sub" x="550" y="41">transit engine</text>
-        <rect class="seq-actor-box" x="612" y="10" width="120" height="36" rx="5"/>
-        <use href="#ico-badge" class="actor-icon" x="616.70" y="21.5" width="14" height="14"/>
-        <text class="seq-actor" x="635.70" y="28" style="text-anchor:start">VC Badge Issuer</text>
-        <text class="seq-actor-sub" x="672" y="41">vc-issuer</text>
+        <rect class="seq-actor-box" x="620" y="10" width="104" height="36" rx="5"/>
+        <use href="#ico-envoy" class="actor-icon" x="640.4" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="659.4" y="28" style="text-anchor:start">Envoy B</text>
+        <text class="seq-actor-sub" x="672" y="41">Org B OPA</text>
         <rect class="seq-actor-box" x="742" y="10" width="104" height="36" rx="5"/>
-        <use href="#ico-doc" class="actor-icon" x="745.85" y="21.5" width="14" height="14"/>
-        <text class="seq-actor" x="764.85" y="28" style="text-anchor:start">ID-JAG Issuer</text>
-        <text class="seq-actor-sub" x="794" y="41">sub-badge only</text>
+        <use href="#ico-envoy" class="actor-icon" x="762.4" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="781.4" y="28" style="text-anchor:start">Envoy A</text>
+        <text class="seq-actor-sub" x="794" y="41">egress OPA</text>
         <rect class="seq-actor-box" x="864" y="10" width="104" height="36" rx="5"/>
-        <use href="#ico-envoy" class="actor-icon" x="884.40" y="21.5" width="14" height="14"/>
-        <text class="seq-actor" x="903.40" y="28" style="text-anchor:start">Envoy A</text>
-        <text class="seq-actor-sub" x="916" y="41">egress OPA</text>
-        <rect class="seq-actor-box" x="986" y="10" width="104" height="36" rx="5"/>
-        <use href="#ico-keycloak" class="actor-icon" x="998.10" y="21.5" width="14" height="14"/>
-        <text class="seq-actor" x="1017.10" y="28" style="text-anchor:start">Keycloak B</text>
-        <text class="seq-actor-sub" x="1038" y="41">org-b realm</text>
-        <rect class="seq-actor-box" x="1102" y="10" width="116" height="36" rx="5"/>
-        <use href="#ico-agent" class="actor-icon" x="1115.45" y="21.5" width="14" height="14"/>
-        <text class="seq-actor" x="1134.45" y="28" style="text-anchor:start">Triage + Sub</text>
-        <text class="seq-actor-sub" x="1160" y="41">Org B agents</text>
-        <rect class="seq-actor-box" x="1230" y="10" width="104" height="36" rx="5"/>
-        <use href="#ico-gitea" class="actor-icon" x="1257.80" y="21.5" width="14" height="14"/>
-        <text class="seq-actor" x="1276.80" y="28" style="text-anchor:start">Gitea</text>
-        <text class="seq-actor-sub" x="1282" y="41">via gateway</text>
+        <use href="#ico-keycloak" class="actor-icon" x="876.1" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="895.1" y="28" style="text-anchor:start">Keycloak B</text>
+        <text class="seq-actor-sub" x="916" y="41">org-b realm</text>
+        <rect class="seq-actor-box" x="980" y="10" width="116" height="36" rx="5"/>
+        <use href="#ico-agent" class="actor-icon" x="993.45" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="1012.45" y="28" style="text-anchor:start">Triage + Sub</text>
+        <text class="seq-actor-sub" x="1038" y="41">Org B agents</text>
+        <rect class="seq-actor-box" x="1108" y="10" width="104" height="36" rx="5"/>
+        <use href="#ico-gitea" class="actor-icon" x="1135.8" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="1154.8" y="28" style="text-anchor:start">Gitea</text>
+        <text class="seq-actor-sub" x="1160" y="41">via gateway</text>
         </svg>
       </div><!-- /diagram-header-sticky -->
 
-      <svg id="seqSvg" viewBox="0 46 1432 2014" role="img" aria-label="Cross-domain remediation sequence diagram">
+      <svg id="seqSvg" viewBox="0 46 1310 2446" role="img" aria-label="Cross-domain remediation sequence diagram">
         <!-- Lifelines -->
-        <line class="seq-life" x1="62" y1="46" x2="62" y2="2048"/>
-        <line class="seq-life" x1="184" y1="46" x2="184" y2="2048"/>
-        <line class="seq-life" x1="306" y1="46" x2="306" y2="2048"/>
-        <line class="seq-life" x1="428" y1="46" x2="428" y2="2048"/>
-        <line class="seq-life" x1="550" y1="46" x2="550" y2="2048"/>
-        <line class="seq-life" x1="672" y1="46" x2="672" y2="2048"/>
-        <line class="seq-life" x1="794" y1="46" x2="794" y2="2048"/>
-        <line class="seq-life" x1="916" y1="46" x2="916" y2="2048"/>
-        <line class="seq-life" x1="1038" y1="46" x2="1038" y2="2048"/>
-        <line class="seq-life" x1="1160" y1="46" x2="1160" y2="2048"/>
-        <line class="seq-life" x1="1282" y1="46" x2="1282" y2="2048"/>
+        <line class="seq-life" x1="62" y1="46" x2="62" y2="2480"/>
+        <line class="seq-life" x1="184" y1="46" x2="184" y2="2480"/>
+        <line class="seq-life" x1="306" y1="46" x2="306" y2="2480"/>
+        <line class="seq-life" x1="428" y1="46" x2="428" y2="2480"/>
+        <line class="seq-life" x1="550" y1="46" x2="550" y2="2480"/>
+        <line class="seq-life" x1="672" y1="46" x2="672" y2="2480"/>
+        <line class="seq-life" x1="794" y1="46" x2="794" y2="2480"/>
+        <line class="seq-life" x1="916" y1="46" x2="916" y2="2480"/>
+        <line class="seq-life" x1="1038" y1="46" x2="1038" y2="2480"/>
+        <line class="seq-life" x1="1160" y1="46" x2="1160" y2="2480"/>
 
         <g data-step="sarah-login" class="g">
           <text class="seq-num" x="72" y="64">1</text>
@@ -406,86 +401,118 @@
         <g data-step="badge-scope-check" class="g">
           <text class="seq-num" x="72" y="258">4</text>
           <text class="seq-label" x="90" y="258">badge request (Sarah's OAuth token) &#8594; Envoy A + OPA &#8594; scoped-down intent</text>
-          <line class="seq-msg" x1="62" y1="264" x2="916" y2="264" marker-end="url(#arr)"/>
-          <text class="seq-label" x="914" y="282" text-anchor="end">ALLOW + scoped_intent=scan-remediate:&#8230;</text>
-          <line class="seq-msg ret" x1="916" y1="288" x2="66" y2="288" marker-end="url(#arr)"/>
+          <line class="seq-msg" x1="62" y1="264" x2="794" y2="264" marker-end="url(#arr)"/>
+          <text class="seq-label" x="792" y="282" text-anchor="end">ALLOW + scoped_intent=scan-remediate:&#8230;</text>
+          <line class="seq-msg ret" x1="794" y1="288" x2="66" y2="288" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="resolve-badge" class="g">
           <text class="seq-num" x="72" y="310">5</text>
-          <text class="seq-label" x="90" y="310">task-scoped VC badge (intent from step 4) issue + verify (real signed vc+jwt)</text>
-          <line class="seq-msg" x1="62" y1="316" x2="672" y2="316" marker-end="url(#arr)"/>
-          <text class="seq-label" x="670" y="334" text-anchor="end">signed badge (vc+jwt)</text>
-          <line class="seq-msg ret" x1="672" y1="340" x2="66" y2="340" marker-end="url(#arr)"/>
-          <line class="seq-msg" x1="62" y1="354" x2="672" y2="354" marker-end="url(#arr)"/>
-          <text class="seq-label" x="670" y="372" text-anchor="end">valid=true + claims</text>
-          <line class="seq-msg ret" x1="672" y1="378" x2="66" y2="378" marker-end="url(#arr)"/>
+          <text class="seq-label" x="90" y="310">agent badge VC (intent from step 4) &#8212; sign with the org trust-authority key</text>
+          <line class="seq-msg" x1="62" y1="316" x2="550" y2="316" marker-end="url(#arr)"/>
+          <text class="seq-label" x="548" y="334" text-anchor="end">RS256 signature (private key stays in Vault)</text>
+          <line class="seq-msg ret" x1="550" y1="340" x2="66" y2="340" marker-end="url(#arr)"/>
+          <line class="seq-msg" x1="62" y1="354" x2="428" y2="354" marker-end="url(#arr)"/>
+          <text class="seq-label" x="426" y="372" text-anchor="end">publish + verify &#8594; W3C VC, resolvable at /.well-known/vcs.json</text>
+          <line class="seq-msg ret" x1="428" y1="378" x2="66" y2="378" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="mint-read-idjag" class="g">
+          <text class="seq-num" x="70" y="400">5b</text>
+          <text class="seq-label" x="97" y="400">mint READ assertion (Keycloak A, native SPI)  scope=gitea:read  resource=this repo</text>
+          <line class="seq-msg" x1="62" y1="406" x2="184" y2="406" marker-end="url(#arr)"/>
+          <text class="seq-label" x="182" y="424" text-anchor="end">signed read assertion (RS256)</text>
+          <line class="seq-msg ret" x1="184" y1="430" x2="66" y2="430" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="read-egress-check" class="g">
+          <text class="seq-num" x="70" y="452">5c</text>
+          <text class="seq-label" x="97" y="452">Org A egress PDP &#8212; may Sarah delegate a READ of this repo to Org B?</text>
+          <line class="seq-msg" x1="62" y1="458" x2="794" y2="458" marker-end="url(#arr)"/>
+          <text class="seq-label" x="792" y="476" text-anchor="end">ALLOW  rule=org-a-egress-source-read</text>
+          <line class="seq-msg ret" x1="794" y1="482" x2="66" y2="482" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="kc-b-read-exchange" class="g">
+          <text class="seq-num" x="70" y="504">5d</text>
+          <text class="seq-label" x="97" y="504">jwt-bearer grant (read assertion) &#8594; Keycloak B</text>
+          <line class="seq-msg" x1="62" y1="510" x2="916" y2="510" marker-end="url(#arr)"/>
+          <text class="seq-label" x="914" y="528" text-anchor="end">access token (gitea:read only)</text>
+          <line class="seq-msg ret" x1="916" y1="534" x2="66" y2="534" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="fetch-source" class="g">
+          <text class="seq-num" x="70" y="556">5e</text>
+          <text class="seq-label" x="97" y="556">GET source through Envoy B + inline OPA (repo-bound, read-scoped)</text>
+          <line class="seq-msg" x1="62" y1="562" x2="672" y2="562" marker-end="url(#arr)"/>
+          <text class="seq-label" x="670" y="580" text-anchor="end">PaymentLookupRepository.java &#8212; real source</text>
+          <line class="seq-msg ret" x1="672" y1="586" x2="66" y2="586" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="scan" class="g">
-          <text class="seq-num" x="72" y="400">6</text>
-          <text class="seq-label" x="90" y="400">scan repo (under task-scoped badge) &#8594; CVE found (HIGH)</text>
-          <path class="seq-msg" d="M62,406 Q46,412 46,418 Q46,424 62,424" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="608">6</text>
+          <text class="seq-label" x="90" y="608">scan repo (under task-scoped badge) &#8594; CVE found (HIGH)</text>
+          <path class="seq-msg" d="M62,614 Q46,620 46,626 Q46,632 62,632" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="opencode-plan" class="g">
-          <text class="seq-num" x="72" y="442">6b</text>
-          <text class="seq-label" x="90" y="442">real OpenCode (opencode-server) analyzes the CVE &#8594; remediation plan</text>
-          <path class="seq-msg" d="M62,448 Q46,454 46,460 Q46,466 62,466" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="650">6b</text>
+          <text class="seq-label" x="90" y="650">real OpenCode (opencode-server) analyzes the CVE &#8594; remediation plan</text>
+          <path class="seq-msg" d="M62,656 Q46,662 46,668 Q46,674 62,674" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="dir-push" class="g">
-          <text class="seq-num" x="72" y="484">7</text>
-          <text class="seq-label" x="90" y="484">push turn record (OASF, schema_version=1.1.0)</text>
-          <line class="seq-msg" x1="62" y1="490" x2="306" y2="490" marker-end="url(#arr)"/>
-          <text class="seq-label" x="304" y="508" text-anchor="end">CID (content-addressed)</text>
-          <line class="seq-msg ret" x1="306" y1="514" x2="66" y2="514" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="692">7</text>
+          <text class="seq-label" x="90" y="692">push turn record (OASF, schema_version=1.1.0)</text>
+          <line class="seq-msg" x1="62" y1="698" x2="306" y2="698" marker-end="url(#arr)"/>
+          <text class="seq-label" x="304" y="716" text-anchor="end">CID (content-addressed)</text>
+          <line class="seq-msg ret" x1="306" y1="722" x2="66" y2="722" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="dir-search" class="g">
-          <text class="seq-num" x="72" y="536">8</text>
-          <text class="seq-label" x="90" y="536">search: name=triage-agent</text>
-          <line class="seq-msg" x1="62" y1="542" x2="306" y2="542" marker-end="url(#arr)"/>
-          <text class="seq-label" x="304" y="560" text-anchor="end">agent record + CID</text>
-          <line class="seq-msg ret" x1="306" y1="566" x2="66" y2="566" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="744">8</text>
+          <text class="seq-label" x="90" y="744">search: name=triage-agent</text>
+          <line class="seq-msg" x1="62" y1="750" x2="306" y2="750" marker-end="url(#arr)"/>
+          <text class="seq-label" x="304" y="768" text-anchor="end">agent record + CID</text>
+          <line class="seq-msg ret" x1="306" y1="774" x2="66" y2="774" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="kc-a-exchange" class="g">
-          <text class="seq-num" x="72" y="588">9</text>
-          <text class="seq-label" x="90" y="588">RFC 8693 token exchange &#8212; subject=Sarah, actor_token=task-scoped badge</text>
-          <line class="seq-msg" x1="62" y1="594" x2="184" y2="594" marker-end="url(#arr)"/>
-          <text class="seq-label" x="182" y="612" text-anchor="end">exchanged access token</text>
-          <line class="seq-msg ret" x1="184" y1="618" x2="66" y2="618" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="796">9</text>
+          <text class="seq-label" x="90" y="796">RFC 8693 token exchange &#8212; subject=Sarah, actor_token=task-scoped badge</text>
+          <line class="seq-msg" x1="62" y1="802" x2="184" y2="802" marker-end="url(#arr)"/>
+          <text class="seq-label" x="182" y="820" text-anchor="end">exchanged access token</text>
+          <line class="seq-msg ret" x1="184" y1="826" x2="66" y2="826" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="mint-idjag" class="g">
-          <text class="seq-num" x="72" y="640">10</text>
-          <text class="seq-label" x="90" y="640">mint ID-JAG (Keycloak A, native — SPI)  sub=sarah  aud=KC-B  scope=triage:create</text>
-          <line class="seq-msg" x1="62" y1="646" x2="184" y2="646" marker-end="url(#arr)"/>
-          <text class="seq-label" x="182" y="664" text-anchor="end">signed assertion (RS256)</text>
-          <line class="seq-msg ret" x1="184" y1="670" x2="66" y2="670" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="848">10</text>
+          <text class="seq-label" x="90" y="848">mint ID-JAG (Keycloak A, native — SPI)  sub=sarah  aud=KC-B  scope=triage:create</text>
+          <line class="seq-msg" x1="62" y1="854" x2="184" y2="854" marker-end="url(#arr)"/>
+          <text class="seq-label" x="182" y="872" text-anchor="end">signed assertion (RS256)</text>
+          <line class="seq-msg ret" x1="184" y1="878" x2="66" y2="878" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="egress-check" class="g">
-          <text class="seq-num" x="70" y="692">10b</text>
-          <text class="seq-label" x="97" y="692">Org A egress PDP &#8212; may Sarah delegate this scope to Org B?</text>
-          <line class="seq-msg" x1="62" y1="698" x2="916" y2="698" marker-end="url(#arr)"/>
-          <text class="seq-label" x="914" y="716" text-anchor="end">ALLOW + policy decision headers</text>
-          <line class="seq-msg ret" x1="916" y1="722" x2="66" y2="722" marker-end="url(#arr)"/>
+          <text class="seq-num" x="70" y="900">10b</text>
+          <text class="seq-label" x="97" y="900">Org A egress PDP &#8212; may Sarah delegate this scope to Org B?</text>
+          <line class="seq-msg" x1="62" y1="906" x2="794" y2="906" marker-end="url(#arr)"/>
+          <text class="seq-label" x="792" y="924" text-anchor="end">ALLOW + policy decision headers</text>
+          <line class="seq-msg ret" x1="794" y1="930" x2="66" y2="930" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="kc-b-exchange" class="g">
-          <text class="seq-num" x="72" y="744">11</text>
-          <text class="seq-label" x="90" y="744">jwt-bearer grant  assertion=&#8230;  scope=triage:create</text>
-          <line class="seq-msg" x1="62" y1="750" x2="1038" y2="750" marker-end="url(#arr)"/>
-          <text class="seq-label" x="1036" y="768" text-anchor="end">access token (triage:create, act=opencode)</text>
-          <line class="seq-msg ret" x1="1038" y1="774" x2="66" y2="774" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="952">11</text>
+          <text class="seq-label" x="90" y="952">jwt-bearer grant  assertion=&#8230;  scope=triage:create</text>
+          <line class="seq-msg" x1="62" y1="958" x2="916" y2="958" marker-end="url(#arr)"/>
+          <text class="seq-label" x="914" y="976" text-anchor="end">access token (triage:create, act=opencode)</text>
+          <line class="seq-msg ret" x1="916" y1="982" x2="66" y2="982" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="create-ticket" class="g">
-          <text class="seq-num" x="72" y="796">12</text>
-          <text class="seq-label" x="90" y="796">POST /api/ticket  access + actor tokens  cve=&#8230;  intent=create-pr-fix</text>
-          <line class="seq-msg" x1="62" y1="802" x2="1160" y2="802" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="1004">12</text>
+          <text class="seq-label" x="90" y="1004">POST /api/ticket  access + actor tokens  cve=&#8230;  intent=create-pr-fix</text>
+          <line class="seq-msg" x1="62" y1="1010" x2="1038" y2="1010" marker-end="url(#arr)"/>
         </g>
 
         <!-- ── Org B: Triage's own lifecycle (t1–t7) ────────────────────────
@@ -497,149 +524,177 @@
              This whole section is generated; see tasks/ for the row spec. -->
 
         <g data-step="tri:opa-ingress" class="g">
-          <text class="seq-label" x="1154" y="826" text-anchor="end">Envoy B + inline OPA: both JWTs &#10003; chain &#10003; scope &#10003; intent &#10003; &#8594; ALLOW, forward to Triage</text>
-          <line class="seq-msg" x1="794" y1="832" x2="1156" y2="832" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1034" text-anchor="end">Envoy B + inline OPA: both JWTs &#10003; chain &#10003; scope &#10003; intent &#10003; &#8594; ALLOW, forward to Triage</text>
+          <line class="seq-msg" x1="672" y1="1040" x2="1034" y2="1040" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:verify-idjag" class="g">
-          <text class="seq-label" x="1154" y="860" text-anchor="end">Triage verifies the ID-JAG itself &#8212; signature vs Keycloak A's JWKS (defense in depth)</text>
-          <line class="seq-msg" x1="1160" y1="866" x2="184" y2="866" marker-end="url(#arr)"/>
-          <text class="seq-label" x="186" y="884">JWKS &#8594; iss &#10003; aud &#10003; act_chain=[opencode-agent]</text>
-          <line class="seq-msg ret" x1="184" y1="890" x2="1156" y2="890" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1068" text-anchor="end">Triage verifies the ID-JAG itself &#8212; signature vs Keycloak A's JWKS (defense in depth)</text>
+          <line class="seq-msg" x1="1038" y1="1074" x2="184" y2="1074" marker-end="url(#arr)"/>
+          <text class="seq-label" x="186" y="1092">JWKS &#8594; iss &#10003; aud &#10003; act_chain=[opencode-agent]</text>
+          <line class="seq-msg ret" x1="184" y1="1098" x2="1034" y2="1098" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="tri:verify-sender-badge" class="g">
+          <text class="seq-label" x="1032" y="1120.0" text-anchor="end">resolve the delegating agent&#39;s credential &#8212; does it permit granting this?</text>
+          <line class="seq-msg" x1="1038" y1="1126.0" x2="428" y2="1126.0" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="1144.0">AGNTCY-opencode-agent: delegatable=[openid, triage:create] &#10003;</text>
+          <line class="seq-msg ret" x1="428" y1="1150.0" x2="1034" y2="1150.0" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:cimd-generate-id" class="g">
-          <text class="seq-label" x="1154" y="916" text-anchor="end">Triage registers its identity &#8212; generate id for triage-agent (Vault-signed proof, org-b authority)</text>
-          <line class="seq-msg" x1="1160" y1="922" x2="550" y2="922" marker-end="url(#arr)"/>
-          <text class="seq-label" x="552" y="940">RS256 signature (org-b key stays in Vault)</text>
-          <line class="seq-msg ret" x1="550" y1="946" x2="1156" y2="946" marker-end="url(#arr)"/>
-          <line class="seq-msg" x1="1160" y1="960" x2="428" y2="960" marker-end="url(#arr)"/>
-          <text class="seq-label" x="430" y="978">id = AGNTCY-triage-agent</text>
-          <line class="seq-msg ret" x1="428" y1="984" x2="1156" y2="984" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1180" text-anchor="end">Triage registers its identity &#8212; generate id for triage-agent (Vault-signed proof, org-b authority)</text>
+          <line class="seq-msg" x1="1038" y1="1186" x2="550" y2="1186" marker-end="url(#arr)"/>
+          <text class="seq-label" x="552" y="1204">RS256 signature (org-b key stays in Vault)</text>
+          <line class="seq-msg ret" x1="550" y1="1210" x2="1034" y2="1210" marker-end="url(#arr)"/>
+          <line class="seq-msg" x1="1038" y1="1224" x2="428" y2="1224" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="1242">id = AGNTCY-triage-agent</text>
+          <line class="seq-msg ret" x1="428" y1="1248" x2="1034" y2="1248" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:cimd-resolve-id" class="g">
-          <text class="seq-label" x="1154" y="1012" text-anchor="end">resolve id &#8594; ResolverMetadata + JWK (org-b issuer)</text>
-          <line class="seq-msg" x1="1160" y1="1018" x2="428" y2="1018" marker-end="url(#arr)"/>
-          <text class="seq-label" x="430" y="1036">ResolverMetadata + JWK</text>
-          <line class="seq-msg ret" x1="428" y1="1042" x2="1156" y2="1042" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1276" text-anchor="end">resolve id &#8594; ResolverMetadata + JWK (org-b issuer)</text>
+          <line class="seq-msg" x1="1038" y1="1282" x2="428" y2="1282" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="1300">ResolverMetadata + JWK</text>
+          <line class="seq-msg ret" x1="428" y1="1306" x2="1034" y2="1306" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:subbadge-scope-check" class="g">
-          <text class="seq-label" x="1154" y="1068" text-anchor="end">sub-badge scope check &#8212; may this delegation be narrowed? &#8594; Envoy B + OPA</text>
-          <line class="seq-msg" x1="1160" y1="1074" x2="794" y2="1074" marker-end="url(#arr)"/>
-          <text class="seq-label" x="796" y="1092">ALLOW + scoped_scope=gitea:write gitea:pr, scoped_resource=repo</text>
-          <line class="seq-msg ret" x1="794" y1="1098" x2="1156" y2="1098" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1332" text-anchor="end">sub-badge scope check &#8212; may this delegation be narrowed? &#8594; Envoy B + OPA</text>
+          <line class="seq-msg" x1="1038" y1="1338" x2="672" y2="1338" marker-end="url(#arr)"/>
+          <text class="seq-label" x="674" y="1356">ALLOW + scoped_scope=gitea:write gitea:pr, scoped_resource=repo</text>
+          <line class="seq-msg ret" x1="672" y1="1362" x2="1034" y2="1362" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="tri:resolve-badge" class="g">
+          <text class="seq-label" x="1032" y="1384.0" text-anchor="end">publish Triage&#39;s own agent badge VC (org-b Vault-signed)</text>
+          <line class="seq-msg" x1="1038" y1="1390.0" x2="428" y2="1390.0" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="1408.0">caps=[triage:create]  delegatable=[gitea:write, gitea:pr]</text>
+          <line class="seq-msg ret" x1="428" y1="1414.0" x2="1034" y2="1414.0" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:plan" class="g">
-          <text class="seq-label" x="1154" y="1124" text-anchor="end">create ticket, plan the remediation, decide the sub-agent</text>
-          <path class="seq-msg" d="M1160,1130 Q1192,1136 1192,1144 Q1192,1152 1160,1152" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1444" text-anchor="end">create ticket, plan the remediation, decide the sub-agent</text>
+          <path class="seq-msg" d="M1038,1450 Q1070,1456 1070,1464 Q1070,1472 1038,1472" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:mint-sub-badge" class="g">
-          <text class="seq-label" x="1154" y="1172" text-anchor="end">mint narrowed sub-badge natively at Keycloak B (keycloak-idjag-spi)  scope from the policy decision</text>
-          <line class="seq-msg" x1="1160" y1="1178" x2="1038" y2="1178" marker-end="url(#arr)"/>
-          <text class="seq-label" x="1040" y="1196">sub-badge (act_chain: sarah&#8594;opencode&#8594;triage)</text>
-          <line class="seq-msg ret" x1="1038" y1="1202" x2="1156" y2="1202" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1492" text-anchor="end">mint narrowed sub-badge natively at Keycloak B (keycloak-idjag-spi)  scope from the policy decision</text>
+          <line class="seq-msg" x1="1038" y1="1498" x2="916" y2="1498" marker-end="url(#arr)"/>
+          <text class="seq-label" x="918" y="1516">sub-badge (act_chain: sarah&#8594;opencode&#8594;triage)</text>
+          <line class="seq-msg ret" x1="916" y1="1522" x2="1034" y2="1522" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:dir-push" class="g">
-          <text class="seq-label" x="1154" y="1228" text-anchor="end">push Triage turn record (OASF) &#8594; CID</text>
-          <line class="seq-msg" x1="1160" y1="1234" x2="306" y2="1234" marker-end="url(#arr)"/>
-          <text class="seq-label" x="308" y="1252">CID (content-addressed)</text>
-          <line class="seq-msg ret" x1="306" y1="1258" x2="1156" y2="1258" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1548" text-anchor="end">push Triage turn record (OASF) &#8594; CID</text>
+          <line class="seq-msg" x1="1038" y1="1554" x2="306" y2="1554" marker-end="url(#arr)"/>
+          <text class="seq-label" x="308" y="1572">CID (content-addressed)</text>
+          <line class="seq-msg ret" x1="306" y1="1578" x2="1034" y2="1578" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:dir-search" class="g">
-          <text class="seq-label" x="1154" y="1284" text-anchor="end">search: name=sub-agent &#8212; discover the delegate before handing it authority</text>
-          <line class="seq-msg" x1="1160" y1="1290" x2="306" y2="1290" marker-end="url(#arr)"/>
-          <text class="seq-label" x="308" y="1308">agent record + skills</text>
-          <line class="seq-msg ret" x1="306" y1="1314" x2="1156" y2="1314" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1604" text-anchor="end">search: name=sub-agent &#8212; discover the delegate before handing it authority</text>
+          <line class="seq-msg" x1="1038" y1="1610" x2="306" y2="1610" marker-end="url(#arr)"/>
+          <text class="seq-label" x="308" y="1628">agent record + skills</text>
+          <line class="seq-msg ret" x1="306" y1="1634" x2="1034" y2="1634" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:spawn-sub-agent" class="g">
-          <text class="seq-label" x="1154" y="1340" text-anchor="end">spawn Sub-Agent with the narrowed sub-badge + intent</text>
-          <path class="seq-msg" d="M1160,1346 Q1192,1352 1192,1360 Q1192,1368 1160,1368" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1660" text-anchor="end">spawn Sub-Agent with the narrowed sub-badge + intent</text>
+          <path class="seq-msg" d="M1038,1666 Q1070,1672 1070,1680 Q1070,1688 1038,1688" marker-end="url(#arr)"/>
         </g>
         <!-- ── Org B: the bounded Sub-Agent, same lifecycle one level down ── -->
 
         <g data-step="sub:verify-subbadge" class="g">
-          <text class="seq-label" x="1154" y="1388" text-anchor="end">Sub-Agent verifies the sub-badge itself &#8212; vs Keycloak B JWKS, BEFORE redeeming it</text>
-          <line class="seq-msg" x1="1160" y1="1394" x2="1038" y2="1394" marker-end="url(#arr)"/>
-          <text class="seq-label" x="1040" y="1412">typ=oauth-id-jag+jwt &#10003; client_id=sub-agent &#10003; scope &#8838; bound &#10003; repo &#10003;</text>
-          <line class="seq-msg ret" x1="1038" y1="1418" x2="1156" y2="1418" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1708" text-anchor="end">Sub-Agent verifies the sub-badge itself &#8212; vs Keycloak B JWKS, BEFORE redeeming it</text>
+          <line class="seq-msg" x1="1038" y1="1714" x2="916" y2="1714" marker-end="url(#arr)"/>
+          <text class="seq-label" x="918" y="1732">typ=oauth-id-jag+jwt &#10003; client_id=sub-agent &#10003; scope &#8838; bound &#10003; repo &#10003;</text>
+          <line class="seq-msg ret" x1="916" y1="1738" x2="1034" y2="1738" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:cimd-generate-id" class="g">
-          <text class="seq-label" x="1154" y="1444" text-anchor="end">Sub-Agent registers its identity &#8212; generate id for sub-agent (Vault-signed proof, org-b authority)</text>
-          <line class="seq-msg" x1="1160" y1="1450" x2="550" y2="1450" marker-end="url(#arr)"/>
-          <text class="seq-label" x="552" y="1468">RS256 signature (org-b key stays in Vault)</text>
-          <line class="seq-msg ret" x1="550" y1="1474" x2="1156" y2="1474" marker-end="url(#arr)"/>
-          <line class="seq-msg" x1="1160" y1="1488" x2="428" y2="1488" marker-end="url(#arr)"/>
-          <text class="seq-label" x="430" y="1506">id = AGNTCY-sub-agent</text>
-          <line class="seq-msg ret" x1="428" y1="1512" x2="1156" y2="1512" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1764" text-anchor="end">Sub-Agent registers its identity &#8212; generate id for sub-agent (Vault-signed proof, org-b authority)</text>
+          <line class="seq-msg" x1="1038" y1="1770" x2="550" y2="1770" marker-end="url(#arr)"/>
+          <text class="seq-label" x="552" y="1788">RS256 signature (org-b key stays in Vault)</text>
+          <line class="seq-msg ret" x1="550" y1="1794" x2="1034" y2="1794" marker-end="url(#arr)"/>
+          <line class="seq-msg" x1="1038" y1="1808" x2="428" y2="1808" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="1826">id = AGNTCY-sub-agent</text>
+          <line class="seq-msg ret" x1="428" y1="1832" x2="1034" y2="1832" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:cimd-resolve-id" class="g">
-          <text class="seq-label" x="1154" y="1540" text-anchor="end">resolve id &#8594; ResolverMetadata + JWK (org-b issuer)</text>
-          <line class="seq-msg" x1="1160" y1="1546" x2="428" y2="1546" marker-end="url(#arr)"/>
-          <text class="seq-label" x="430" y="1564">ResolverMetadata + JWK</text>
-          <line class="seq-msg ret" x1="428" y1="1570" x2="1156" y2="1570" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1860" text-anchor="end">resolve id &#8594; ResolverMetadata + JWK (org-b issuer)</text>
+          <line class="seq-msg" x1="1038" y1="1866" x2="428" y2="1866" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="1884">ResolverMetadata + JWK</text>
+          <line class="seq-msg ret" x1="428" y1="1890" x2="1034" y2="1890" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="sub:resolve-badge" class="g">
+          <text class="seq-label" x="1032" y="1912.0" text-anchor="end">publish Sub-Agent&#39;s agent badge VC &#8212; the leaf: delegatable=[]</text>
+          <line class="seq-msg" x1="1038" y1="1918.0" x2="428" y2="1918.0" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="1936.0">caps=[gitea:write, gitea:pr]  delegatable=[] &#8212; chain ends here</text>
+          <line class="seq-msg ret" x1="428" y1="1942.0" x2="1034" y2="1942.0" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="sub:verify-sender-badge" class="g">
+          <text class="seq-label" x="1032" y="1964.0" text-anchor="end">resolve Triage&#39;s credential &#8212; may it delegate what our sub-badge grants?</text>
+          <line class="seq-msg" x1="1038" y1="1970.0" x2="428" y2="1970.0" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="1988.0">granted &#8838; delegatable &#10003;  act_chain agrees &#10003;</text>
+          <line class="seq-msg ret" x1="428" y1="1994.0" x2="1034" y2="1994.0" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:kc-b-exchange" class="g">
-          <text class="seq-label" x="1154" y="1596" text-anchor="end">jwt-bearer grant (assertion = the verified sub-badge) &#8594; Keycloak B</text>
-          <line class="seq-msg" x1="1160" y1="1602" x2="1038" y2="1602" marker-end="url(#arr)"/>
-          <text class="seq-label" x="1040" y="1620">access token (gitea:write, gitea:pr &#8212; no triage:create)</text>
-          <line class="seq-msg ret" x1="1038" y1="1626" x2="1156" y2="1626" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2028" text-anchor="end">jwt-bearer grant (assertion = the verified sub-badge) &#8594; Keycloak B</text>
+          <line class="seq-msg" x1="1038" y1="2034" x2="916" y2="2034" marker-end="url(#arr)"/>
+          <text class="seq-label" x="918" y="2052">access token (gitea:write, gitea:pr &#8212; no triage:create)</text>
+          <line class="seq-msg ret" x1="916" y1="2058" x2="1034" y2="2058" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:idjag-gitea" class="g">
-          <text class="seq-label" x="1154" y="1652" text-anchor="end">resource credentials: scoped access token + verified sub-badge</text>
-          <path class="seq-msg" d="M1160,1658 Q1192,1664 1192,1672 Q1192,1680 1160,1680" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2084" text-anchor="end">resource credentials: scoped access token + verified sub-badge</text>
+          <path class="seq-msg" d="M1038,2090 Q1070,2096 1070,2104 Q1070,2112 1038,2112" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:push-file" class="g">
-          <text class="seq-label" x="1154" y="1700" text-anchor="end">push fix to agent branch (needs gitea:write) &#8212; via Envoy B + gitea-gateway</text>
-          <line class="seq-msg" x1="1160" y1="1706" x2="1282" y2="1706" marker-end="url(#arr)"/>
-          <text class="seq-label" x="1280" y="1724" text-anchor="end">branch + commit &#10003;</text>
-          <line class="seq-msg ret" x1="1282" y1="1730" x2="1156" y2="1730" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2132" text-anchor="end">push fix to agent branch (needs gitea:write) &#8212; via Envoy B + gitea-gateway</text>
+          <line class="seq-msg" x1="1038" y1="2138" x2="1160" y2="2138" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1158" y="2156" text-anchor="end">branch + commit &#10003;</text>
+          <line class="seq-msg ret" x1="1160" y1="2162" x2="1034" y2="2162" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:open-pr" class="g">
-          <text class="seq-label" x="1154" y="1756" text-anchor="end">open PR (branch &#8594; main, needs the separate gitea:pr scope)</text>
-          <line class="seq-msg" x1="1160" y1="1762" x2="1282" y2="1762" marker-end="url(#arr)"/>
-          <text class="seq-label" x="1280" y="1780" text-anchor="end">PR created &#10003;</text>
-          <line class="seq-msg ret" x1="1282" y1="1786" x2="1156" y2="1786" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2188" text-anchor="end">open PR (branch &#8594; main, needs the separate gitea:pr scope)</text>
+          <line class="seq-msg" x1="1038" y1="2194" x2="1160" y2="2194" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1158" y="2212" text-anchor="end">PR created &#10003;</text>
+          <line class="seq-msg ret" x1="1160" y1="2218" x2="1034" y2="2218" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:denied-pr-attempt" class="g">
-          <text class="seq-label" x="1154" y="1812" text-anchor="end">same PR against demo-protected (deny-listed, outside the signed repo)</text>
-          <line class="seq-msg" x1="1160" y1="1818" x2="1282" y2="1818" marker-end="url(#arr)"/>
-          <text class="seq-label" x="1280" y="1836" text-anchor="end">denied &#10007; (403 &#8212; scope alone isn&#39;t enough)</text>
-          <line class="seq-msg ret" x1="1282" y1="1842" x2="1156" y2="1842" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2244" text-anchor="end">same PR against demo-protected (deny-listed, outside the signed repo)</text>
+          <line class="seq-msg" x1="1038" y1="2250" x2="1160" y2="2250" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1158" y="2268" text-anchor="end">denied &#10007; (403 &#8212; scope alone isn&#39;t enough)</text>
+          <line class="seq-msg ret" x1="1160" y1="2274" x2="1034" y2="2274" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:opa-egress" class="g">
-          <text class="seq-label" x="1154" y="1868" text-anchor="end">Envoy B resource policy: both JWTs &#10003; depth &#10003; scope &#8838; parent &#10003; repo &#10003;</text>
-          <line class="seq-msg" x1="1160" y1="1874" x2="794" y2="1874" marker-end="url(#arr)"/>
-          <text class="seq-label" x="796" y="1892">ALLOW + policy decision headers</text>
-          <line class="seq-msg ret" x1="794" y1="1898" x2="1156" y2="1898" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2300" text-anchor="end">Envoy B resource policy: both JWTs &#10003; depth &#10003; scope &#8838; parent &#10003; repo &#10003;</text>
+          <line class="seq-msg" x1="1038" y1="2306" x2="672" y2="2306" marker-end="url(#arr)"/>
+          <text class="seq-label" x="674" y="2324">ALLOW + policy decision headers</text>
+          <line class="seq-msg ret" x1="672" y1="2330" x2="1034" y2="2330" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:dir-push" class="g">
-          <text class="seq-label" x="1154" y="1924" text-anchor="end">push Sub-Agent turn record (OASF) &#8594; CID</text>
-          <line class="seq-msg" x1="1160" y1="1930" x2="306" y2="1930" marker-end="url(#arr)"/>
-          <text class="seq-label" x="308" y="1948">CID (content-addressed)</text>
-          <line class="seq-msg ret" x1="306" y1="1954" x2="1156" y2="1954" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2356" text-anchor="end">push Sub-Agent turn record (OASF) &#8594; CID</text>
+          <line class="seq-msg" x1="1038" y1="2362" x2="306" y2="2362" marker-end="url(#arr)"/>
+          <text class="seq-label" x="308" y="2380">CID (content-addressed)</text>
+          <line class="seq-msg ret" x1="306" y1="2386" x2="1034" y2="2386" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:pr-created" class="g">
-          <text class="seq-label" x="1154" y="1980" text-anchor="end">PR live &#8212; causal act-chain audit</text>
-          <path class="seq-msg" d="M1160,1986 L1188,1986 L1188,1996 L1162,1996" marker-end="url(#arr)"/>
-          <text class="seq-label" x="1154" y="2024" text-anchor="end">PR created &#10003; &#8212; Sarah &#8594; OpenCode &#8594; Triage &#8594; Sub-Agent</text>
-          <line class="seq-msg ret" x1="1152" y1="2030" x2="66" y2="2030" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2412" text-anchor="end">PR live &#8212; causal act-chain audit</text>
+          <path class="seq-msg" d="M1038,2418 L1066,2418 L1066,2428 L1040,2428" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2456" text-anchor="end">PR created &#10003; &#8212; Sarah &#8594; OpenCode &#8594; Triage &#8594; Sub-Agent</text>
+          <line class="seq-msg ret" x1="1030" y1="2462" x2="66" y2="2462" marker-end="url(#arr)"/>
         </g>
 
         <circle id="travelDot" r="5"/>
@@ -658,6 +713,17 @@
     <b>OpenCode</b> (her Org A AI agent) to fix a CVE found in a repo owned by <b>Org B</b>.
     Because Org B has its own IdP and access control, OpenCode cannot act directly — it must
     <i>assert</i> Sarah's delegation cross-domain using the ID-JAG protocol.</p>
+
+    <div class="note"><b>Two signed objects, and they are not the same thing.</b>
+    A <b>credential</b> (<code>typ=JOSE</code>, type <code>AgentBadge</code>) is signed with the
+    org's Vault trust-authority key and published to the Identity Node, where anyone can resolve it
+    at <code>/v1alpha1/vc/{id}/.well-known/vcs.json</code>. It says <i>what an agent is and what it
+    may do or delegate</i>, and lasts about an hour. An <b>assertion</b>
+    (<code>typ=oauth-id-jag+jwt</code>) is minted by Keycloak per task, lives about five minutes, and
+    says <i>this particular request is authorised</i>. Policy at the four Envoy boundaries acts on the
+    <b>assertion</b>; the <b>credential</b> is what a counterparty resolves independently before
+    trusting a handoff. Where a step says "sub-badge" it means an assertion — the JWT header type is
+    always authoritative.</div>
 
     <p>Conventional identity systems assume the caller is the human principal; an autonomous agent
     acting under delegated authority breaks that assumption. This is a reference implementation of
@@ -698,8 +764,14 @@
     to <b>Envoy A + inline OPA</b> at a new endpoint: <code>/api/badge-scope-check</code>. Policy decides
     whether — and how narrowly — to scope this task, returning a scoped-down intent
     (e.g. <code>scan-remediate:demo-admin/payments-service</code>) as a response header. Only <i>then</i>
-    does <b>vc-issuer</b> mint the VC delegation badge, bound to exactly that intent — the badge cannot
-    be broader than what policy already approved.</p>
+    does OpenCode issue the badge, bound to exactly that intent — it cannot be broader than what
+    policy already approved. The badge is a genuine W3C Verifiable Credential: built by the agent,
+    signed with <b>org-a's Vault trust-authority key</b> (the same key CIMD proofs use — the private
+    half never leaves Vault), and published to the <b>AGNTCY Identity Node</b>, which verifies it and
+    serves it at <code>/v1alpha1/vc/{id}/.well-known/vcs.json</code>. Note the node's API is
+    publish/verify/revoke/search with no <i>issue</i>: it registers credentials the issuer has already
+    signed, so the trust anchor is the org's registered issuer key rather than any one service's
+    keypair.</p>
     <pre><code>POST /api/badge-scope-check          # Envoy A + inline OPA
   Authorization: Bearer &lt;Sarah's access token&gt;
   x-agntcy-requested-action: scan-remediate
@@ -707,10 +779,13 @@
 → 200 OK
   x-agntcy-scoped-intent: scan-remediate:demo-admin/payments-service
 
-POST /vc/issue                        # vc-issuer
-{"id": "opencode-agent", "caps": [...], "delegating_user": "sarah@org-a.example",
- "intent": "scan-remediate:demo-admin/payments-service", "act_chain": ["opencode-agent"]}
-→ {"badge": "eyJ…"}   # real signed vc+jwt, verified immediately after</code></pre>
+POST /v1alpha1/vc/publish             # AGNTCY Identity Node
+{"vc":    {"envelopeType": "CREDENTIAL_ENVELOPE_TYPE_JOSE", "value": "&lt;JOSE VC&gt;"},
+ "proof": {"type": "JWT", "proofValue": "&lt;Vault-signed proof JWT&gt;"}}
+→ 200
+
+POST /v1alpha1/vc/verify              # the node verifies, not the issuer
+→ {"status": true, "document": {"type": ["VerifiableCredential", "AgentBadge"], …}}</code></pre>
 
     <h3>The work — scan + a real OpenCode agent (steps 6–6b)</h3>
     <p>Only now, under the task-scoped badge, does the actual work begin: a mocked CVE scan, then a
@@ -759,10 +834,9 @@ stub.SearchRecords(SearchRecordsRequest(queries=[RecordQuery(
     throwaway keypair. Before it ever leaves Org A, Envoy A + inline OPA independently re-check its
     scope, intent, and delegation-chain depth (the egress PDP). Org B's Keycloak then validates the
     assertion against that same JWKS, maps Sarah's identity, and issues a scoped access
-    token. (Triage's later narrowed sub-badge for Sub-Agent still comes
-    from a separate <code>idjag-issuer</code> mock service — see
-    <a href="https://github.com/agntcy/agent-identity-demos/discussions/18" target="_blank" rel="noopener">Discussion #18</a>
-    for why that path wasn't migrated too.)</p>
+    token. Triage's later narrowed sub-badge is minted the same native way, by
+    <b>Keycloak B</b> through its own copy of the SPI — no mock issuer remains
+    anywhere in the delegation path.</p>
     <pre><code>POST /realms/org-a/protocol/openid-connect/token   # Keycloak A
   grant_type          = urn:ietf:params:oauth:grant-type:token-exchange
   subject_token       = &lt;Sarah's exchanged KC-A access token&gt;
@@ -1006,16 +1080,24 @@ POST /realms/org-b/protocol/openid-connect/token
     'cimd-generate-id': "OpenCode requires its own provable identity, independent of Sarah's — an agent asserting its principal's identity as its own would defeat accountability rather than establish it. Org A's private signing key resides in Vault's Transit secrets engine, which functions here as a signing oracle: the key never leaves Vault's boundary, is never exported, and is never held by any calling service. To register, OpenCode submits a claim to Vault's /transit/sign endpoint; Vault returns only the RS256 signature, never the key material. identity-node verifies that signature against org-a's previously registered public key before minting the id. This signature is the root of trust every subsequent `act` claim traces back to.",
     'cimd-resolve-id': "OpenCode resolves its own id back to its ResolverMetadata and public key, independently confirming the registration rather than relying on the mint operation's own success response.",
     'badge-scope-check': "Authorization is enforced here, prior to any work being performed. OpenCode presents Sarah's own OAuth access token, plus the requested action and resource, to Envoy A and inline OPA. Policy determines the narrowest permissible intent for this task — least privilege is a policy decision, not a constraint the agent self-imposes.",
-    'resolve-badge': "vc-issuer mints a W3C Verifiable Credential (vc+jwt) scoped to exactly the intent OPA approved; OpenCode verifies the signature before using it. This VC becomes the `actor_token` presented at the ID-JAG mint, where Keycloak A re-verifies it against vc-issuer's JWKS and refuses to sign unless it attests delegation by this same subject — so the attestation is checked by the issuer, not only by the agent it constrains.",
-    'scan': "The scan executes only under the now task-scoped VC. This step is mocked — no vulnerability scanner is integrated in this demo.",
+    'resolve-badge': "The badge is a W3C Verifiable Credential scoped to exactly the intent OPA approved, signed with org-a's Vault trust-authority key and published to the AGNTCY Identity Node — which verifies it and serves it publicly at /v1alpha1/vc/{id}/.well-known/vcs.json. It then travels as the `actor_token` at the ID-JAG mint, where Keycloak A re-verifies it against the org's registered issuer JWKS and refuses to sign unless it attests delegation by this same subject. One identity resolves to one live credential: an existing valid one is reused rather than minting a new badge per task, since per-task narrowing is what the ID-JAG assertion carries.",
+    'mint-read-idjag': "Scanning means reading source that belongs to Org B, which is itself a cross-domain privileged act — so it gets its own assertion rather than riding on the remediation one. Keycloak A mints a second ID-JAG scoped to gitea:read alone, bound to this one repository, with intent=scan-source. Two narrow assertions rather than one broad one: the credential that reads cannot write, and the credential that writes is not issued until later.",
+    'read-egress-check': "Org A decides, unilaterally and before anything leaves, whether Sarah may delegate a *read* of this repository to Org B. Envoy A validates the assertion against Keycloak A's JWKS and inline OPA checks it carries gitea:read and nothing else — a read assertion that also carried gitea:write or triage:create is refused here, not downstream.",
+    'kc-b-read-exchange': "Keycloak B independently validates the read assertion against Keycloak A's JWKS and issues its own local access token carrying gitea:read only. The same trust boundary the remediation path crosses later, crossed first with strictly less authority.",
+    'fetch-source': "The file comes through Envoy B and inline OPA, never from Gitea directly. Policy requires gitea:read, rejects a token that also carries write or PR authority, and allows the read only for the repository signed into the assertion — asking for a different one is refused at the gateway, whatever the token says.",
+    'scan': "Now the agent analyses the source it actually fetched — real code obtained through the delegation chain, not a hardcoded constant. It reports a CWE rather than a CVE, because a weakness found by reading code has no CVE: that identifier describes a vulnerability in a released product. The finding that emerges here is what flows into the badge intent, the ticket, and the remediation plan.",
     'opencode-plan': "The real OpenCode agent (opencode.ai), running headless in its own container, produces the remediation plan via an actual model completion, streamed live above through opencode-server's own SSE event API. This step is non-fatal by design: if the model backend is unreachable, it reports `skipped` rather than failing the run, since model availability is orthogonal to the correctness of the identity and delegation chain. The \"Real OpenCode (LLM)\" toggle forces a fast, explicitly labeled mock plan — a deliberate fallback, not error suppression.",
     'dir-push': "OpenCode pushes an OASF turn record to the AGNTCY Directory, content-addressed by CID. This is the first entry in an audit trail that exists independently of the tokens' own claims.",
     'dir-search': "OpenCode resolves triage-agent's endpoint via a directory lookup by name — service discovery through a shared record, not a hardcoded URL or pre-shared network topology.",
     'kc-a-exchange': "RFC 8693 token exchange at Keycloak A: `subject_token` is Sarah's access token, `actor_token` is the VC. Keycloak validates `subject_token` cryptographically but — a documented platform behavior, not a workaround — does not itself emit an `act` claim derived from `actor_token`. This is precisely why the ID-JAG is minted as its own explicit, signed assertion in the next step.",
     'egress-check': "Org A's own policy decision point, evaluated before the assertion crosses the org boundary: Envoy validates the ID-JAG's signature against Keycloak A's JWKS, and inline OPA checks scope, intent, and delegation-chain depth. This decision is made unilaterally by Org A; it does not defer to Org B's evaluation.",
-    'mint-idjag': "Keycloak A mints the ID-JAG natively via grant_type=token-exchange (keycloak-idjag-spi), with requested_token_type=urn:ietf:params:oauth:token-type:id-jag, signed with Keycloak's own realm key — so Envoy and Keycloak B validate against the same JWKS Keycloak already publishes, with no separate mock issuer. The resulting token carries sub=sarah@org-a.example and act_chain=[opencode-agent] as sibling claims under one signature — the sub/act separation made portable across the trust boundary. Before signing, the SPI verifies the VC badge sent as actor_token against vc-issuer's JWKS and requires its delegating_user to equal the verified subject_token's subject — an issuer refusing to mint authority on an attestation it has not checked.",
+    'mint-idjag': "Keycloak A mints the ID-JAG natively via grant_type=token-exchange (keycloak-idjag-spi), with requested_token_type=urn:ietf:params:oauth:token-type:id-jag, signed with Keycloak's own realm key — so Envoy and Keycloak B validate against the same JWKS Keycloak already publishes, with no separate mock issuer. The resulting token carries sub=sarah@org-a.example and act_chain=[opencode-agent] as sibling claims under one signature — the sub/act separation made portable across the trust boundary. Before signing, the SPI verifies the VC badge sent as actor_token against the org's registered issuer JWKS at the Identity Node, and requires its credentialSubject.delegating_user to equal the verified subject_token's subject — an issuer refusing to mint authority on an attestation it has not checked.",
     'kc-b-exchange': "Keycloak B independently validates the ID-JAG's signature against Keycloak A's JWKS — with no shared IdP and no pre-established federation beyond each side publishing its own JWKS — then issues its own scoped access token via a jwt-bearer grant (RFC 7523). This is the actual trust boundary: Org B's evaluation is authoritative, not Org A's assertion.",
     'create-ticket': "Both the Org B access token and the original ID-JAG actor token are presented to Envoy. Each signature is validated independently against its own issuer's JWKS before Org B's inline OPA evaluates subject, scope, delegation chain, signed intent, and target repository.",
+    'tri:verify-sender-badge': "Triage resolves OpenCode's credential from the Identity Node and requires it to agree with the assertion just presented: the credential's act-chain must match the ticket's, and the scope the ID-JAG granted must be within what OpenCode's credential says it may *delegate*. An assertion exceeding what its issuer is permitted to grant is refused here. Note the limit: this proves org-a published such a credential, not that the process we spoke to holds that identity's key — CIMD registers no per-agent keypair.",
+    'tri:resolve-badge': "Triage publishes its own agent badge, signed with org-b's Vault key — Org B attesting its own agents exactly as Org A attests OpenCode. The credential distinguishes what Triage may do itself (triage:create) from what it may grant onward (gitea:write, gitea:pr). Those are genuinely different authorities here, and a credential carrying only one of them would misrepresent the agent.",
+    'sub:resolve-badge': "The leaf of the chain publishes a credential too, so every registered identity resolves to both a 'who' (/id/resolve) and a 'what' (/vc/{id}/.well-known/vcs.json). Its delegatable list is empty — the credential states that the chain ends here rather than leaving it implied.",
+    'sub:verify-sender-badge': "Sub-Agent independently resolves Triage's credential and checks the sub-badge it holds is within what Triage is permitted to delegate — not merely within what Triage itself may do. Comparing against the wrong one of those two would reject every legitimate narrowing in this demo.",
     'tri:opa-ingress': "Org B evaluates its own policy over delegation chain, scope, intent, method, path, and repository, independent of Org A's egress decision. Two unilateral policy evaluations are applied to the same request.",
     'tri:plan': "Triage plans the remediation and delegates execution to a bounded Sub-Agent rather than performing the change itself.",
     'tri:mint-sub-badge': "Triage's own policy decision point determines the narrowed scope, and Triage mints the sub-badge natively at Keycloak B, scoped to gitea:write/gitea:pr only — a strict subset of Triage's own grant, cryptographically bound to the target repository. The chain now carries Sarah → OpenCode → Triage → Sub-Agent.",
@@ -1179,20 +1261,16 @@ POST /realms/org-b/protocol/openid-connect/token
   // -> work (scan + real OpenCode) -> delegate cross-domain (ID-JAG).
   const SVG_STEPS = [
     'sarah-login', 'cimd-generate-id', 'cimd-resolve-id', 'badge-scope-check',
-    'resolve-badge', 'scan', 'opencode-plan', 'dir-push', 'dir-search',
-    'kc-a-exchange', 'mint-idjag', 'egress-check', 'kc-b-exchange', 'create-ticket',
-    // The create-ticket cascade is split into sub-groups so the diagram lights
-    // up at the same pace as the nested step cards reveal, instead of jumping
-    // to fully-green the instant step 12 (the outer POST) completes. Triage
-    // runs the same lifecycle shape OpenCode does (verify -> register own
-    // identity -> policy-scoped credential -> work -> delegate narrower), so
-    // several ids repeat across orgs — hence the tri:/sub: namespace.
-    'tri:opa-ingress', 'tri:verify-idjag', 'tri:cimd-generate-id',
-    'tri:cimd-resolve-id', 'tri:subbadge-scope-check', 'tri:plan',
-    'tri:mint-sub-badge', 'tri:dir-push', 'tri:dir-search', 'tri:spawn-sub-agent',
-    'sub:verify-subbadge', 'sub:cimd-generate-id', 'sub:cimd-resolve-id',
-    'sub:kc-b-exchange', 'sub:idjag-gitea', 'sub:push-file', 'sub:open-pr',
-    'sub:denied-pr-attempt', 'sub:opa-egress', 'sub:dir-push', 'sub:pr-created'
+    'resolve-badge', 'mint-read-idjag', 'read-egress-check', 'kc-b-read-exchange',
+    'fetch-source', 'scan', 'opencode-plan', 'dir-push',
+    'dir-search', 'kc-a-exchange', 'mint-idjag', 'egress-check',
+    'kc-b-exchange', 'create-ticket', 'tri:opa-ingress', 'tri:verify-idjag',
+    'tri:verify-sender-badge', 'tri:cimd-generate-id', 'tri:cimd-resolve-id', 'tri:subbadge-scope-check',
+    'tri:resolve-badge', 'tri:plan', 'tri:mint-sub-badge', 'tri:dir-push',
+    'tri:dir-search', 'tri:spawn-sub-agent', 'sub:verify-subbadge', 'sub:cimd-generate-id',
+    'sub:cimd-resolve-id', 'sub:resolve-badge', 'sub:verify-sender-badge', 'sub:kc-b-exchange',
+    'sub:idjag-gitea', 'sub:push-file', 'sub:open-pr', 'sub:denied-pr-attempt',
+    'sub:opa-egress', 'sub:dir-push', 'sub:pr-created'
   ];
 
   let allSteps  = [];   // full list from /api/run

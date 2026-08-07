@@ -175,3 +175,17 @@ test_subbadge_missing_request_headers_denied if {
 	result := allow with input as subbadge_input(valid_access, {})
 	not result.allowed
 }
+
+# ── Finding identifier (the scan now reports CWE, not a fabricated CVE) ──────
+
+test_ticket_with_cwe_finding_id_allowed if {
+	body := json.patch(valid_body, [{"op": "replace", "path": "/cve", "value": "CWE-89"}])
+	result := allow with input as ticket_input(valid_headers, body)
+	result.allowed
+}
+
+test_ticket_with_unrecognised_finding_id_denied if {
+	body := json.patch(valid_body, [{"op": "replace", "path": "/cve", "value": "BUG-1"}])
+	result := allow with input as ticket_input(valid_headers, body)
+	not result.allowed
+}

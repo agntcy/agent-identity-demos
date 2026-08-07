@@ -42,6 +42,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from agntcy_identity_client import VaultConfig
 from agntcy_identity_client import cimd as cimd_api
 from agntcy_identity_client import directory as dir_api
+from agntcy_identity_client import vc as vc_api
 from tracing import setup_tracing, step_span
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -330,6 +331,113 @@ async def run(body: RunRequest):
             cimd_steps = await _cimd_register(client)
         steps.extend(cimd_steps)
         if any(cs.get("status") == "error" for cs in cimd_steps):
+            return JSONResponse({"ok": False, "steps": steps})
+        sub_cimd_id = next(
+            (cs["result"]["id"] for cs in cimd_steps
+             if cs.get("id") == "cimd-generate-id" and (cs.get("result") or {}).get("id")),
+            f"AGNTCY-{SUB_AGENT_CLIENT_ID}",
+        )
+
+        # ── s2c: publish the Sub-Agent's own agent badge ───────────────────
+        # The leaf of the chain gets a resolvable credential too: anyone can
+        # ask the Identity Node what this agent is permitted to do, rather
+        # than that being knowable only from a token in flight.
+        s = {
+            "id": "resolve-badge",
+            "title": f"s2c. Publish Sub-Agent's agent badge VC (caps from the verified sub-badge) — org-b Vault-signed",
+            "detail": f"POST {IDENTITY_NODE_URL}/v1alpha1/vc/publish  issuer={VAULT_CFG.issuer}  subject={sub_cimd_id}",
+        }
+        with step_span("resolve-badge"):
+            try:
+                granted = [c for c in str(claims.get("scope") or "").split(" ") if c]
+                issued = await vc_api.issue_badge(
+                    client, IDENTITY_NODE_URL, VAULT_CFG,
+                    subject_id=sub_cimd_id,
+                    caps=granted,
+                    # The leaf of the chain: it delegates to nobody, and the
+                    # credential states that rather than leaving it implied.
+                    delegatable=[],
+                    delegating_user="sarah@org-a.example",
+                    intent=body.intent,
+                    act_chain=body.act_chain,
+                )
+                s.update(status="ok" if issued["verified"] else "error", result={
+                    "credential_id": issued["credential_id"],
+                    "issuer": issued["issuer"],
+                    "reused_existing_credential": issued.get("reused", False),
+                    "verified_by": "identity-node /v1alpha1/vc/verify",
+                    "well_known": f"{IDENTITY_NODE_URL}/v1alpha1/vc/{sub_cimd_id}/.well-known/vcs.json",
+                    "claims": issued["document"],
+                })
+                if not issued["verified"]:
+                    s["error"] = "identity-node reported the published badge as invalid"
+            except Exception as exc:  # noqa: BLE001
+                s.update(status="error", error=str(exc))
+        steps.append(s)
+        if s.get("status") == "error":
+            return JSONResponse({"ok": False, "steps": steps})
+
+        # ── s2d: resolve the SENDER's credential ───────────────────────────
+        # Triage handed us an assertion; the Identity Node independently says
+        # what Triage is authorised to do. Require the two to agree.
+        #
+        # What this can honestly prove: org-b issued a credential about the
+        # identifier Triage claims, and its act-chain is the prefix of ours.
+        # What it CANNOT prove: that the process we spoke to holds that
+        # identifier's key — CIMD registers no per-agent keypair, so every
+        # org-b agent resolves to the same org key. Process-to-identity
+        # binding comes from Keycloak client credentials, not from here.
+        parent_id = f"AGNTCY-{body.act_chain[-2]}" if len(body.act_chain) >= 2 else ""
+        s = {
+            "id": "verify-sender-badge",
+            "title": f"s2d. Resolve the delegating agent's credential ({parent_id}) and check it agrees with the sub-badge",
+            "detail": f"GET {IDENTITY_NODE_URL}/v1alpha1/vc/{parent_id}/.well-known/vcs.json",
+        }
+        with step_span("verify-sender-badge"):
+            try:
+                sender_vcs = await vc_api.well_known_badges(client, IDENTITY_NODE_URL, parent_id)
+                sender = None
+                for enveloped in sender_vcs:
+                    doc = _decode_jwt_payload_unverified(enveloped.get("value", ""))
+                    if doc.get("credentialSubject", {}).get("id") == parent_id:
+                        sender = doc
+                        break
+                if sender is None:
+                    raise ValueError(f"{parent_id} has no resolvable credential")
+                sender_subject = sender.get("credentialSubject", {})
+                sender_chain = list(sender_subject.get("act_chain") or [])
+                # The sender's chain must be exactly our chain minus this hop.
+                if sender_chain != body.act_chain[:-1]:
+                    raise ValueError(
+                        f"delegating agent's credential says act_chain={sender_chain}, "
+                        f"but the sub-badge we hold says {body.act_chain[:-1]}"
+                    )
+                # It must not contradict the assertion: the sender cannot have
+                # granted us authority it does not itself hold.
+                # Compare against what the sender may DELEGATE, not what it
+                # holds: Triage acts under triage:create while granting
+                # gitea:write/pr. Conflating the two would reject every
+                # legitimate narrowing.
+                may_delegate = {c for c in (sender_subject.get("delegatable") or [])}
+                ours = {c for c in str(claims.get("scope") or "").split(" ") if c}
+                if not ours <= may_delegate:
+                    raise ValueError(
+                        f"sub-badge grants {sorted(ours - may_delegate)} which the delegating "
+                        f"agent's credential does not permit it to delegate"
+                    )
+                s.update(status="ok", result={
+                    "delegating_agent": parent_id,
+                    "credential_issuer": sender.get("issuer"),
+                    "credential_caps": sorted(sender_subject.get("caps") or []),
+                    "credential_delegatable": sorted(may_delegate),
+                    "credential_act_chain": sender_chain,
+                    "note": "the credential agrees with the assertion; this is not proof of "
+                            "possession — CIMD registers no per-agent key",
+                })
+            except Exception as exc:  # noqa: BLE001
+                s.update(status="error", error=str(exc))
+        steps.append(s)
+        if s.get("status") == "error":
             return JSONResponse({"ok": False, "steps": steps})
 
         # ── s3: jwt-bearer exchange at Keycloak B ──────────────────────────

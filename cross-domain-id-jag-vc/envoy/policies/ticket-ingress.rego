@@ -63,8 +63,16 @@ allow := {
 	input.body.intent in actor.intent
 
 	startswith(input.body.repo, "demo-admin/")
-	startswith(input.body.cve, "CVE-")
+	well_formed_finding_id(input.body.cve)
 }
+
+# The ticket's finding identifier. Since the scan became a real source
+# analysis, findings are reported as CWE classes — a weakness found by reading
+# code has no CVE, which identifies a vulnerability in a *released product*.
+# CVE- is still accepted for dependency-level findings.
+well_formed_finding_id(id) if startswith(id, "CVE-")
+
+well_formed_finding_id(id) if startswith(id, "CWE-")
 
 # ── Sub-badge scope PDP ──────────────────────────────────────────────────────
 # Before Triage mints the narrowed sub-badge at Keycloak B, it must ask this

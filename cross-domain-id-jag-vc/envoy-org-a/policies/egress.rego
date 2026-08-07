@@ -60,6 +60,46 @@ allow := {
 	actor.act.sub == "opencode-agent"
 }
 
+# ── Egress: the READ assertion ───────────────────────────────────────────────
+# Scanning Org B's source is a cross-domain read, so it leaves Org A under its
+# own assertion — narrower than the remediation one above and checked
+# separately rather than by loosening that rule. May Sarah delegate a *read*
+# of this repository to Org B? Answered here, before the assertion leaves.
+allow := {
+	"allowed": true,
+	"headers": {
+		"x-agntcy-policy-decision": "ALLOW",
+		"x-agntcy-policy-rule": "org-a-egress-source-read",
+		"x-agntcy-policy-enforcer": "built-on-envoy-opa",
+		"x-agntcy-delegation-depth": sprintf("%d", [count(actor.act.act_chain)]),
+	},
+} if {
+	input.attributes.request.http.method == "POST"
+	input.attributes.request.http.path == "/api/egress-check"
+
+	actor := verified_payload("x-verified-actor-token-payload")
+
+	actor.sub == "sarah@org-a.example"
+	actor.azp == "opencode-agent"
+	actor.client_id == "opencode-agent"
+
+	# Read and nothing else: this assertion must not double as write authority.
+	scope_contains(actor.scope, "gitea:read")
+	not scope_contains(actor.scope, "gitea:write")
+	not scope_contains(actor.scope, "gitea:pr")
+	not scope_contains(actor.scope, "triage:create")
+
+	"scan-source" in actor.intent
+
+	# One hop — Org A's own agent, delegating onward to nobody.
+	actor.act.act_chain == ["opencode-agent"]
+	actor.act.sub == "opencode-agent"
+
+	# Bound to a repository Org A permits delegated work on.
+	count(actor.resource) == 1
+	actor.resource[0] in badge_repo_allowlist
+}
+
 # ── Badge-scope PDP ──────────────────────────────────────────────────────────
 # Before any task work runs, the agent presents Sarah's verified Keycloak A
 # access token (jwt_authn, kc_a_access_token provider) plus the task it wants

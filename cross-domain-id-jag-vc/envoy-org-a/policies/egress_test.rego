@@ -174,3 +174,72 @@ test_badge_scope_missing_task_headers_denied if {
 	result := allow with input as badge_scope_input(valid_user, {})
 	not result.allowed
 }
+
+# ── Egress: the READ assertion (source scanning) ─────────────────────────────
+
+valid_read_assertion := {
+	"iss": "http://keycloak-a:8080/realms/org-a",
+	"sub": "sarah@org-a.example",
+	"aud": "http://keycloak-b:8080/keycloak-b/realms/org-b",
+	"azp": "opencode-agent",
+	"client_id": "opencode-agent",
+	"scope": "openid gitea:read",
+	"intent": ["scan-source"],
+	"resource": ["demo-admin/payments-service"],
+	"act": {"sub": "opencode-agent", "act_chain": ["opencode-agent"]},
+}
+
+read_egress_request(actor) := {"attributes": {"request": {"http": {
+	"method": "POST",
+	"path": "/api/egress-check",
+	"headers": {"x-verified-actor-token-payload": base64url.encode(json.marshal(actor))},
+}}}}
+
+test_source_read_egress_allowed if {
+	result := allow with input as read_egress_request(valid_read_assertion)
+	result.allowed
+	result.headers["x-agntcy-policy-rule"] == "org-a-egress-source-read"
+	result.headers["x-agntcy-delegation-depth"] == "1"
+}
+
+test_read_assertion_carrying_write_denied if {
+	wide := json.patch(valid_read_assertion, [{
+		"op": "replace", "path": "/scope", "value": "openid gitea:read gitea:write",
+	}])
+	result := allow with input as read_egress_request(wide)
+	not result.allowed
+}
+
+test_read_assertion_carrying_triage_denied if {
+	wide := json.patch(valid_read_assertion, [{
+		"op": "replace", "path": "/scope", "value": "openid gitea:read triage:create",
+	}])
+	result := allow with input as read_egress_request(wide)
+	not result.allowed
+}
+
+test_read_of_unlisted_repository_denied if {
+	other := json.patch(valid_read_assertion, [{
+		"op": "replace", "path": "/resource", "value": ["demo-admin/some-other-repo"],
+	}])
+	result := allow with input as read_egress_request(other)
+	not result.allowed
+}
+
+test_read_with_delegated_chain_denied if {
+	deeper := json.patch(valid_read_assertion, [{
+		"op": "replace", "path": "/act", "value": {
+			"sub": "triage-agent", "act_chain": ["opencode-agent", "triage-agent"],
+		},
+	}])
+	result := allow with input as read_egress_request(deeper)
+	not result.allowed
+}
+
+test_read_without_scan_intent_denied if {
+	wrong := json.patch(valid_read_assertion, [{
+		"op": "replace", "path": "/intent", "value": ["create-pr-fix"],
+	}])
+	result := allow with input as read_egress_request(wrong)
+	not result.allowed
+}
