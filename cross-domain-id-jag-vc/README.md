@@ -639,6 +639,30 @@ correctly. `/v1/` is planted at the domain root because that's where the UI's
 own bundle expects Vault's API, not because it's namespaced to Vault; keep
 that in mind if this domain ever needs a `/v1/` route for anything else.
 
+### Exposing the Identity Node's REST API under a subpath
+
+The webapp's "Registered agents (Identity Node)" panel (`GET
+/api/registered-agents`) links out to each agent's raw `.well-known/vcs.json`.
+Unlike Vault, the Identity Node has no bundled web UI at all — it's a plain
+JSON REST API — so simple prefix-stripping works with none of Vault's
+absolute-path problems:
+
+```nginx
+location /identity-node/ {
+    auth_request /oauth2/auth;
+    error_page 401 = /oauth2/sign_in?rd=$scheme://$host$request_uri;
+    proxy_pass http://127.0.0.1:4005/;  # trailing slash — STRIPS /identity-node/ before forwarding
+    proxy_set_header Host $host;
+}
+```
+
+`4005` is `IDENTITY_NODE_REST_PORT` from `docker-compose.yaml`, already
+published on the host for internal use; this just fronts it with the same
+OAuth gate as everything else. Note there is no "list all registered
+identities" API on either the Identity Node or the Directory — the panel
+above is a curated view over this demo's known agents (OpenCode, Triage,
+Sub-Agent), not a live enumeration.
+
 ### Reverse-proxying `/api/run` — raise the read timeout
 
 Since Milestone 8, `opencode-plan` makes a real LLM call, and one call

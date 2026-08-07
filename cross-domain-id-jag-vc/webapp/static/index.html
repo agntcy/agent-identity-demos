@@ -255,6 +255,10 @@
       <summary>Vault (Transit signing keys)</summary>
       <div class="config" id="vaultKeys"><div><i>Loading…</i></div></div>
     </details>
+    <details class="config-wrap">
+      <summary>Registered agents (Identity Node)</summary>
+      <div class="config" id="registeredAgents"><div><i>Loading…</i></div></div>
+    </details>
     <div class="status-bar" id="legend" style="margin-top:-8px"></div>
     <div class="status-bar" id="status"></div>
     <pre class="live-plan" id="livePlan" hidden></pre>
@@ -734,6 +738,29 @@
     trusting a handoff. Where a step says "sub-badge" it means an assertion — the JWT header type is
     always authoritative.</div>
 
+    <p>The credential side follows the standard W3C VC roles — <b>Issuer</b>, <b>Holder</b>,
+    <b>Verifier</b> — each mapped onto a specific component here, not left abstract:</p>
+    <table>
+      <tr><th>Role</th><th>Who, in this demo</th><th>What it actually does</th></tr>
+      <tr><td><b>Issuer</b></td><td>The org's Vault trust authority
+        (<code>org-a-issuer</code> / <code>org-b-issuer</code>)</td><td>Signs the credential via
+        <code>/transit/sign</code> — a signing oracle, the private key never leaves Vault. The
+        Identity Node itself is <i>not</i> the issuer: its <code>/vc/publish</code> has no
+        <code>issue</code> verb, it only registers a credential the issuer already signed, so the
+        trust anchor is the org's registered issuer JWKS, not any one service's keypair.</td></tr>
+      <tr><td><b>Holder</b></td><td>The agent the credential is about
+        (OpenCode, Triage, or Sub-Agent)</td><td>Builds its own <code>AgentBadge</code>, gets it
+        signed by its org's issuer key, publishes it to the Identity Node, and later <i>presents</i>
+        it — as the <code>actor_token</code> at an ID-JAG mint, or resolved by a counterparty at a
+        handoff. One live credential per identity; publish-once, not re-issued per task.</td></tr>
+      <tr><td><b>Verifier</b></td><td>Whoever must trust the credential before acting on
+        it</td><td>Not one party — this demo verifies at every boundary that relies on the badge:
+        the Identity Node on <code>/vc/verify</code>, Keycloak A's SPI before it will mint an
+        ID-JAG on that badge's authority, and — since M14 — the <i>other side of every handoff</i>
+        (Triage resolves and checks OpenCode's credential; Sub-Agent resolves and checks Triage's)
+        rather than trusting the assertion alone.</td></tr>
+    </table>
+
     <p>Conventional identity systems assume the caller is the human principal; an autonomous agent
     acting under delegated authority breaks that assumption. This is a reference implementation of
     the alternative, built on three design principles:</p>
@@ -1004,9 +1031,9 @@ POST /realms/org-b/protocol/openid-connect/token
          <div><b>OpenCode agent:</b> ${esc(c.opencode_agent_url)} (model: ${esc(c.opencode_model)})</div>
          <div><b>Triage client:</b> ${esc(c.triage_client_id)}</div>
          <div><b>User:</b> ${esc(c.sarah_user)} (${esc(c.sarah_email)})</div>
-         <div><b>ID-JAG issuer:</b> ${esc(c.idjag_issuer_url)}</div>
+         <div><b>ID-JAG issuer:</b> Keycloak A, natively (keycloak-idjag-spi) — no separate service</div>
          <div><b>Identity node:</b> ${esc(c.identity_node_url)}</div>
-         <div><b>VC badge issuer:</b> ${esc(c.vc_issuer_url)}</div>
+         <div><b>VC badge issuer:</b> org trust authority, Vault-signed — see the Vault Keys panel below</div>
          <div><b>Egress PDP:</b> ${esc(c.egress_pdp_url)}</div>
          <div><b>Directory:</b> ${esc(c.dir_apiserver_url)}</div>
          <div><b>Trust authority:</b> ${esc(c.org_a_common_name)} (Vault key: ${esc(c.vault_key_name)})</div>
@@ -1044,6 +1071,46 @@ POST /realms/org-b/protocol/openid-connect/token
         `<div style="margin-top:6px"><i>Vault: ${esc(v.vault_addr)} — private key material never leaves Vault; only signatures come back out.</i></div>`;
     } catch(e) {
       el.innerHTML = '<div style="color:var(--err)">Could not reach /api/vault-keys.</div>';
+    }
+  }
+
+  // ── Registered agents (Identity Node) ─────────────────────────────────────
+  // There is no "list all registered identities" API on the Identity Node or
+  // the Directory, so this is a curated view over this demo's known agents,
+  // not a live enumeration. Each row separates the three W3C VC roles: the
+  // Holder (the agent itself), its Issuer (the org's Vault trust authority —
+  // shown via the credential's kid), and the fact that this credential gets
+  // independently Verified at multiple points downstream (not shown per-row,
+  // since verification is an action other components take, not a property
+  // of the credential itself — see the How It Works tab for who does it).
+  async function loadRegisteredAgents() {
+    const el = document.getElementById('registeredAgents');
+    try {
+      const data = await (await fetch('/api/registered-agents')).json();
+      const agents = data.agents || [];
+      if (!agents.length) {
+        el.innerHTML = '<div><i>No known agents configured.</i></div>';
+        return;
+      }
+      el.innerHTML = agents.map(a => {
+        const vcsLink = `/identity-node/v1alpha1/vc/${encodeURIComponent(a.holder_id)}/.well-known/vcs.json`;
+        if (!a.resolved) {
+          return `<div><b>${esc(a.name)}</b> (${esc(a.org)}) — <span style="color:var(--err)">not resolved at identity-node</span></div>`;
+        }
+        const c = a.credential;
+        const cred = c
+          ? `caps=[${(c.caps||[]).join(', ')}] delegatable=[${(c.delegatable||[]).join(', ')}] expires ${esc(c.expirationDate)}`
+          : '<span style="color:var(--muted)">no live credential published</span>';
+        return `<div style="margin-bottom:8px">
+          <b>${esc(a.name)}</b> — Holder id <code>${esc(a.holder_id)}</code> (${esc(a.org)})<br/>
+          <span style="color:var(--muted)">Issuer:</span> ${esc(a.issuer_kid || 'unknown')} (Vault-signed)<br/>
+          <span style="color:var(--muted)">Credential:</span> ${cred}
+          &nbsp;<a href="${esc(vcsLink)}" target="_blank" rel="noopener">view raw &#8594;</a>
+        </div>`;
+      }).join('') +
+        '<div style="margin-top:6px"><i>Curated view over this demo\'s known agents — neither the Identity Node nor the Directory expose a list-all API. Issuer/Holder/Verifier roles follow the W3C VC model; see the How It Works tab for the full mapping.</i></div>';
+    } catch (e) {
+      el.innerHTML = '<div style="color:var(--err)">Could not reach /api/registered-agents.</div>';
     }
   }
 
@@ -1795,6 +1862,7 @@ POST /realms/org-b/protocol/openid-connect/token
   // ── Init ───────────────────────────────────────────────────────────────────
   loadConfig();
   loadVaultKeys();
+  loadRegisteredAgents();
   updateButtons();
 </script>
 </body>
