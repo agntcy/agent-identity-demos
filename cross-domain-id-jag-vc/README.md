@@ -34,16 +34,40 @@ It also wires in two AGNTCY components for real:
   resolved through identity-node's actual cryptographic proof-of-ownership
   flow, not a mock.
 
+## Two artifacts, both historically called "badge"
+
+The demo moves two different signed objects around, and it is worth separating
+them before reading anything below:
+
+| | **Credential** (agent badge) | **Assertion** (ID-JAG) |
+|---|---|---|
+| Header | `typ=JOSE`, type `AgentBadge` | `typ=oauth-id-jag+jwt` |
+| Signed by | the org's Vault trust-authority key | Keycloak A or B (`keycloak-idjag-spi`) |
+| Registered where | published to the Identity Node, resolvable at `/v1alpha1/vc/{id}/.well-known/vcs.json` | not registered — it is a bearer token |
+| Lifetime | ~1 hour, one live credential per identity | ~5 minutes, minted per task |
+| Answers | *what is this agent, and what may it do or delegate?* | *is this particular request authorised?* |
+
+**The credential describes standing capability; the assertion authorises a
+request.** Policy enforcement (Envoy + OPA at all four boundaries) acts on the
+**assertion**. The credential is what an agent publishes about itself and what
+a counterparty resolves independently before trusting a handoff.
+
+Where a name says "sub-badge" it means an **assertion** — Triage's narrowed
+ID-JAG for the Sub-Agent — not a credential. Step ids still carry the older
+"badge" wording in places; the type in the JWT header is always authoritative.
+
 ## What's real vs. mocked
 
 | Step(s) | What | Real or mocked |
 |---|---|---|
 | 1 | Sarah's OIDC login at Keycloak A | **Real** |
-| 2 | CVE scan | Mocked (no scanner integration) |
+| 2 | Code scan — OpenCode analyses source fetched from the Org B repo | **Real** agent analysis of real source; reports a CWE (falls back to the known fixture finding when no model is reachable) |
+| — | Read chain: read-scoped ID-JAG mint → Org A egress PDP → Keycloak B redemption → source fetch through Envoy B | **Real** — a second, narrower assertion (`gitea:read`, repo-bound) minted and enforced end to end |
 | — | OpenCode remediation plan (headless `opencode-server`, Ollama/Anthropic) | **Real** agent + LLM call (`skipped` without a provider) |
 | — | Badge-scope PDP at Envoy A — verify Sarah's KC-A token, return task-scoped badge intent | **Real** JWT verification + inline OPA |
 | 3–4 | AGNTCY Directory push + search (gRPC) | **Real** |
-| 5–6 | CIMD generate/resolve id (Vault-signed proof JWT → identity-node) + VC badge issue/verify (signed `vc+jwt` → vc-issuer) | **Real** |
+| 5–6 | CIMD generate/resolve id (Vault-signed proof JWT → identity-node) + agent badge issued as a **W3C Verifiable Credential**: built by the agent, signed with the org's Vault trust-authority key, published to identity-node's VC API and verified by it | **Real** |
+| — | Every agent (OpenCode, Triage, Sub-Agent) publishes its own credential; each side of a handoff resolves the other's and requires it to agree with the assertion presented | **Real** |
 | 7 | RFC 8693 token exchange at Keycloak A | **Real** call; see note below on `act` claims |
 | 8 | ID-JAG mint for Org B triage-agent | **Real** |
 | 9–10 | Org A egress PDP — may Sarah delegate this scope to Org B? | **Real** single-token JWT verification + inline OPA policy |
@@ -58,56 +82,28 @@ It also wires in two AGNTCY components for real:
 | 20 | PR created, causal act-chain audit | **Real** |
 | — | OpenTelemetry `trace_id` linking every hop | **Real** — see [Viewing traces](#viewing-traces) |
 
-Milestone 1 provisioned the Built On Envoy gateway and inline OPA module.
-Milestone 2 protects ticket ingress by verifying the Keycloak B access token
-and the original ID-JAG actor token, then enforcing signed scope, delegation
-chain, intent, and repository constraints. Milestone 3 protects the resource
-path: the narrowed sub-badge is signed for one repository, Sub-Agent sends it
-with its access token through listener `10001`, and inline OPA allows only the
-specific push and pull-request operations. Milestone 4 protects the Org A
-egress boundary: before OpenCode ever redeems the ID-JAG at Keycloak B, Envoy
-A verifies the freshly-minted assertion against Keycloak A's own JWKS and
-inline OPA checks its scope, intent, and delegation-chain depth — a policy
-violation never leaves Org A. Milestone 5 replaces the hardcoded
-VC badge mock with vc-issuer, a real signed-`vc+jwt` issuer/verifier standing
-in for identity-node's (nonexistent) badge API. Milestone 6 makes the RFC
-8693 exchange at Keycloak A a real network call instead of a static mock —
-see the note below on what Keycloak's standard token exchange does and does
-not do with the `actor_token`. Milestone 7 adds real distributed tracing:
-every service exports OpenTelemetry spans via OTLP to a local Jaeger container,
-and standard `httpx`/FastAPI auto-instrumentation propagates the W3C
-`traceparent` header across every hop (including transparently through Envoy,
-which just forwards it as an ordinary header) — so one browser-triggered run
-produces one real, inspectable trace end to end. Milestone 8 replaces the
-mock Org A agent with the **real OpenCode** (headless `opencode-server`,
-Ollama/Anthropic provider) driven by an identity harness, reorders the task
-lifecycle to *OAuth → register own identity → policy-scoped badge → work →
-delegate*, and adds a second real Org A enforcement point: the
-**badge-scope PDP** (`/api/badge-scope-check` on Envoy A) verifies Sarah's
-Keycloak A access token and returns the narrowed, task-scoped intent the VC
-badge is minted with — least privilege decided by policy before any work
-runs. Milestone 9 gives the Triage agent the same identity lifecycle:
-Triage independently re-verifies the inbound ID-JAG against Keycloak A's
-JWKS (defense in depth — no more blind trust of gateway headers), registers
-its own CIMD identity (`AGNTCY-triage-agent`) under a second, real **org-b
-trust authority** (its own Vault Transit key, registered at identity-node by
-the multi-issuer bootstrap), asks the new **sub-badge scope PDP**
-(`/api/subbadge-scope-check` on Envoy B) how narrowly the delegation may be
-re-narrowed, and only then mints the sub-badge **natively at Keycloak B**
-(the same keycloak-idjag-spi, now baked into `keycloak-b/Dockerfile`) —
-retiring idjag-issuer from the live delegation path entirely. Milestone 10
-finishes the chain: the **Sub-Agent** — until now the only agent with no
-identity of its own, blindly redeeming whatever badge it was handed — gets the
-same lifecycle. It verifies the sub-badge against **Keycloak B's JWKS before
-redeeming it** (is this really an ID-JAG, addressed to me, matching the
-act-chain I was spawned with, bound to this repo, and — the point of the whole
-exercise — granting nothing beyond `gitea:write gitea:pr`?), registers its own
-CIMD identity (`AGNTCY-sub-agent`) under the org-b trust authority, and pushes
-its own Directory turn record. Triage also gains the one stage it was still
-missing versus OpenCode: it now **discovers** Sub-Agent in the Directory by
-name before handing it authority, instead of calling a hardcoded endpoint.
+### How it got here
+
+Each milestone replaced something simulated with the real thing. In order:
+
+| | What changed |
+|---|---|
+| **M1–M3** | Built On Envoy gateway + inline OPA; ticket ingress verifies the Keycloak B access token *and* the original ID-JAG actor token, enforcing signed scope, delegation chain, intent and repository; the resource path enforces a repo-bound sub-assertion on listener `10001` |
+| **M4** | Org A **egress** boundary: Envoy A verifies the freshly-minted assertion against Keycloak A's JWKS and checks scope, intent and chain depth — a policy violation never leaves Org A |
+| **M5** | Replaced the hardcoded badge mock with a real signed issuer/verifier |
+| **M6** | Made the RFC 8693 exchange at Keycloak A a real network call (see the `actor_token` note below for what Keycloak does and does not do) |
+| **M7** | Real distributed tracing — every service exports OTLP to Jaeger; one browser click produces one inspectable trace end to end |
+| **M8** | Replaced the mock Org A agent with the **real OpenCode**, reordered the lifecycle to *OAuth → register own identity → policy-scoped badge → work → delegate*, and added the **badge-scope PDP** so least privilege is decided by policy before any work runs |
+| **M9** | Gave **Triage** the same lifecycle: in-agent ID-JAG verification against Keycloak A's JWKS, its own CIMD identity under a second real **org-b trust authority**, a sub-assertion scope PDP, and native minting at Keycloak B — retiring `idjag-issuer` from the delegation path |
+| **M10** | Gave **Sub-Agent** the same lifecycle — it verifies the sub-assertion against Keycloak B's JWKS *before* redeeming it, registers its own CIMD identity, and records its own Directory turn. Triage also gained Directory discovery of its delegate |
+| **M11** | **Issuer-side attestation check**: `keycloak-idjag-spi` now verifies the credential presented as `actor_token` and requires it to attest delegation by the same principal as the verified `subject_token` |
+| **M12** | **Policy-gated code scan**: reading Org B's source is itself a cross-domain act, so it gets its own narrower assertion (`gitea:read`, repo-bound) — minted, egress-checked, redeemed and enforced at Envoy B before OpenCode analyses real source and reports a CWE |
+| **M13** | Badges became **real AGNTCY Verifiable Credentials** — built by the agent, signed with the org's Vault trust-authority key, published to the Identity Node's VC API and verified by it. `vc-issuer` retired |
+| **M14** | **Every agent publishes a credential**, distinguishing what it may do (`caps`) from what it may grant onward (`delegatable`), and each side of a handoff resolves the other's credential and requires it to agree with the assertion presented |
+
 Every agent in the demo, across both orgs, now holds a real cryptographic
-identity and verifies its inbound credential itself.
+identity, publishes a resolvable credential, and verifies its inbound
+credential itself.
 
 **A note on `actor_token` and the `act` claim**: Keycloak 26.7's standard
 token exchange (`standard.token.exchange.enabled`) validates `subject_token`
@@ -124,12 +120,13 @@ limitation.
 
 That remains true of the **standard** exchange (step 9). The **ID-JAG mint**
 (step 10) is a different matter: it is handled by `keycloak-idjag-spi`, which
-*does* verify `actor_token`. The badge is fetched, its `vc+jwt` signature
-checked against vc-issuer's published JWKS, and its `delegating_user` required
+*does* verify `actor_token`. The credential is fetched, its JOSE signature
+checked against the org's published issuer JWKS at the Identity Node, and its
+`credentialSubject.delegating_user` required
 to match the verified `subject_token`'s subject — so Keycloak A will not mint
 an assertion on the strength of a badge that is forged, expired, or attests
 somebody else's delegation. Enabled per client via the
-`idjag.badge.jwks.url` attribute; clients without it keep the previous
+`agent.credential.jwks.url` attribute; clients without it keep the previous
 behaviour.
 
 **Known limitations of that check** (deliberate, not oversights):
@@ -142,11 +139,23 @@ behaviour.
 - **`act_chain` is caller-declared**, not constructed by the issuer. A
   production implementation would append the authenticated client itself
   rather than accept an asserted ancestry.
-- **`delegating_user` is self-asserted at issuance.** `vc-issuer` authenticates
-  nobody on `/vc/issue` — it signs whatever principal it is handed. Its
-  signature therefore attests "vc-issuer emitted this", not "this delegation
-  occurred". The binding above is what gives the badge meaning, by tying it to
-  a subject whose token *was* verified.
+- **`delegating_user` is asserted by the agent at issuance.** The agent builds
+  its own credential and signs it with the org's Vault key, so the signature
+  attests "org-X issued this", not "this delegation occurred". The binding
+  above is what gives the credential meaning, by tying it to a subject whose
+  token *was* verified.
+- **No proof of possession.** CIMD registers no per-agent keypair — every
+  agent in an org resolves to that org's key (`AGNTCY-triage-agent` and
+  `AGNTCY-sub-agent` share a modulus). An agent therefore cannot prove it *is*
+  the subject of a credential it presents; process-to-identity binding comes
+  from Keycloak client credentials, at the OAuth layer. The handoff checks say
+  so explicitly in their own output.
+- **Credentials cannot be revoked.** On identity-node 0.0.23 a credential is
+  either live and irrevocable, or born revoked — there is no shape that yields
+  both (see [discussion #27](https://github.com/agntcy/agent-identity-demos/discussions/27)).
+  We issue live and rely on publish-once plus expiry; `/vc/verify` also returns
+  `status: true` for expired credentials, so consumers must check
+  `expirationDate` themselves, as the SPI and client do.
 - **Keycloak B's sub-badge mint has no equivalent check.** The symmetric
   property — an issuer never minting authority exceeding a verified inbound
   attestation — is not yet enforced for Org B's re-narrowing.
@@ -219,8 +228,6 @@ flowchart TB
 | `kc-a-init` | `quay.io/keycloak/keycloak:26.7` | _(one-shot)_ | Registers `triage:create` optional scope |
 | `keycloak-b` | built from `./keycloak-b` (`quay.io/keycloak/keycloak:26.7` + `keycloak-idjag-spi`) | `8083` | Org B IdP (`org-b` realm), redeems ID-JAG assertions, natively mints Triage's narrowed sub-badge |
 | `kc-b-init` | `quay.io/keycloak/keycloak:26.7` | _(one-shot)_ | Registers `triage:create`/`gitea:*` optional scopes |
-| `vc-issuer` | built from `./vc-issuer` | `9003` | Issues + verifies signed VC badges (stand-in — identity-node has no badge API) |
-| `idjag-issuer` | built from `../archive/single-org-id-jag-app-access/idjag-issuer` | `9002` | Legacy assertion minter — retired from the live delegation path (both mints are Keycloak-native now); kept for the webapp's older flow |
 | `identity-postgres` | `postgres:16` | _(internal)_ | DB for identity-node |
 | `identity-vault` | `hashicorp/vault:1.17` | _(internal)_ | Holds the org-a and org-b trust-authority signing keys (Transit engine) |
 | `identity-node` | `ghcr.io/agntcy/identity/node:0.0.23` | `4005` (REST), `4006` (gRPC) | AGNTCY identity node — CIMD id generate/resolve |
@@ -244,10 +251,11 @@ flowchart TB
 ## Sequence flow
 
 Every hop below actually happens against the real services in this stack
-(Keycloak, Vault, identity-node, vc-issuer, dir-apiserver, Gitea). Only the
-CVE scan is mocked. All three Envoy enforcement points — egress, ticket
-ingress, and resource access — are real. This is the same
-flow the webapp's UI animates step by step.
+(Keycloak, Vault, identity-node, dir-apiserver, Gitea) — including
+the scan, which analyses source genuinely read out of the Org B repository
+under its own read-scoped assertion. All four Envoy enforcement points —
+badge-scope, egress, ticket ingress, and resource access — are real. This is
+the same flow the webapp's UI animates step by step.
 
 ```mermaid
 sequenceDiagram
@@ -290,7 +298,20 @@ sequenceDiagram
     VC-->>OC: valid=true + claims
 
     Note over OC: only now, under the task-scoped badge, does work begin
-    Note over OC: mock CVE scan → HIGH severity (mocked)
+    Note over OC,Envoy: scanning reads Org B's source — a cross-domain act,<br/>so it gets its own narrower assertion
+    OC->>KCA: mint READ assertion (scope=gitea:read, resource=repo, intent=scan-source)
+    KCA-->>OC: signed read assertion (RS256)
+    OC->>EnvoyA: POST /api/egress-check (read assertion)
+    EnvoyA-->>OC: ALLOW — rule=org-a-egress-source-read
+    OC->>KCB: jwt-bearer grant (read assertion)
+    KCB-->>OC: access token (gitea:read only)
+    OC->>Envoy: GET /api/gitea/source/... (access token + read assertion)
+    Note over Envoy: verify both JWTs; require gitea:read, forbid write/PR,<br/>bind to the repository signed into the assertion
+    Envoy->>GW: ALLOW read
+    GW->>Gitea: read file
+    Gitea-->>GW: source
+    GW-->>OC: PaymentLookupRepository.java
+    Note over OC: OpenCode analyses the real source → CWE-89 (SQL injection)
     OC->>OCS: remediation plan request (real agent, real LLM call)
     OCS-->>OC: remediation plan (or skipped if no model provider)
 
@@ -461,8 +482,8 @@ all-in-one container — no external tracing backend or extra setup needed.
 2. Open **http://localhost:16686**, select a service (e.g. `opencode-agent`)
    in the left panel, and click **Find Traces**.
 3. Open the most recent trace to see the full waterfall — `opencode-agent`'s
-   own spans plus every downstream call it made via `httpx` (`vc-issuer`,
-   `idjag-issuer`, Keycloak A/B, Envoy, …), all under one `trace_id`, because
+   own spans plus every downstream call it made via `httpx` (identity-node,
+   Keycloak A/B, Envoy, …), all under one `trace_id`, because
    standard `httpx`/FastAPI auto-instrumentation propagates the W3C
    `traceparent` header on every hop automatically — no manual wiring.
 
@@ -849,7 +870,7 @@ imports cleanly.
    ```
 
    Expected: `spanCount` > 1, and `services` includes at minimum
-   `opencode-agent`, `vc-issuer` (or `idjag-issuer`), and `keycloak`-adjacent
+   `opencode-agent`, `identity-node`, and `keycloak`-adjacent
    spans — i.e. more than one service name, proving the `traceparent` header
    really propagated across the `httpx` calls rather than each service
    starting an unrelated, disconnected trace.
@@ -961,72 +982,6 @@ Docker, Docker Compose, `curl`, and `jq`.
    curl --fail --silent --show-error \
      'http://127.0.0.1:9902/stats?filter=opa_requests_total'
    ```
-
-### VC badge issuer reviewer verification
-
-Verifies the badge issuer's own test suite, that it builds and starts
-cleanly, and that `opencode-agent`'s badge-resolution step now issues and
-verifies a real signed badge instead of returning a hardcoded mock.
-
-1. Run the badge issuer's unit tests:
-
-   ```bash
-   docker run --rm -e PYTHONDONTWRITEBYTECODE=1 \
-     -v "$PWD/cross-domain-id-jag-vc/vc-issuer:/src" \
-     -w /src python:3.12-slim sh -c \
-     'pip install -q -r requirements-dev.txt && pytest -q -p no:cacheprovider'
-   ```
-
-   Expected: 9/9 tests pass.
-
-2. Validate Compose and start the stack:
-
-   ```bash
-   cd cross-domain-id-jag-vc
-   docker compose config --quiet
-   docker compose up -d --build
-   ```
-
-3. Confirm the issuer is healthy and its JWKS is well-formed:
-
-   ```bash
-   curl --fail --silent --show-error http://localhost:9003/healthz | jq .
-   curl --fail --silent --show-error http://localhost:9003/jwks | jq .
-   ```
-
-4. Issue and verify a badge directly, confirming it is a real signed `vc+jwt`
-   (not the old hardcoded mock):
-
-   ```bash
-   BADGE="$(curl --silent --show-error -X POST http://localhost:9003/vc/issue \
-     -H 'Content-Type: application/json' \
-     -d '{"id":"opencode-agent","caps":["scan","remediate","delegate"],
-          "delegating_user":"sarah@org-a.example",
-          "intent":"cross-domain-remediation","act_chain":["opencode-agent"]}' \
-     | jq -r .badge)"
-
-   curl --silent --show-error -X POST http://localhost:9003/vc/verify \
-     -H 'Content-Type: application/json' \
-     -d "{\"badge\":\"$BADGE\"}" | jq .
-   ```
-
-   Expected: `valid: true`, claims matching the request, and a `typ: vc+jwt`
-   header (`echo "$BADGE" | cut -d. -f1 | base64 -d`).
-
-5. Run the full sequence and confirm the badge step used the real issuer:
-
-   ```bash
-   RUN_OUTPUT="$(mktemp)"
-   curl --fail --silent --show-error -X POST http://localhost:8100/api/run \
-     -H 'Content-Type: application/json' \
-     -d '{"repo":"demo-admin/payments-service"}' -o "$RUN_OUTPUT"
-
-   jq '{ok, badge: [.steps[] | select(.id == "resolve-badge")][0]}' "$RUN_OUTPUT"
-   rm "$RUN_OUTPUT"
-   ```
-
-   Expected: `ok=true`, the `resolve-badge` step has `status=ok` and a
-   `token_preview` (the real signed badge), not the old static mock claims.
 
 ### Keycloak A token exchange reviewer verification
 
@@ -1270,6 +1225,138 @@ delegate rather than assuming it.
    Expected: `ok=false` with a single `verify-subbadge` step in `error` —
    no `cimd-generate-id`, no `kc-b-exchange`, nothing reached Keycloak B.
 
+### Policy-gated code scan (Milestone 12) reviewer verification
+
+1. OPA unit tests — the read is a distinct delegation shape, so it has its own
+   rules at both boundaries. Each policy is a separate bundle (they all define
+   `data.envoy.authz.allow`), so test them one at a time:
+
+   ```bash
+   cd cross-domain-id-jag-vc
+   for p in envoy-org-a/policies envoy/policies; do
+     for f in $p/*_test.rego; do
+       d=$(mktemp -d); cp "${f%_test.rego}.rego" "$f" "$d"
+       docker run --rm -v "$d:/p" openpolicyagent/opa:latest test /p | tail -1
+     done
+   done
+   ```
+
+   Expected: egress **22/22**, resource-access **21/21**, ticket-ingress
+   **17/17**. The new cases assert that a read assertion additionally carrying
+   `gitea:write`, `gitea:pr`, or `triage:create` is denied, that a deeper
+   act-chain cannot use the read route, and that the sub-agent's write
+   credential cannot read source.
+
+2. The read chain end to end:
+
+   ```bash
+   curl -s -X POST http://localhost:8100/api/run \
+     -H 'Content-Type: application/json' \
+     -d '{"repo":"demo-admin/payments-service","use_real_opencode":false}' \
+     | jq '[.steps[] | select(.id | test("read|fetch-source|^scan$")) |
+            {id, status, rule: (.result.policy.rule // .result.rule),
+             scope: .result.claims.scope, finding: .result.finding.id}]'
+   ```
+
+   Expected: `mint-read-idjag` with `scope="openid gitea:read"`,
+   `read-egress-check` with `rule=org-a-egress-source-read`,
+   `kc-b-read-exchange` carrying read and nothing else, `fetch-source` with
+   `rule=org-b-source-read`, and `scan` reporting `CWE-89` — a finding
+   produced from source the agent genuinely fetched, not a constant.
+
+3. The source really is the repository's:
+
+   ```bash
+   curl -s http://localhost:3002/api/v1/repos/demo-admin/payments-service/git/trees/main?recursive=true \
+     | jq -r '.tree[] | select(.type=="blob") | .path'
+   ```
+
+   Expected: `README.md` and
+   `src/main/java/com/example/payments/PaymentLookupRepository.java` — the
+   file the scan analyses, seeded by `gitea-init`. It is a **source-level**
+   fixture (string-concatenated SQL), not a vulnerable dependency: there is no
+   manifest and no build, so nothing here resolves, compiles, or executes, and
+   SCA tooling has nothing to flag.
+
+4. The read is bound to the repository signed into the assertion — same agent,
+   same scope, same valid assertion, different repo:
+
+   ```bash
+   docker compose logs envoy-org-b --tail 0 -f &   # optional: watch the decision
+   # payments-service → allowed; demo-protected → 403 at Envoy B's inline OPA
+   ```
+
+   The demo exercises this on every run via `denied-pr-attempt` on the write
+   path; for the read path, requesting `demo-admin/demo-protected` returns
+   `403 policy_denied` before the gateway is reached.
+
+### Agent credentials (Milestones 13–14) reviewer verification
+
+1. Every agent identity resolves to a credential — not just an identifier:
+
+   ```bash
+   for id in AGNTCY-opencode-agent AGNTCY-triage-agent AGNTCY-sub-agent; do
+     echo -n "$id  "
+     curl -s "http://localhost:4005/v1alpha1/vc/$id/.well-known/vcs.json" | jq '.vcs | length'
+   done
+   ```
+
+   Expected: at least one credential each. Before M14 the two Org B agents
+   returned `0` — they had a *who* (`/id/resolve`) but no *what*.
+
+2. The credential is a real W3C VC signed by the **org's Vault key**, not by
+   any single service:
+
+   ```bash
+   curl -s http://localhost:4005/v1alpha1/vc/AGNTCY-triage-agent/.well-known/vcs.json \
+     | jq -r '.vcs[0].value' | cut -d. -f1,2 \
+     | python3 -c 'import sys,base64,json;h,p=sys.stdin.read().split(".");pad=lambda x:x+"="*(-len(x)%4);
+   print(json.dumps({"header":json.loads(base64.urlsafe_b64decode(pad(h))),
+                     "subject":json.loads(base64.urlsafe_b64decode(pad(p)))["credentialSubject"]},indent=2))'
+   ```
+
+   Expected: header `{"alg":"RS256","typ":"JOSE","kid":"org-b-issuer-v1"}` —
+   Org B attesting its own agent — and a `credentialSubject` distinguishing
+   `caps` (what it may do: `triage:create`) from `delegatable` (what it may
+   grant onward: `gitea:write`, `gitea:pr`). Those are different authorities
+   here, which is why the credential carries both.
+
+3. Each side of a handoff resolves the other's credential:
+
+   ```bash
+   curl -s -X POST http://localhost:8100/api/run \
+     -H 'Content-Type: application/json' \
+     -d '{"repo":"demo-admin/payments-service","use_real_opencode":false}' \
+     | jq '[.steps[] | select(.id == "verify-sender-badge") |
+            {delegating_agent: .result.delegating_agent,
+             may_delegate:     .result.credential_delegatable}]'
+   ```
+
+   Expected: two entries — Triage resolving `AGNTCY-opencode-agent`, and
+   Sub-Agent resolving `AGNTCY-triage-agent`. Each requires the granted scope
+   to be within the sender's `delegatable`, and the act-chains to agree.
+
+   **What this proves and does not:** it proves org-X published that credential
+   about that identifier and it does not contradict the assertion. It does
+   *not* prove the process you spoke to holds that identity's key — see
+   "no proof of possession" under known limitations. Both steps say so in
+   their own result payload.
+
+4. Issuance is bound to registered identities, by the node itself:
+
+   ```bash
+   # a credential about an unregistered id is refused
+   # (publishing requires resolving the subject first)
+   curl -s -X POST http://localhost:4005/v1alpha1/id/resolve \
+     -H 'Content-Type: application/json' -d '{"id":"AGNTCY-does-not-exist"}' | jq -r .message
+   ```
+
+   Expected: `could not resolve the ID`. Publishing a credential about that
+   subject fails the same way, and an org-a-signed credential about an org-b
+   identity is refused with `Unable to verify the integrity of the data
+   provided` — so subject-registration and issuer-matching are enforced
+   upstream rather than by this demo.
+
 ### Via the webapp (recommended)
 
 Open **http://localhost:8090**. Click **Run (animated)** to watch the whole
@@ -1314,10 +1401,16 @@ curl -s -X POST http://localhost:8090/api/run \
 curl -s http://localhost:8090/api/health
 curl -s http://localhost:8090/api/config | jq .
 
-# Individual steps (step-through mode)
-curl -s -X POST http://localhost:8090/api/step/cimd-generate-id \
-  -H 'Content-Type: application/json' -d '{"sub":"triage-agent"}' | jq .
+# …or straight at the agent, skipping the webapp
+curl -s -X POST http://localhost:8100/api/run \
+  -H 'Content-Type: application/json' \
+  -d '{"repo":"demo-admin/payments-service","use_real_opencode":false}' \
+  | jq '.ok, (.steps|length)'
 ```
+
+Step-through is a client-side control: the webapp fetches the whole run once
+and **Next step ▶** paces the reveal. There are no per-step HTTP endpoints —
+the lifecycle only ever executes in `opencode-agent`.
 
 You can re-run `/api/run` repeatedly — every push branch is randomized
 server-side, so repeat runs don't collide with a prior run's branch/PR.
@@ -1327,7 +1420,6 @@ server-side, so repeat runs don't collide with a prior run's branch/PR.
 ```bash
 curl http://localhost:8082/realms/org-a/.well-known/openid-configuration | jq .issuer
 curl http://localhost:8083/realms/org-b/.well-known/openid-configuration | jq .issuer
-curl http://localhost:9002/jwks | jq .
 curl http://localhost:4005/v1alpha1/issuer/org-a/.well-known/jwks.json | jq .
 curl http://localhost:10000/health
 curl http://localhost:10001/healthz
@@ -1433,7 +1525,6 @@ cross-domain-id-jag-vc/
 ├── proto/                     # shared AGNTCY Directory proto tree (compiled at image build)
 ├── envoy-org-a/                # Org A gateway: badge-scope PDP + egress.rego (+tests)
 ├── envoy/                     # Built On Envoy image, JWT filters, and Rego policies/tests
-├── vc-issuer/                  # VC badge issuer (stand-in for identity-node's badge API)
 ├── identity-node-init.py      # Vault Transit bootstrap + org-a issuer registration
 ├── keycloak-a/, keycloak-b/   # realm import JSON + scope bootstrap scripts
 ├── keycloak-idjag-spi/         # Keycloak SPI: native token-exchange ID-JAG minting (see Discussion #18)

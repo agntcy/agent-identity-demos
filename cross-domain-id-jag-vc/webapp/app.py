@@ -53,11 +53,9 @@ TRIAGE_CLIENT_ID = os.environ.get("TRIAGE_CLIENT_ID", "triage-agent")
 SARAH_USER = os.environ.get("SARAH_USER", "sarah")
 SARAH_EMAIL = os.environ.get("SARAH_EMAIL", "sarah@org-a.example")
 
-IDJAG_ISSUER_URL = os.environ.get("IDJAG_ISSUER_URL", "http://idjag-issuer:9000").rstrip("/")
 IDENTITY_NODE_URL = os.environ.get("IDENTITY_NODE_URL", "http://identity-node:4000").rstrip("/")
 TRIAGE_AGENT_URL = os.environ.get("TRIAGE_AGENT_URL", "http://envoy-org-b:10000").rstrip("/")
 DIR_APISERVER_URL = os.environ.get("DIR_APISERVER_URL", "")  # e.g. "dir-apiserver:8888"
-VC_ISSUER_URL = os.environ.get("VC_ISSUER_URL", "http://vc-issuer:9003").rstrip("/")
 EGRESS_PDP_URL = os.environ.get("EGRESS_PDP_URL", "http://envoy-org-a:12000").rstrip("/")
 JAEGER_UI_URL = os.environ.get("JAEGER_UI_URL", "")  # e.g. "http://localhost:16686" — blank hides the trace link
 
@@ -210,9 +208,7 @@ def config() -> JSONResponse:
         "sarah_email": SARAH_EMAIL,
         "opencode_agent_url": OPENCODE_AGENT_URL,
         "opencode_model": OPENCODE_MODEL,
-        "idjag_issuer_url": IDJAG_ISSUER_URL,
         "identity_node_url": IDENTITY_NODE_URL,
-        "vc_issuer_url": VC_ISSUER_URL,
         "egress_pdp_url": EGRESS_PDP_URL,
         "triage_agent_url": TRIAGE_AGENT_URL,
         "dir_apiserver_url": DIR_APISERVER_URL or "not configured",

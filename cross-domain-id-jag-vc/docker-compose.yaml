@@ -12,7 +12,9 @@ name: cross-domain-stack
 #   OpenCode       → Org A AI agent: REAL OpenCode (opencode-server, headless)
 #                    + identity harness (opencode-agent), task lifecycle:
 #                    OAuth → identity → policy-scoped badge → work → delegate
-#   AGNTCY         → identity node (CIMD) + vc-issuer (badge mint) + idjag-issuer (assertion mint)
+#   AGNTCY         → identity node (CIMD ids + agent-badge VCs); ID-JAG
+#                    assertions are minted natively by Keycloak A and B
+#                    (keycloak-idjag-spi baked into both images)
 #   Keycloak A     → Org A IdP (org-a realm), authenticates Sarah
 #   Envoy+OPA A    → egress inline policy (may Sarah delegate this scope to Org B?)
 #   Keycloak B     → Org B IdP (org-b realm), receives cross-domain ID-JAG assertion
@@ -24,8 +26,6 @@ name: cross-domain-stack
 # Ports (non-conflicting with single-org-id-jag-app-access defaults):
 #   keycloak-a      → host:8082  (Org A IdP)
 #   keycloak-b      → host:8083  (Org B IdP)
-#   vc-issuer       → host:9003  (AGNTCY badge minter, stand-in for identity-node's badge API)
-#   idjag-issuer    → host:9002  (AGNTCY assertion minter)
 #   identity-node   → host:4005 (REST) / 4006 (gRPC)
 #   gitea           → host:3002
 #   envoy-org-a     → host:12000 (egress)  admin:127.0.0.1:9902
@@ -79,7 +79,7 @@ services:
   # ---------------------------------------------------------------------------
   # Keycloak A — Org A IdP (realm: org-a)
   #   - Authenticates Sarah (password grant → opencode-agent client)
-  #   - ID-JAG IdP wired to idjag-issuer's JWKS
+  #   - Mints ID-JAG assertions natively (keycloak-idjag-spi)
   #   - standard.token.exchange enabled on opencode-agent (RFC 8693, step 7)
   # ---------------------------------------------------------------------------
   keycloak-a:
@@ -191,75 +191,6 @@ services:
     networks:
       - cd-net
     restart: "no"
-
-  # ---------------------------------------------------------------------------
-  # VC badge issuer — stand-in for identity-node's (nonexistent) badge API
-  #   - Generates ephemeral RSA key pair at startup; publishes JWKS at /jwks
-  #   - Steps 3-6: OpenCode calls POST /vc/issue then POST /vc/verify to
-  #     resolve and self-check its own delegation badge
-  #   - identity-node (below) only does CIMD id generate/resolve; it has no
-  #     badge concept, so this stays a separate demo helper
-  # ---------------------------------------------------------------------------
-  vc-issuer:
-    build:
-      context: ./vc-issuer
-    image: cd-vc-issuer
-    container_name: cd-vc-issuer
-    depends_on:
-      jaeger:
-        condition: service_healthy
-    environment:
-      ISSUER_URL: http://vc-issuer:9003
-      BADGE_TTL: ${BADGE_TTL:-3600}
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
-    ports:
-      - "${VC_ISSUER_PORT:-9003}:9003"
-    networks:
-      - cd-net
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9003/healthz').status==200 else 1)\""]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
-
-  # ---------------------------------------------------------------------------
-  # ID-JAG issuer — AGNTCY assertion minter (trusted by both Keycloak A and B)
-  #   - Generates ephemeral RSA key pair at startup; publishes JWKS at /jwks
-  #   - Both KC-A and KC-B configure an id-jag IdP pointing at this JWKS URL
-  #   - Mints assertions for:
-  #       step  8: OpenCode → Triage cross-domain (aud=KC-B org-b realm)
-  #       step 17: Triage → Sub-Agent sub-badge   (aud=KC-B org-b realm, nested act_chain)
-  # ---------------------------------------------------------------------------
-  idjag-issuer:
-    build:
-      context: ../archive/single-org-id-jag-app-access/idjag-issuer
-    image: cd-idjag-issuer
-    container_name: cd-idjag-issuer
-    depends_on:
-      jaeger:
-        condition: service_healthy
-    environment:
-      ISSUER_URL: http://idjag-issuer:9000
-      ASSERTION_TTL: ${ASSERTION_TTL:-300}
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
-    ports:
-      - "${IDJAG_PORT:-9002}:9000"
-    networks:
-      - cd-net
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9000/healthz').status==200 else 1)\""]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
-
-  # ---------------------------------------------------------------------------
-  # AGNTCY Identity Node infrastructure (Postgres + Vault + Node)
-  #   - Badge (VC) registry and resolver
-  #   - Steps 3-6: OpenCode would call /vc/verify here (mocked in agent stub)
-  #   - Points at Keycloak A (Org A) as its OIDC issuer for tenant auth
-  # ---------------------------------------------------------------------------
   identity-postgres:
     image: postgres:16
     container_name: cd-identity-postgres
@@ -431,7 +362,7 @@ services:
   # ---------------------------------------------------------------------------
   # Org A gateway — Envoy + Built On Envoy inline OPA dynamic module
   #   - Listener 12000 enforces the egress PDP: may Sarah delegate this scope
-  #     to Org B? Verifies the freshly-minted ID-JAG against idjag-issuer's
+  #     to Org B? Verifies the freshly-minted ID-JAG against Keycloak A's own
   #     JWKS, then checks scope/intent/delegation-chain in Rego before
   #     OpenCode redeems it at Keycloak B.
   # ---------------------------------------------------------------------------
@@ -445,8 +376,6 @@ services:
     image: cd-envoy-boe-a:${ENVOY_A_IMAGE_TAG:-milestone4}
     container_name: cd-envoy-org-a
     depends_on:
-      idjag-issuer:
-        condition: service_healthy
       # badge-scope route verifies Sarah's KC-A access token via KC-A JWKS
       keycloak-a:
         condition: service_healthy
@@ -480,8 +409,6 @@ services:
     container_name: cd-envoy-org-b
     depends_on:
       keycloak-b:
-        condition: service_healthy
-      idjag-issuer:
         condition: service_healthy
       triage-agent:
         condition: service_healthy
@@ -539,8 +466,9 @@ services:
   #     1     Sarah OIDC → Keycloak A → delegated access token
   #     2-3   OpenCode registers its own identity (CIMD @ identity-node)
   #     4     badge request → Envoy A + OPA → scoped-down intent
-  #     5     vc-issuer mints the task-scoped badge
-  #     6-6b  work: mock scan + real OpenCode remediation plan
+  #     5     agent badge VC: Vault-signed, published to identity-node
+  #     5b-5e read Org B source under a read-scoped assertion
+  #     6-6b  work: OpenCode analyses that source + remediation plan
   #     7-8   Directory turn record + triage-agent discovery
   #     9-12  RFC 8693 → ID-JAG → egress OPA → KC-B → ticket to Org B
   #
@@ -558,10 +486,6 @@ services:
       keycloak-a:
         condition: service_healthy
       keycloak-b:
-        condition: service_healthy
-      vc-issuer:
-        condition: service_healthy
-      idjag-issuer:
         condition: service_healthy
       envoy-org-a:
         condition: service_healthy
@@ -596,8 +520,6 @@ services:
       TRIAGE_CLIENT_ID: triage-agent
       TRIAGE_CLIENT_SECRET: ${TRIAGE_CLIENT_SECRET:-demo-triage-secret-change-me}
       # AGNTCY services
-      VC_ISSUER_URL: http://vc-issuer:9003
-      IDJAG_ISSUER_URL: http://idjag-issuer:9000
       IDENTITY_NODE_URL: http://identity-node:4000
       DIR_APISERVER_URL: dir-apiserver:8888
       # CIMD proof signing — org-a trust authority key in Vault Transit
@@ -609,6 +531,10 @@ services:
       EGRESS_PDP_URL: http://envoy-org-a:12000
       # Org B trust boundary; Envoy proxies the request to Triage.
       TRIAGE_AGENT_URL: http://envoy-org-b:10000
+      # Org B resource boundary — source is read through Envoy B + inline OPA
+      # under a read-scoped assertion, never from Gitea directly.
+      GITEA_RESOURCE_URL: http://envoy-org-b:10001
+      SCAN_SOURCE_PATH: ${SCAN_SOURCE_PATH:-src/main/java/com/example/payments/PaymentLookupRepository.java}
       # Real OpenCode (headless) + model provider
       OPENCODE_SERVER_URL: http://opencode-server:4096
       OPENCODE_MODEL: ${OPENCODE_MODEL:-ollama/qwen2.5-coder:7b}
@@ -884,8 +810,6 @@ services:
         condition: service_healthy
       keycloak-b:
         condition: service_healthy
-      idjag-issuer:
-        condition: service_healthy
       identity-node:
         condition: service_healthy
       identity-vault:
@@ -897,8 +821,6 @@ services:
       envoy-org-b:
         condition: service_healthy
       envoy-org-a:
-        condition: service_healthy
-      vc-issuer:
         condition: service_healthy
       opencode-agent:
         condition: service_healthy
@@ -915,9 +837,7 @@ services:
       TRIAGE_CLIENT_ID: triage-agent
       SARAH_USER: ${SARAH_USER:-sarah}
       SARAH_EMAIL: ${SARAH_EMAIL:-sarah@org-a.example}
-      IDJAG_ISSUER_URL: http://idjag-issuer:9000
       IDENTITY_NODE_URL: http://identity-node:4000
-      VC_ISSUER_URL: http://vc-issuer:9003
       EGRESS_PDP_URL: http://envoy-org-a:12000
       TRIAGE_AGENT_URL: http://envoy-org-b:10000
       DIR_APISERVER_URL: dir-apiserver:8888

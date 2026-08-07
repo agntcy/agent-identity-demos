@@ -40,6 +40,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from agntcy_identity_client import VaultConfig
 from agntcy_identity_client import cimd as cimd_api
 from agntcy_identity_client import directory as dir_api
+from agntcy_identity_client import vc as vc_api
 from tracing import setup_tracing, step_span
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -338,12 +339,65 @@ async def receive_ticket(
 
     async with httpx.AsyncClient(timeout=20) as client:
 
+        # ── t1c: resolve the SENDER's credential ──────────────────────────
+        # The ID-JAG says what we were granted; the Identity Node says
+        # independently what OpenCode is permitted to grant. Require agreement.
+        # Not proof of possession — CIMD holds no per-agent key — but it does
+        # catch an assertion exceeding what its issuer may delegate.
+        sender_id = f"AGNTCY-{body.act_chain[0]}" if body.act_chain else ""
+        s = {
+            "id": "verify-sender-badge",
+            "title": f"t1c. Resolve the delegating agent's credential ({sender_id}) and check it agrees with the ID-JAG",
+            "detail": f"GET {IDENTITY_NODE_URL}/v1alpha1/vc/{sender_id}/.well-known/vcs.json",
+        }
+        with step_span("verify-sender-badge"):
+            try:
+                sender = None
+                for env in await vc_api.well_known_badges(client, IDENTITY_NODE_URL, sender_id):
+                    doc = _decode_jwt_payload_unverified(env.get("value", ""))
+                    subj = doc.get("credentialSubject") or {}
+                    if subj.get("id") == sender_id and subj.get("delegatable"):
+                        sender = doc
+                        break
+                if sender is None:
+                    raise ValueError(
+                        f"{sender_id} has no resolvable credential declaring delegatable authority")
+                subj = sender["credentialSubject"]
+                if list(subj.get("act_chain") or []) != body.act_chain:
+                    raise ValueError(
+                        f"sender credential act_chain={subj.get('act_chain')} disagrees "
+                        f"with the ticket's {body.act_chain}")
+                may_delegate = {c for c in (subj.get("delegatable") or [])}
+                granted = {c for c in str(claims.get("scope") or "").split(" ") if c}
+                if not granted <= may_delegate:
+                    raise ValueError(
+                        f"ID-JAG grants {sorted(granted - may_delegate)} which the sender's "
+                        f"credential does not permit it to delegate")
+                s.update(status="ok", result={
+                    "delegating_agent": sender_id,
+                    "credential_issuer": sender.get("issuer"),
+                    "credential_caps": sorted(subj.get("caps") or []),
+                    "credential_delegatable": sorted(may_delegate),
+                    "note": "credential agrees with the assertion; not proof of possession",
+                })
+            except Exception as exc:  # noqa: BLE001
+                s.update(status="error", error=str(exc))
+        steps.append(s)
+        if s.get("status") == "error":
+            return JSONResponse({"ok": False, "ticket_id": ticket_id, "steps": steps})
+
         # ── t2: register own identity (org-b trust authority) ─────────────
         with step_span("cimd-register"):
             cimd_steps = await _cimd_register(client)
         steps.extend(cimd_steps)
         if any(cs.get("status") == "error" for cs in cimd_steps):
             return JSONResponse({"ok": False, "ticket_id": ticket_id, "steps": steps})
+        # This agent's own CIMD id — the subject its badge will be issued about.
+        triage_cimd_id = next(
+            (cs["result"]["id"] for cs in cimd_steps
+             if cs.get("id") == "cimd-generate-id" and (cs.get("result") or {}).get("id")),
+            f"AGNTCY-{TRIAGE_CLIENT_ID}",
+        )
 
         # ── t3: sub-badge scope check (Org B PDP — Envoy + inline OPA) ────
         s = {
@@ -386,6 +440,52 @@ async def receive_ticket(
                 steps.append(s)
                 return JSONResponse({"ok": False, "ticket_id": ticket_id, "steps": steps})
         steps.append(s)
+
+        # ── t3b: publish Triage's own agent badge ─────────────────────────
+        # Every registered identity should resolve to a credential saying what
+        # it may do — otherwise .well-known answers "who" but never "what".
+        # Signed with ORG-B's Vault key: Org B attests its own agents, exactly
+        # as Org A attests OpenCode.
+        s = {
+            "id": "resolve-badge",
+            "title": "t3b. Publish Triage's agent badge VC — org-b Vault-signed, describes what Triage HOLDS",
+            "detail": f"POST {IDENTITY_NODE_URL}/v1alpha1/vc/publish  issuer={VAULT_CFG.issuer}  "
+                      f"subject={triage_cimd_id}",
+        }
+        with step_span("resolve-badge"):
+            try:
+                # caps describe the authority THIS agent holds — taken from
+                # its own verified inbound assertion — not the narrower scope
+                # it grants onward. A credential that advertised the delegated
+                # scope would misrepresent the agent and be indistinguishable
+                # from the Sub-Agent's.
+                held_caps = [c for c in str(claims.get("scope") or "").split(" ") if c]
+                issued = await vc_api.issue_badge(
+                    client, IDENTITY_NODE_URL, VAULT_CFG,
+                    subject_id=triage_cimd_id,
+                    caps=held_caps,
+                    # What Triage may grant onward — the narrowing Org B's
+                    # policy just approved at t3, not what Triage itself uses.
+                    delegatable=[c for c in scoped_scope.split(" ") if c],
+                    delegating_user="sarah@org-a.example",
+                    intent=body.intent,
+                    act_chain=parent_chain + [TRIAGE_CLIENT_ID],
+                )
+                s.update(status="ok" if issued["verified"] else "error", result={
+                    "credential_id": issued["credential_id"],
+                    "issuer": issued["issuer"],
+                    "reused_existing_credential": issued.get("reused", False),
+                    "verified_by": "identity-node /v1alpha1/vc/verify",
+                    "well_known": f"{IDENTITY_NODE_URL}/v1alpha1/vc/{triage_cimd_id}/.well-known/vcs.json",
+                    "claims": issued["document"],
+                })
+                if not issued["verified"]:
+                    s["error"] = "identity-node reported the published badge as invalid"
+            except Exception as exc:  # noqa: BLE001
+                s.update(status="error", error=str(exc))
+        steps.append(s)
+        if s.get("status") == "error":
+            return JSONResponse({"ok": False, "ticket_id": ticket_id, "steps": steps})
 
         # ── t4: plan the remediation ──────────────────────────────────────
         with step_span("plan"):

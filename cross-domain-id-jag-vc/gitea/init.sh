@@ -53,9 +53,76 @@ seed_repo() {
     "${GITEA_URL}/api/v1/user/repos" >/dev/null 2>&1 || echo "[gitea-init] WARN: could not create ${name}"
 }
 
+seed_file() {
+  repo="$1"; path="$2"; msg="$3"; src="$4"
+  if wget -q -O- --header="$AUTH" \
+       "${GITEA_URL}/api/v1/repos/${ADMIN_USER}/${repo}/contents/${path}" >/dev/null 2>&1; then
+    echo "[gitea-init] ${repo}/${path} already present"
+    return
+  fi
+  # busybox base64 wraps output; the API wants one unbroken string.
+  b64=$(base64 < "$src" | tr -d '\n')
+  echo "[gitea-init] seeding ${repo}/${path}"
+  wget -q -O- --header="Content-Type: application/json" --header="$AUTH" \
+    --post-data="{\"content\":\"${b64}\",\"message\":\"${msg}\",\"branch\":\"main\"}" \
+    "${GITEA_URL}/api/v1/repos/${ADMIN_USER}/${repo}/contents/${path}" >/dev/null 2>&1 \
+    || echo "[gitea-init] WARN: could not seed ${path}"
+}
+
 # Target repo for sub-agent's PR (the "remediation" resource)
 seed_repo "payments-service" "Payments microservice — target for CVE remediation PRs (cross-domain demo)"
 # Protected repo: gateway deny-list blocks PR creation regardless of scope
 seed_repo "demo-protected"   "Protected repo — deny-listed at gateway; agents cannot PR here"
+
+# ── Analysis target ──────────────────────────────────────────────────────────
+# Real source for OpenCode to analyse, so the scan step reports a weakness it
+# actually found rather than a hardcoded constant.
+#
+# Deliberately a SOURCE-LEVEL flaw, not a vulnerable dependency: there is no
+# manifest and no build, so nothing here can be resolved, fetched, compiled or
+# executed, and SCA tooling has nothing to flag on this repository. The file is
+# an inert fixture in a throwaway demo Gitea, in the spirit of OWASP WebGoat.
+cat > /tmp/PaymentLookupRepository.java <<'JAVA'
+// ─────────────────────────────────────────────────────────────────────────────
+// INTENTIONALLY VULNERABLE — DEMO FIXTURE. DO NOT COPY INTO REAL CODE.
+//
+// Seeded by gitea-init so the AGNTCY cross-domain delegation demo has genuine
+// source for the agent to analyse. This file is never built, deployed, or
+// reachable by anything; it exists only to be read.
+// ─────────────────────────────────────────────────────────────────────────────
+package com.example.payments;
+
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
+
+/** Looks up payment records for the payments microservice. */
+public class PaymentLookupRepository {
+
+    private final Connection connection;
+
+    public PaymentLookupRepository(Connection connection) {
+        this.connection = connection;
+    }
+
+    /** Returns every payment belonging to a customer. */
+    public ResultSet findPaymentsByCustomer(String customerId) throws Exception {
+        Statement statement = connection.createStatement();
+        String sql = "SELECT id, amount, currency, status FROM payments "
+                   + "WHERE customer_id = '" + customerId + "'";
+        return statement.executeQuery(sql);
+    }
+
+    /** Free-text search over payment references. */
+    public ResultSet searchByReference(String reference, String status) throws Exception {
+        Statement statement = connection.createStatement();
+        return statement.executeQuery(
+            "SELECT * FROM payments WHERE reference LIKE '%" + reference + "%' "
+          + "AND status = '" + status + "'");
+    }
+}
+JAVA
+seed_file "payments-service" "src/main/java/com/example/payments/PaymentLookupRepository.java" \
+  "feat: add payment lookup repository" /tmp/PaymentLookupRepository.java
 
 echo "[gitea-init] done."

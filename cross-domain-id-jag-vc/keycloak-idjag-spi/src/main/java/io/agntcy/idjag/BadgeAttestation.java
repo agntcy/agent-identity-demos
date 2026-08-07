@@ -28,17 +28,22 @@ import org.keycloak.models.ClientModel;
  * it to the authenticated subject.
  *
  * Why this exists: without it, the badge is decorative at the issuance
- * boundary. OpenCode verifies its own badge against vc-issuer and then tells
- * Keycloak what authority to mint — meaning the only party checking the
- * attestation is the party it is supposed to constrain. Keycloak would sign
- * whatever was asked for, and the badge's scoping would be advisory.
+ * boundary. The agent verifies its own badge and then tells Keycloak what
+ * authority to mint — meaning the only party checking the attestation is the
+ * party it is supposed to constrain. Keycloak would sign whatever was asked
+ * for, and the badge's scoping would be advisory.
+ *
+ * The badge is a W3C Verifiable Credential (JOSE envelope) signed with the
+ * org's Vault trust-authority key and published to the AGNTCY Identity Node,
+ * so the trust anchor here is the org's registered issuer JWKS — not any
+ * single service's keypair.
  *
  * What is checked here (deliberately a narrow subset — see the README's
  * "known limitations"):
- *   1. the badge is a real, unexpired {@code vc+jwt} signed by vc-issuer,
- *      verified against vc-issuer's published JWKS; and
- *   2. its {@code delegating_user} is the same principal as the verified
- *      {@code subject_token}'s subject.
+ *   1. the badge is a real, unexpired credential signed by the org issuer,
+ *      verified against its published JWKS; and
+ *   2. its {@code credentialSubject.delegating_user} is the same principal as
+ *      the verified {@code subject_token}'s subject.
  *
  * Deliberately NOT checked yet (would be the natural next increment):
  * containment of requested scope/resource/intent within the badge's
@@ -49,24 +54,31 @@ import org.keycloak.models.ClientModel;
  * {@code delegating_user} against an unverified badge would be trivially
  * defeated by forging one, so the two are implemented together or not at all.
  *
- * Enabled per calling client via the {@code idjag.badge.jwks.url} attribute;
+ * Enabled per calling client via the {@code agent.credential.jwks.url} attribute;
  * when that attribute is absent the check is skipped, so realms that have not
  * opted in keep their existing behaviour.
  */
 final class BadgeAttestation {
 
-    static final String ATTR_BADGE_JWKS_URL = "idjag.badge.jwks.url";
+    // Names the *credential* JWKS, not the ID-JAG one. The two artifacts are
+    // distinct: this class verifies a W3C Verifiable Credential (typ=JOSE)
+    // published to the Identity Node, whereas an ID-JAG assertion
+    // (typ=oauth-id-jag+jwt) is what Keycloak itself mints.
+    static final String ATTR_BADGE_JWKS_URL = "agent.credential.jwks.url";
 
-    /** JWT "typ" header vc-issuer stamps on a badge. */
-    private static final String BADGE_TYP = "vc+jwt";
+    /**
+     * JOSE envelope type, per agntcy/identity's CredentialEnvelopeType. The
+     * badge is a W3C Verifiable Credential signed with the org's Vault
+     * trust-authority key and published to the Identity Node.
+     */
+    private static final String BADGE_TYP = "JOSE";
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final Base64.Decoder B64URL = Base64.getUrlDecoder();
 
     /**
-     * vc-issuer generates a fresh keypair (and kid) on every boot, so the JWKS
-     * is cached only briefly and re-fetched whenever a kid is unknown — pinning
-     * would break the demo across a vc-issuer restart.
+     * Cached briefly and re-fetched whenever a kid is unknown, so key rotation
+     * at the issuer is picked up without a Keycloak restart.
      */
     private static final Duration JWKS_TTL = Duration.ofSeconds(300);
 
@@ -121,19 +133,29 @@ final class BadgeAttestation {
 
         PublicKey key = resolveKey(jwksUrl, kid);
         if (!signatureValid(actorToken, parts, key)) {
-            throw new BadgeException("actor_token signature does not verify against vc-issuer's JWKS");
+            throw new BadgeException("actor_token signature does not verify against the issuer's published JWKS");
         }
 
-        JsonNode claims = decodeJson(parts[1], "payload");
+        JsonNode credential = decodeJson(parts[1], "payload");
 
-        long exp = claims.path("exp").asLong(0);
-        if (exp > 0 && Instant.now().getEpochSecond() >= exp) {
-            throw new BadgeException("actor_token (VC badge) has expired");
+        // W3C credential: validity is expirationDate (ISO-8601), and the
+        // asserted facts live under credentialSubject rather than at the top
+        // level as they did in the bespoke JWT this replaced.
+        String expiresAt = credential.path("expirationDate").asText("");
+        if (!expiresAt.isBlank()) {
+            try {
+                if (!Instant.now().isBefore(Instant.parse(expiresAt))) {
+                    throw new BadgeException("actor_token (VC badge) expired at " + expiresAt);
+                }
+            } catch (java.time.format.DateTimeParseException e) {
+                throw new BadgeException("actor_token has an unparseable expirationDate: " + expiresAt);
+            }
         }
 
-        String delegatingUser = claims.path("delegating_user").asText("");
+        JsonNode subject = credential.path("credentialSubject");
+        String delegatingUser = subject.path("delegating_user").asText("");
         if (delegatingUser.isBlank()) {
-            throw new BadgeException("actor_token carries no delegating_user claim");
+            throw new BadgeException("actor_token carries no credentialSubject.delegating_user");
         }
         // The binding that makes the badge meaningful: the attestation must be
         // about the same human whose token is being exchanged. Otherwise a
@@ -168,14 +190,14 @@ final class BadgeAttestation {
         boolean fresh = jwksUrl.equals(cachedUrl)
                 && Instant.now().isBefore(cachedAt.plus(JWKS_TTL));
         if (!fresh || !keys.containsKey(kid)) {
-            keys = fetchJwks(jwksUrl); // unknown kid: vc-issuer may have restarted
+            keys = fetchJwks(jwksUrl); // unknown kid: the issuer may have rotated keys
             cachedKeys = keys;
             cachedUrl = jwksUrl;
             cachedAt = Instant.now();
         }
         PublicKey key = keys.get(kid);
         if (key == null) {
-            throw new BadgeException("vc-issuer's JWKS has no key for kid '" + kid + "'");
+            throw new BadgeException("the issuer's published JWKS has no key for kid '" + kid + "'");
         }
         return key;
     }
@@ -188,9 +210,14 @@ final class BadgeAttestation {
                     .build();
             HttpResponse<InputStream> response = HTTP.send(request, HttpResponse.BodyHandlers.ofInputStream());
             if (response.statusCode() != 200) {
-                throw new BadgeException("vc-issuer JWKS returned HTTP " + response.statusCode());
+                throw new BadgeException("issuer JWKS returned HTTP " + response.statusCode());
             }
-            JsonNode keys = MAPPER.readTree(response.body()).path("keys");
+            JsonNode document = MAPPER.readTree(response.body());
+            // The Identity Node nests the set under "jwks"; a bare JWKS
+            // document has "keys" at the top level. Accept either.
+            JsonNode keys = document.has("jwks")
+                    ? document.path("jwks").path("keys")
+                    : document.path("keys");
             Map<String, PublicKey> parsed = new java.util.LinkedHashMap<>();
             for (JsonNode jwk : keys) {
                 if (!"RSA".equals(jwk.path("kty").asText())) {
@@ -205,13 +232,13 @@ final class BadgeAttestation {
                 parsed.put(kid, KeyFactory.getInstance("RSA").generatePublic(new RSAPublicKeySpec(n, e)));
             }
             if (parsed.isEmpty()) {
-                throw new BadgeException("vc-issuer JWKS contained no usable RSA keys");
+                throw new BadgeException("issuer JWKS contained no usable RSA keys");
             }
             return Map.copyOf(parsed);
         } catch (BadgeException e) {
             throw e;
         } catch (Exception e) {
-            throw new BadgeException("could not fetch vc-issuer JWKS: " + e.getMessage());
+            throw new BadgeException("could not fetch the issuer's JWKS: " + e.getMessage());
         }
     }
 }

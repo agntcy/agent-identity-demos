@@ -78,6 +78,65 @@ allow := {
 	valid_action_body(action)
 }
 
+# ── Source read (Org A's own agent, one hop) ─────────────────────────────────
+# A different delegation shape from the sub-agent's writes above: OpenCode reads
+# under its own narrow, read-scoped assertion, so the chain is one hop and the
+# token must NOT carry write, PR, or triage:create authority. Reading Org B's
+# source is a delegated act in its own right, checked here rather than trusted.
+allow := {
+	"allowed": true,
+	"headers": {
+		"x-agntcy-policy-decision": "ALLOW",
+		"x-agntcy-policy-rule": "org-b-source-read",
+		"x-agntcy-policy-enforcer": "built-on-envoy-opa",
+		"x-agntcy-policy-action": "read-source",
+		"x-agntcy-policy-repository": repository,
+		"x-agntcy-delegation-depth": sprintf("%d", [count(actor.act.act_chain)]),
+	},
+} if {
+	input.attributes.request.http.method == "GET"
+	source_read_path
+	repository := requested_repository
+
+	access := verified_payload("x-verified-access-token-payload")
+	actor := verified_payload("x-verified-actor-token-payload")
+
+	access.azp == "opencode-agent"
+	actor.azp == "opencode-agent"
+	actor.client_id == "opencode-agent"
+	actor.sub == "sarah@org-a.example"
+
+	# Read and nothing else — no write, no PR, no onward delegation authority.
+	scope_contains(access.scope, "gitea:read")
+	scope_contains(actor.scope, "gitea:read")
+	not scope_contains(access.scope, "gitea:write")
+	not scope_contains(access.scope, "gitea:pr")
+	not scope_contains(access.scope, "triage:create")
+	not scope_contains(actor.scope, "gitea:write")
+	not scope_contains(actor.scope, "gitea:pr")
+	not scope_contains(actor.scope, "triage:create")
+
+	# One hop: Org A's agent acting for Sarah, with nobody delegated onward.
+	actor.act.act_chain == ["opencode-agent"]
+	count(actor.act.act_chain) == 1
+
+	actor.intent == ["scan-source"]
+
+	# Bound to the exact repository signed into the assertion, and the
+	# deny-list applies to reads just as it does to writes.
+	repository in actor.resource
+	request_path_segments[3] == "demo-admin"
+	request_path_segments[4] != "demo-protected"
+}
+
+source_read_path if {
+	segments := request_path_segments
+	count(segments) >= 6
+	segments[0] == "api"
+	segments[1] == "gitea"
+	segments[2] == "source"
+}
+
 request_path_segments := split(trim(input.attributes.request.http.path, "/"), "/")
 
 resource_action := "push-file" if {

@@ -215,9 +215,39 @@ static_resources:
                             cache_duration: 300s
                           forward: false
                           forward_payload_header: x-verified-actor-token-payload
+                        idjag_read_assertion:
+                          # Source reads are a different delegation shape from
+                          # the sub-agent's writes: Org A's own agent reads
+                          # under a read-scoped assertion minted by Keycloak
+                          # A, so the actor token is signed by KC-A, not KC-B.
+                          # Same forward header, so the OPA policy reads the
+                          # actor payload from one place either way.
+                          issuer: http://keycloak-a:8080/realms/org-a
+                          audiences:
+                            - http://keycloak-b:8080/keycloak-b/realms/org-b
+                          from_headers:
+                            - name: X-AGNTCY-Actor-Token
+                              value_prefix: "Bearer "
+                          remote_jwks:
+                            http_uri:
+                              uri: http://keycloak-a:8080/realms/org-a/protocol/openid-connect/certs
+                              cluster: keycloak_a_jwks
+                              timeout: 5s
+                            cache_duration: 300s
+                          forward: false
+                          forward_payload_header: x-verified-actor-token-payload
                       rules:
                         - match:
                             path: "/healthz"
+                        # Read path first — more specific than the catch-all
+                        # below, and it carries a KC-A-issued assertion.
+                        - match:
+                            prefix: "/api/gitea/source/"
+                          requires:
+                            requires_all:
+                              requirements:
+                                - provider_name: org_b_resource_token
+                                - provider_name: idjag_read_assertion
                         - match:
                             prefix: "/"
                           requires:
