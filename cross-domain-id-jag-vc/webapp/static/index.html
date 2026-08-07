@@ -82,7 +82,7 @@
     .g.error .seq-label, .g.error .seq-num { fill: var(--err); }
     .g.denied .seq-msg { stroke: var(--denied); }
     .g.denied .seq-label, .g.denied .seq-num { fill: var(--denied); }
-    /* clickable steps — jump to this step's span in Jaeger */
+    /* clickable steps — choose explainer toast or Jaeger trace */
     .g[data-step] { cursor: pointer; }
     .g[data-step]:hover .seq-msg { stroke: var(--teal); stroke-width: 2.2; }
     .g[data-step]:hover .seq-label, .g[data-step]:hover .seq-num { fill: var(--teal); }
@@ -210,6 +210,15 @@
     .side-toast .toast-bar { height: 3px; border-radius: 2px; background: #21262d; margin-top: 12px; overflow: hidden; flex-shrink: 0; }
     .side-toast .toast-bar > div { height: 100%; background: var(--accent); width: 0%; transition: width linear; }
     @media (max-width: 980px) { .side-toast { display: none; } }
+
+    /* Popup shown when a diagram step is clicked — pick explainer vs. trace */
+    .step-menu { position: fixed; z-index: 10000; background: #161b22; border: 1px solid var(--border);
+      border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.4); padding: 4px; min-width: 200px; }
+    .step-menu button { display: block; width: 100%; text-align: left; padding: 8px 10px; border: none;
+      background: none; color: var(--text); font-size: 13px; border-radius: 5px; cursor: pointer; }
+    .step-menu button:hover { background: #21262d; }
+    .step-menu button:disabled { color: var(--muted); cursor: not-allowed; }
+    .step-menu button:disabled:hover { background: none; }
   </style>
 </head>
 <body>
@@ -788,7 +797,8 @@ POST /v1alpha1/vc/verify              # the node verifies, not the issuer
 → {"status": true, "document": {"type": ["VerifiableCredential", "AgentBadge"], …}}</code></pre>
 
     <h3>The work — scan + a real OpenCode agent (steps 6–6b)</h3>
-    <p>Only now, under the task-scoped badge, does the actual work begin: a mocked CVE scan, then a
+    <p>Only now, under the task-scoped badge, does the actual work begin: a scan of source actually
+    fetched from Org B through the delegation chain (a real Gitea read, not a hardcoded finding), then a
     real remediation analysis from the <b>real open-source OpenCode agent</b> (opencode.ai, headless
     in its own <code>opencode-server</code> container) — a genuine LLM call, not a canned response.
     This step is deliberately non-fatal: without a reachable model provider it reports
@@ -1170,6 +1180,14 @@ POST /realms/org-b/protocol/openid-connect/token
     toastTitle.textContent = step.title || step.id;
     toastBody.textContent = STEP_EXPLAIN[step.id] || 'See the step card below for the raw request/response.';
 
+    if (step.detail) {
+      toastDetail.textContent = step.detail;
+      toastDetail.hidden = false;
+    } else {
+      toastDetail.textContent = '';
+      toastDetail.hidden = true;
+    }
+
     const facts = extractFacts(step);
     if (facts.length) {
       toastFact.innerHTML = facts.map((f, i) => {
@@ -1214,6 +1232,8 @@ POST /realms/org-b/protocol/openid-connect/token
     toastProgress.textContent = '';
     toastTitle.textContent = 'Cross-domain remediation, step by step';
     toastBody.textContent = INTRO_STORY;
+    toastDetail.textContent = '';
+    toastDetail.hidden = true;
     toastFact.hidden = true;
     toastFact.innerHTML = '';
     toastEl.classList.add('show');
@@ -1456,15 +1476,68 @@ POST /realms/org-b/protocol/openid-connect/token
     return `${base}?uiFind=${encodeURIComponent('step:' + stepId)}`;
   }
 
+  // Clicking a step offers a choice — the explainer toast (same one the
+  // animated run shows) or the step's own span in Jaeger — rather than
+  // always jumping straight to Jaeger.
+  let stepMenuEl = null;
+  function closeStepMenu() {
+    if (stepMenuEl) { stepMenuEl.remove(); stepMenuEl = null; }
+    document.removeEventListener('click', closeStepMenuOnOutsideClick, true);
+    document.removeEventListener('keydown', closeStepMenuOnEscape, true);
+  }
+  function closeStepMenuOnOutsideClick(e) {
+    if (stepMenuEl && !stepMenuEl.contains(e.target)) closeStepMenu();
+  }
+  function closeStepMenuOnEscape(e) {
+    if (e.key === 'Escape') closeStepMenu();
+  }
+
+  function openStepMenu(stepId, x, y) {
+    closeStepMenu();
+    const svgIndex = SVG_STEPS.indexOf(stepId);
+    const step = svgIndex >= 0 ? allSteps[svgIndex] : null;
+    const traceUrl = traceUrlForStep(stepId);
+
+    const menu = document.createElement('div');
+    menu.className = 'step-menu';
+    menu.innerHTML = `
+      <button type="button" data-action="toast" ${step ? '' : 'disabled'}>Show explainer</button>
+      <button type="button" data-action="trace" ${traceUrl ? '' : 'disabled'}>View trace in Jaeger &#8594;</button>
+    `;
+    document.body.appendChild(menu);
+    // Keep the menu on-screen — clamp against the viewport, not just the click point.
+    const menuW = menu.offsetWidth, menuH = menu.offsetHeight;
+    menu.style.left = `${Math.min(x, window.innerWidth - menuW - 8)}px`;
+    menu.style.top = `${Math.min(y, window.innerHeight - menuH - 8)}px`;
+    stepMenuEl = menu;
+
+    menu.querySelector('[data-action="toast"]').addEventListener('click', () => {
+      closeStepMenu();
+      if (!step) return;
+      activeStepId = stepId;
+      updateDiagram();
+      showToast(step, svgIndex, allSteps.length);
+    });
+    menu.querySelector('[data-action="trace"]').addEventListener('click', () => {
+      closeStepMenu();
+      if (traceUrl) window.open(traceUrl, '_blank', 'noopener');
+    });
+
+    // Deferred so the click that opened the menu doesn't immediately close it.
+    setTimeout(() => {
+      document.addEventListener('click', closeStepMenuOnOutsideClick, true);
+      document.addEventListener('keydown', closeStepMenuOnEscape, true);
+    }, 0);
+  }
+
   document.getElementById('seqSvg').addEventListener('click', (e) => {
     const g = e.target.closest('.g[data-step]');
     if (!g) return;
-    const url = traceUrlForStep(g.dataset.step);
-    if (!url) {
-      setStatus('Run the demo, then click a step to view its trace in Jaeger.');
+    if (!allSteps.length) {
+      setStatus('Run the demo, then click a step for its explainer or Jaeger trace.');
       return;
     }
-    window.open(url, '_blank', 'noopener');
+    openStepMenu(g.dataset.step, e.clientX, e.clientY);
   });
 
   // Each step group only draws thin lines/text with no fill, so by default
@@ -1483,7 +1556,7 @@ POST /realms/org-b/protocol/openid-connect/token
     g.insertBefore(rect, g.firstChild);
 
     const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-    title.textContent = "Click to view this step's trace in Jaeger";
+    title.textContent = 'Click to show the explainer or view this step\'s trace in Jaeger';
     g.appendChild(title);
   });
 
