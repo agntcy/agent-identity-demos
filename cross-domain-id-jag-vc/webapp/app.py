@@ -22,6 +22,7 @@ GET  /api/health        — liveness probe
 GET  /api/config        — all service URLs / client IDs (informational)
 POST /api/run           — proxy to opencode-agent's /api/run
 GET  /api/plan-stream   — live SSE relay of opencode-agent's /api/plan-stream
+GET  /api/vault-keys    — read-only Transit key metadata (no key material)
 """
 
 from __future__ import annotations
@@ -137,6 +138,54 @@ async def plan_stream():
 
     return StreamingResponse(relay(), media_type="text/event-stream",
                               headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ── /api/vault-keys — read-only Transit engine visualization ──────────────────
+# Transit never exposes private key material via any API call — signing
+# happens inside Vault (see vault.py's vault_sign_rs256) and only a signature
+# ever comes back out. So there is nothing secret in this response: it shows
+# exactly what "the private key never leaves Vault" means operationally.
+
+@app.get("/api/vault-keys")
+async def vault_keys() -> JSONResponse:
+    async with httpx.AsyncClient(timeout=5) as client:
+        try:
+            r = await client.get(
+                f"{VAULT_CFG.vault_addr}/v1/transit/keys",
+                params={"list": "true"},
+                headers={"X-Vault-Token": VAULT_CFG.vault_token},
+            )
+            r.raise_for_status()
+            names = r.json().get("data", {}).get("keys", [])
+        except Exception as exc:  # noqa: BLE001
+            return JSONResponse({"reachable": False, "vault_addr": VAULT_CFG.vault_addr,
+                                  "error": str(exc)[:200], "keys": []})
+
+        keys = []
+        for name in names:
+            try:
+                kr = await client.get(
+                    f"{VAULT_CFG.vault_addr}/v1/transit/keys/{name}",
+                    headers={"X-Vault-Token": VAULT_CFG.vault_token},
+                )
+                kr.raise_for_status()
+            except Exception:  # noqa: BLE001
+                continue
+            d = kr.json().get("data", {})
+            versions = d.get("keys", {})
+            latest = str(d.get("latest_version", ""))
+            keys.append({
+                "name": name,
+                "type": d.get("type"),
+                "latest_version": d.get("latest_version"),
+                "version_count": len(versions),
+                "created": versions.get(latest, {}).get("creation_time"),
+                "exportable": d.get("exportable"),
+                "deletion_allowed": d.get("deletion_allowed"),
+                "supports_signing": d.get("supports_signing"),
+            })
+
+    return JSONResponse({"reachable": True, "vault_addr": VAULT_CFG.vault_addr, "keys": keys})
 
 
 # ── Utility endpoints ─────────────────────────────────────────────────────────

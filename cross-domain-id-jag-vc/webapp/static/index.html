@@ -242,6 +242,10 @@
       <summary>Service config</summary>
       <div class="config" id="config"><div><i>Loading config…</i></div></div>
     </details>
+    <details class="config-wrap">
+      <summary>Vault (Transit signing keys)</summary>
+      <div class="config" id="vaultKeys"><div><i>Loading…</i></div></div>
+    </details>
     <div class="status-bar" id="legend" style="margin-top:-8px"></div>
     <div class="status-bar" id="status"></div>
     <pre class="live-plan" id="livePlan" hidden></pre>
@@ -929,6 +933,36 @@ POST /realms/org-b/protocol/openid-connect/token
     }
   }
 
+  // ── Vault Transit keys ───────────────────────────────────────────────────
+  // Read-only view of Vault's Transit engine metadata (never key material —
+  // Transit has no API that returns a private key; every proof JWT is signed
+  // in-place via /transit/sign, so this panel shows exactly what "the
+  // private key never leaves Vault" means operationally).
+  async function loadVaultKeys() {
+    const el = document.getElementById('vaultKeys');
+    try {
+      const v = await (await fetch('/api/vault-keys')).json();
+      if (!v.reachable) {
+        el.innerHTML = `<div style="color:var(--err)">Vault unreachable at ${esc(v.vault_addr)}${v.error ? ': ' + esc(v.error) : ''}</div>`;
+        return;
+      }
+      if (!v.keys.length) {
+        el.innerHTML = '<div><i>No Transit keys found.</i></div>';
+        return;
+      }
+      el.innerHTML = v.keys.map(k => `
+        <div><b>${esc(k.name)}</b> — ${esc(k.type)}, v${esc(k.latest_version)}
+          (${k.version_count} version${k.version_count === 1 ? '' : 's'}), created ${esc(k.created)}
+          &middot; signing: ${k.supports_signing ? 'yes' : 'no'}
+          &middot; exportable: ${k.exportable ? 'yes' : 'no'}
+          &middot; deletion allowed: ${k.deletion_allowed ? 'yes' : 'no'}
+        </div>`).join('') +
+        `<div style="margin-top:6px"><i>Vault: ${esc(v.vault_addr)} — private key material never leaves Vault; only signatures come back out.</i></div>`;
+    } catch(e) {
+      el.innerHTML = '<div style="color:var(--err)">Could not reach /api/vault-keys.</div>';
+    }
+  }
+
   // "Access these services" legend — direct links to the real services
   // behind this demo, for anyone who wants to click around themselves
   // instead of just watching the animated run. Each entry only appears if
@@ -1609,6 +1643,7 @@ POST /realms/org-b/protocol/openid-connect/token
 
   // ── Init ───────────────────────────────────────────────────────────────────
   loadConfig();
+  loadVaultKeys();
   updateButtons();
 </script>
 </body>
