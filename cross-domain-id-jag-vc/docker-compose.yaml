@@ -327,7 +327,7 @@ services:
   # ---------------------------------------------------------------------------
   gitea-gateway:
     build:
-      context: ../archive/single-org-id-jag-app-access/gitea-gateway
+      context: ./gitea-gateway
     image: cd-gitea-gateway
     container_name: cd-gitea-gateway
     depends_on:

@@ -1133,9 +1133,10 @@ POST /realms/org-b/protocol/openid-connect/token
   }
 
   // ── Story overview (shown once, before the animated run starts) ───────────
-  const INTRO_STORY = "Sarah (Org A) identifies a CVE in a repository she cannot access directly — " +
-    "it belongs to Org B. Her AI agent, OpenCode (a real, non-mocked agent), crosses that trust " +
-    "boundary on her behalf, following three design principles. Identity ≠ Execution: Sarah's " +
+  const INTRO_STORY = "Sarah (Org A) asks OpenCode to fix a security weakness in a repository she " +
+    "cannot access directly — it belongs to Org B. OpenCode (a real, non-mocked agent) crosses that " +
+    "trust boundary on her behalf to read the actual source and find the weakness itself, " +
+    "following three design principles. Identity ≠ Execution: Sarah's " +
     "`sub` claim and the agent's `act` claim remain distinct at every hop and are never collapsed " +
     "into a single identity. Independent Trust Domains: Org A and Org B each validate signatures " +
     "against their own JWKS and evaluate policy independently, with no shared IdP. Complete " +
