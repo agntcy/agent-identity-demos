@@ -17,6 +17,10 @@ The most complete demo. Shows a full cross-domain agent delegation scenario:
 - Every agent publishes a real W3C Verifiable Credential (Vault-signed, registered at the Identity Node), and each side of a handoff resolves and checks the other's before trusting it
 - Every step is audited via the **AGNTCY Directory Node** (OASF records) and identities are minted/resolved through the **AGNTCY Identity Node** with Vault-backed cryptographic proof
 
+<video src="./cross-domain-id-jag-vc/docs/demo.mp4" controls muted width="100%"></video>
+
+[Watch the full walkthrough](./cross-domain-id-jag-vc/docs/demo.mp4) if the embed above doesn't render.
+
 23 services total. The whole identity/authorization/audit path is real
 (Keycloak, Vault, identity-node, Gitea, Directory, and two Built On Envoy
 inline OPA boundaries) — the only optional mock is the remediation LLM call
