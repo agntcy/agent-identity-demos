@@ -10,46 +10,20 @@ Each demo is self-contained Docker Compose stack that you can run locally.
 
 The most complete demo. Shows a full cross-domain agent delegation scenario:
 
-- **Sarah** (Org A engineer) asks her AI agent **OpenCode** to fix a CVE in a repo owned by **Org B**
-- OpenCode can't act in Org B directly — it asserts Sarah's delegation cross-domain using ID-JAG
+- **Sarah** (Org A engineer) asks her AI agent **OpenCode** to fix a security weakness in a repo owned by **Org B**
+- OpenCode reads the real source through the delegation chain, under its own read-scoped assertion, before analyzing it
+- OpenCode can't act in Org B directly — it asserts Sarah's delegation cross-domain using a natively-minted ID-JAG (Keycloak's own token-exchange grant, no separate mock issuer)
 - Org B's **Triage** agent narrows the privilege further and spawns a bounded **Sub-Agent** to open the PR
+- Every agent publishes a real W3C Verifiable Credential (Vault-signed, registered at the Identity Node), and each side of a handoff resolves and checks the other's before trusting it
 - Every step is audited via the **AGNTCY Directory Node** (OASF records) and identities are minted/resolved through the **AGNTCY Identity Node** with Vault-backed cryptographic proof
 
-21 services total. Most steps are real (Keycloak, Vault, identity-node, Gitea,
-and two Built On Envoy inline OPA boundaries); only the CVE scan and Org A
-token exchange are intentionally mocked.
+23 services total. The whole identity/authorization/audit path is real
+(Keycloak, Vault, identity-node, Gitea, Directory, and two Built On Envoy
+inline OPA boundaries) — the only optional mock is the remediation LLM call
+itself, toggleable to a fast, clearly-labeled stand-in when a model backend
+isn't available.
 
 → [Full walkthrough and quick start](./cross-domain-id-jag-vc/README.md)
-
----
-
-### [`archive/single-org-id-jag-app-access`](./archive/single-org-id-jag-app-access)
-
-The original CNCF conference demo (archived). Shows ID-JAG cross-app access within a single org:
-
-- A **Requesting App** obtains a narrow-scoped token on behalf of a signed-in user via ID-JAG
-- A **Gitea Gateway** enforces the narrow scope (`gitea:read` / `gitea:write`) before proxying to Gitea
-- The animated web UI walks through each hop step by step
-
-Still referenced by `cross-domain-id-jag-vc` (shares the `idjag-issuer` and `gitea-gateway` builds). Superseded for new work by the two-org scenario above.
-
-→ [Full walkthrough and quick start](./archive/single-org-id-jag-app-access/README.md)
-
----
-
-### [`cncf-demo`](./cncf-demo) _(placeholder)_
-
-Upcoming CNCF conference demo stack. Will cover Envoy + `ext_authz` task-based authorization with the AGNTCY Identity Service.
-
-→ [Planned contents and related issues](./cncf-demo/README.md)
-
----
-
-### [`xaa-multi-enterprise`](./xaa-multi-enterprise) _(placeholder)_
-
-Upcoming cross-enterprise (XAA) multi-enterprise demo. Will show agent identity and authorization across multiple enterprises.
-
-→ [Planned contents and related issues](./xaa-multi-enterprise/README.md)
 
 ---
 

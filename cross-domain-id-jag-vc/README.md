@@ -1,12 +1,18 @@
 # Cross-Domain AI Agent Remediation Demo (ID-JAG + VC)
 
 A cross-domain agent delegation scenario: **Sarah** (an engineer at **Org A**)
-asks **OpenCode** (her Org A AI agent) to fix a CVE found in a repo owned by
-**Org B**. Org B has its own Keycloak realm and access control, so OpenCode
-can't act there directly — it asserts Sarah's delegation cross-domain using
-**ID-JAG** (Identity Assertion JWT Authorization Grant), then Triage further
-delegates a *narrowed* privilege to a bounded Sub-Agent that actually opens
-the pull request.
+asks **OpenCode** (her Org A AI agent) to fix a security weakness in a repo
+owned by **Org B**. OpenCode reads the real source through the delegation
+chain, under its own read-scoped assertion, and reports what it actually
+finds — a CWE, not a hardcoded CVE. Org B has its own Keycloak realm and
+access control, so OpenCode can't act there directly — it asserts Sarah's
+delegation cross-domain using **ID-JAG** (Identity Assertion JWT
+Authorization Grant), then Triage further delegates a *narrowed* privilege to
+a bounded Sub-Agent that actually opens the pull request.
+
+<video src="./docs/demo.mp4" controls muted width="100%"></video>
+
+[Watch the full walkthrough](./docs/demo.mp4) if the embed above doesn't render.
 
 OpenCode is the **real open-source OpenCode agent** ([opencode.ai](https://opencode.ai),
 pinned `opencode-ai@1.18.7`) running headless in the `opencode-server`
@@ -238,7 +244,7 @@ flowchart TB
 | `agent-dir-init` | built from `./agent-dir-init` | _(one-shot)_ | Pushes static OASF records for all 3 demo agents |
 | `gitea` | `gitea/gitea:1.22` | `3002` (HTTP), `2223` (SSH) | Protected resource (repo server) |
 | `gitea-init` | `gitea/gitea:1.22` | _(one-shot)_ | Seeds the Gitea admin + demo repo |
-| `gitea-gateway` | built from `../archive/single-org-id-jag-app-access/gitea-gateway` | _(internal only)_ | Requires Envoy policy metadata, then rechecks token scope before using Gitea admin credentials |
+| `gitea-gateway` | built from `./gitea-gateway` | _(internal only)_ | Requires Envoy policy metadata, then rechecks token scope before using Gitea admin credentials |
 | `envoy-org-a` | built from `./envoy-org-a` (Envoy + Built On Envoy Composer) | `12000`; admin `127.0.0.1:9902` | Org A gateway; badge-scope PDP (KC-A JWT) + egress JWT + inline OPA policies |
 | `envoy-org-b` | built from `./envoy` (Envoy + Built On Envoy Composer) | `10000`, `10001`; admin `127.0.0.1:9901` | Org B gateway; separate ticket-ingress and resource-access JWT + inline OPA policies |
 | `opencode-server` | built from `./opencode-server` | _(internal `:4096`)_ | **Real OpenCode agent** (opencode-ai@1.18.7, headless; Ollama/Anthropic provider) |
@@ -714,13 +720,7 @@ service exposure. Run it from the repository root with Docker, Docker Compose,
           /policies/resource-access_test.rego -v
 
    docker run --rm -e PYTHONDONTWRITEBYTECODE=1 \
-     -v "$PWD/archive/single-org-id-jag-app-access/gitea-gateway:/src" \
-     -w /src python:3.12-slim sh -c \
-     'pip install -q -r requirements-dev.txt &&
-      pytest -q -p no:cacheprovider'
-
-   docker run --rm -e PYTHONDONTWRITEBYTECODE=1 \
-     -v "$PWD/archive/single-org-id-jag-app-access/idjag-issuer:/src" \
+     -v "$PWD/cross-domain-id-jag-vc/gitea-gateway:/src" \
      -w /src python:3.12-slim sh -c \
      'pip install -q -r requirements-dev.txt &&
       pytest -q -p no:cacheprovider'
@@ -931,17 +931,12 @@ imports cleanly.
 
    ```bash
    docker run --rm -e PYTHONDONTWRITEBYTECODE=1 \
-     -v "$PWD/../archive/single-org-id-jag-app-access/idjag-issuer:/src" \
-     -w /src python:3.12-slim sh -c \
-     'pip install -q -r requirements-dev.txt && pytest -q -p no:cacheprovider'
-
-   docker run --rm -e PYTHONDONTWRITEBYTECODE=1 \
-     -v "$PWD/../archive/single-org-id-jag-app-access/gitea-gateway:/src" \
+     -v "$PWD/gitea-gateway:/src" \
      -w /src python:3.12-slim sh -c \
      'pip install -q -r requirements-dev.txt && pytest -q -p no:cacheprovider'
    ```
 
-   Expected: 10/10 and 15/15 pass (same counts as before this PR). You'll see
+   Expected: 15/15 pass (same count as before this PR). You'll see
    `Transient error ... exporting traces to jaeger:4317` warnings in the
    output — expected, since these unit tests run standalone without Jaeger
    reachable; they don't affect the test results.
@@ -1559,12 +1554,10 @@ omit either and you'll get an opaque failure with no useful error message.
   real OASF taxonomy entries (e.g. `software_engineering/code_quality/code_review`),
   not made-up strings.
 - **Repeat `/api/run` calls fail at push-file/open-pr with "branch already
-  exists"** — `gitea-gateway` (shared with the archived `single-org-id-jag-app-access`
-  demo) now randomizes the branch name per push; if you're on an older image,
-  rebuild it (`docker compose build gitea-gateway`).
-- **Port already in use** — this stack's default ports are chosen to avoid
-  colliding with `single-org-id-jag-app-access`'s defaults; if something else
-  on your machine still collides, override the `*_PORT` variables in `.env`.
+  exists"** — `gitea-gateway` now randomizes the branch name per push; if
+  you're on an older image, rebuild it (`docker compose build gitea-gateway`).
+- **Port already in use** — override the `*_PORT` variables in `.env` if
+  something else on your machine collides with this stack's defaults.
 
 ## Repo layout
 
