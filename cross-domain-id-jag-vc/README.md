@@ -10,9 +10,9 @@ delegation cross-domain using **ID-JAG** (Identity Assertion JWT
 Authorization Grant), then Triage further delegates a *narrowed* privilege to
 a bounded Sub-Agent that actually opens the pull request.
 
-<video src="./docs/demo.mp4" controls muted width="100%"></video>
+[![Demo walkthrough](https://gist.githubusercontent.com/sriaradhyula/24f325e4a51ed74d682692cefcd8eff2/raw/demo.gif)](./docs/demo.mp4)
 
-[Watch the full walkthrough](./docs/demo.mp4) if the embed above doesn't render.
+Click the GIF above for the full-quality video.
 
 OpenCode is the **real open-source OpenCode agent** ([opencode.ai](https://opencode.ai),
 pinned `opencode-ai@1.18.7`) running headless in the `opencode-server`
