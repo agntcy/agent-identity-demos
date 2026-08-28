@@ -6,6 +6,10 @@ Each demo is a self-contained Docker Compose stack that you can run locally.
 
 This wiki is the navigable overview. Operational detail (commands, reviewer checklists, reverse-proxy recipes) stays in the demo README.
 
+## Survey
+
+[Orthogonal dimensions](survey.md) of agent identity and authorization (10-axis framework).
+
 ## Demos
 
 ### Cross-domain ID-JAG + VC

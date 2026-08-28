@@ -43,6 +43,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Survey: survey.md
   - Cross-domain demo:
       - Overview: cross-domain/overview.md
       - Architecture: cross-domain/architecture.md
