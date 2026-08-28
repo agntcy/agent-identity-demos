@@ -43,6 +43,15 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Survey (outline):
+      - Overview: survey/index.md
+      - Methodology: survey/methodology.md
+      - Ten dimensions: survey/dimensions.md
+      - Composition & couplings: survey/composition.md
+      - Related work matrix: survey/related-work.md
+      - Threat model: survey/threats.md
+      - Open problems: survey/open-problems.md
+      - References: survey/references.md
   - Cross-domain demo:
       - Overview: cross-domain/overview.md
       - Architecture: cross-domain/architecture.md

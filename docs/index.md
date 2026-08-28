@@ -6,6 +6,14 @@ Each demo is a self-contained Docker Compose stack that you can run locally.
 
 This wiki is the navigable overview. Operational detail (commands, reviewer checklists, reverse-proxy recipes) stays in the demo README.
 
+## Survey (work in progress)
+
+Orthogonal dimensions of **agent identity and authorization** — a survey paper outline organized for literature review and system comparison.
+
+- [Survey overview](survey/index.md) — abstract, full paper outline (§I–§X)
+- [Methodology](survey/methodology.md) — swap test, 15→10 dimension merge
+- [Ten dimensions](survey/dimensions.md) — definitions, standards, open questions per axis
+
 ## Demos
 
 ### Cross-domain ID-JAG + VC
