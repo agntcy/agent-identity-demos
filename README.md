@@ -2,6 +2,8 @@
 
 Runnable demos for [AGNTCY Identity](https://github.com/agntcy/identity-service) — covering agent authentication, delegation, verifiable credentials, and cross-domain authorization using [ID-JAG](https://www.keycloak.org/securing-apps/identity-assertion-jwt-authorization-grant) and the AGNTCY Identity Node (CIMD).
 
+**Wiki:** [agntcy.github.io/agent-identity-demos](https://agntcy.github.io/agent-identity-demos/) ([source](./docs/index.md))
+
 Each demo is self-contained Docker Compose stack that you can run locally.
 
 ## Demos

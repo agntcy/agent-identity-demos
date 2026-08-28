@@ -1,0 +1,54 @@
+site_name: Agent Identity Demos
+site_description: Wiki for AGNTCY agent identity demos — authentication, delegation, verifiable credentials, and cross-domain authorization.
+site_url: https://agntcy.github.io/agent-identity-demos/
+repo_url: https://github.com/agntcy/agent-identity-demos
+repo_name: agntcy/agent-identity-demos
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.sections
+    - navigation.expand
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: index.md
+  - Cross-domain demo:
+      - Overview: cross-domain/overview.md
+      - Architecture: cross-domain/architecture.md
+      - Credentials vs assertions: cross-domain/credentials.md
+      - Sequence: cross-domain/sequence.md
+      - Quick start: cross-domain/quick-start.md
+      - Identity (CIMD): cross-domain/identity.md
+  - Related:
+      - A2A auth framework: related/a2a-auth-framework.md
