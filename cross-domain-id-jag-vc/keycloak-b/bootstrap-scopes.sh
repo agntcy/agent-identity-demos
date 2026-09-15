@@ -69,8 +69,8 @@ assign_optional "sub-agent" "gitea:read"
 assign_optional "sub-agent" "gitea:write"
 assign_optional "sub-agent" "gitea:pr"
 
-# opencode-agent (Org A) may only ever read source here — no write, no PR, no
-# triage:create. Reading Org B's code is itself a delegated cross-domain act.
-assign_optional "opencode-agent" "gitea:read"
+# The Security Autonomous Agent may only read source here — no write, no PR,
+# no triage:create. OpenCode is merely its internal analysis tool.
+assign_optional "security-autonomous-agent" "gitea:read"
 
 echo "[kc-b-init] done."

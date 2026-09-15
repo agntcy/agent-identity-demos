@@ -16,12 +16,13 @@ import org.keycloak.models.ClientModel;
  * Python — Keycloak has no built-in concept of "this client may vouch for
  * that subject to a different realm." The check here is deliberately
  * narrow: it only covers the OpenCode -> Org B initial ID-JAG mint (the gap
- * the Slack discussion / Discussion #18 was actually about — Sarah's
- * delegation crossing from Org A to Org B for the first time).
+ * the Slack discussion / Discussion #18 was actually about — the Security
+ * Autonomous Agent's delegation crossing from Org A to Org B for the first
+ * time).
  *
  * Triage-agent's narrowed sub-badge minting (Org B re-delegating a further,
  * narrower scope to Sub-Agent) is a different trust shape: triage-agent
- * never holds Sarah's original Keycloak A access token (it's an Org B
+ * never holds the Security Autonomous Agent's original Keycloak A access token (it's an Org B
  * service, it only ever sees the already-issued ID-JAG assertion and its
  * own Keycloak B access token), so it cannot authenticate a live
  * subject_token the way this provider requires. Migrating that path would

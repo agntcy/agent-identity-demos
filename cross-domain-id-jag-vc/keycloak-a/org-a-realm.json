@@ -8,52 +8,36 @@
   "identityProviders": [],
   "clients": [
     {
-      "clientId": "opencode-agent",
-      "name": "OpenCode Agent (Org A)",
-      "description": "Org A AI coding agent. Authenticates Sarah, initiates cross-domain remediation via ID-JAG.",
+      "clientId": "security-autonomous-agent",
+      "name": "Security Autonomous Agent (Org A)",
+      "description": "Autonomous Org A security remediation agent. Authenticates with client credentials, uses OpenCode internally, and delegates bounded work to Org B.",
       "enabled": true,
       "publicClient": false,
-      "secret": "demo-opencode-secret-change-me",
+      "secret": "demo-security-autonomous-secret-change-me",
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": true,
+      "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": true,
-      "redirectUris": [
-        "*"
-      ],
-      "webOrigins": [
-        "+"
+      "protocolMappers": [
+        {
+          "name": "Security Autonomous Agent token-exchange audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "security-autonomous-agent",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "lightweight.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
       ],
       "attributes": {
         "standard.token.exchange.enabled": "true",
-        "post.logout.redirect.uris": "+",
         "idjag.allowed.scopes": "openid triage:create gitea:read",
         "idjag.allowed.audiences": "http://keycloak-b:8080/keycloak-b/realms/org-b",
         "agent.credential.jwks.url": "http://identity-node:4000/v1alpha1/issuer/org-a/.well-known/jwks.json"
       }
-    }
-  ],
-  "users": [
-    {
-      "username": "sarah",
-      "email": "sarah@org-a.example",
-      "firstName": "Sarah",
-      "lastName": "Org-A",
-      "enabled": true,
-      "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "demo-sarah-password-change-me",
-          "temporary": false
-        }
-      ],
-      "federatedIdentities": [
-        {
-          "identityProvider": "id-jag",
-          "userId": "sarah@org-a.example",
-          "userName": "sarah"
-        }
-      ]
     }
   ]
 }

@@ -1,12 +1,11 @@
 # Cross-Domain AI Agent Remediation Demo (ID-JAG + VC)
 
-A cross-domain agent delegation scenario: **Sarah** (an engineer at **Org A**)
-asks **OpenCode** (her Org A AI agent) to fix a security weakness in a repo
-owned by **Org B**. OpenCode reads the real source through the delegation
-chain, under its own read-scoped assertion, and reports what it actually
-finds — a CWE, not a hardcoded CVE. Org B has its own Keycloak realm and
-access control, so OpenCode can't act there directly — it asserts Sarah's
-delegation cross-domain using **ID-JAG** (Identity Assertion JWT
+A cross-domain agent delegation scenario: the **Security Autonomous Agent** in
+**Org A** uses **OpenCode as an internal planning engine** to fix a security
+weakness in a repo owned by **Org B**. The agent reads the real source through
+the delegation chain, under its own read-scoped assertion, and reports what it
+actually finds — a CWE, not a hardcoded CVE. Org B has its own Keycloak realm
+and access control, so the agent cannot act there directly — it uses **ID-JAG** (Identity Assertion JWT
 Authorization Grant), then Triage further delegates a *narrowed* privilege to
 a bounded Sub-Agent that actually opens the pull request.
 
@@ -14,15 +13,16 @@ a bounded Sub-Agent that actually opens the pull request.
 
 Click the GIF above for the full-quality video.
 
-OpenCode is the **real open-source OpenCode agent** ([opencode.ai](https://opencode.ai),
-pinned `opencode-ai@1.18.7`) running headless in the `opencode-server`
-container, driven by an **identity harness** (`opencode-agent`, port 8100)
-that executes the task lifecycle Sarah delegates:
+OpenCode ([opencode.ai](https://opencode.ai), pinned `opencode-ai@1.18.7`) runs
+headless in `opencode-server` as an internal tool. It has no Agent Card, OAuth
+principal, CIMD identity, or place in the delegation chain. The Security
+Autonomous Agent owns the A2A endpoint, identity, credentials, and lifecycle:
 
-> **OAuth → register own identity (CIMD) → policy-scoped badge → work → delegate cross-domain**
+> **A2A task → OAuth → CIMD + Agent Badge VC → secondary Organization VC → holder-signed VP verification → internal OpenCode analysis → Directory discovery → ID-JAG delegation**
 
-Before any task work runs, the harness presents Sarah's delegated access
-token to **Envoy A + inline OPA** (`/api/badge-scope-check`), which verifies
+The Security Autonomous Agent obtains its own client-credentials token and
+presents it to **Envoy A + inline OPA**
+(`/api/badge-scope-check`), which verifies
 the token against Keycloak A's JWKS and answers with a **scoped-down intent**
 (e.g. `scan-remediate:demo-admin/payments-service`); only then is the VC
 badge minted — bound to that one task — and only then does the agent work.
@@ -40,18 +40,23 @@ It also wires in two AGNTCY components for real:
   resolved through identity-node's actual cryptographic proof-of-ownership
   flow, not a mock.
 
-## Two artifacts, both historically called "badge"
+All three runtime agents expose A2A 1.0 Agent Cards at
+`/.well-known/agent-card.json` and JSON-RPC endpoints at `/a2a`. The live path
+is Security Autonomous Agent → Triage → Remediation Agent. OpenCode is an
+internal API call and does not appear as an A2A hop; REST routes
+remain adapters for diagnostics and backwards compatibility.
+
+## Four security artifacts
 
 The demo moves two different signed objects around, and it is worth separating
 them before reading anything below:
 
-| | **Credential** (agent badge) | **Assertion** (ID-JAG) |
-|---|---|---|
-| Header | `typ=JOSE`, type `AgentBadge` | `typ=oauth-id-jag+jwt` |
-| Signed by | the org's Vault trust-authority key | Keycloak A or B (`keycloak-idjag-spi`) |
-| Registered where | published to the Identity Node, resolvable at `/v1alpha1/vc/{id}/.well-known/vcs.json` | not registered — it is a bearer token |
-| Lifetime | ~1 hour, one live credential per identity | ~5 minutes, minted per task |
-| Answers | *what is this agent, and what may it do or delegate?* | *is this particular request authorised?* |
+| Artifact | Signed by | Purpose | Stored? |
+|---|---|---|---|
+| **Agent Badge VC** | Org Identity Service / Vault trust-authority key | Binds CIMD agent identity, `operatedBy`, capability, and the canonical OASF description | Published to the Identity Node |
+| **Organization VC** | Independent secondary enterprise issuer | Attests the operating organization without D-U-N-S-specific fields | Issued for presentation; not stored in Directory |
+| **Verifiable Presentation** | Presenting agent's CIMD-resolved key | Presents exactly both VCs with verifier nonce, audience, holder, and expiry | Short-lived exchange artifact |
+| **ID-JAG** | Keycloak A or B (`keycloak-idjag-spi`) | Authorizes one narrowed runtime request and carries the delegation chain | Never stored in Directory |
 
 **The credential describes standing capability; the assertion authorises a
 request.** Policy enforcement (Envoy + OPA at all four boundaries) acts on the
@@ -62,21 +67,65 @@ Where a name says "sub-badge" it means an **assertion** — Triage's narrowed
 ID-JAG for the Sub-Agent — not a credential. Step ids still carry the older
 "badge" wording in places; the type in the JWT header is always authoritative.
 
+## Directory description vs. Agent Badge
+
+The Directory and Identity Node now share one canonical description without
+turning the Directory record into a credential:
+
+```text
+OASF agent definition = description
+Agent Badge           = signed proof about that description
+Directory record      = searchable/catalogued copy + discovery metadata
+```
+
+`agntcy_identity_client.directory` owns the canonical OASF definitions. The
+Directory bootstrap pushes those records with `record_type=agent` in
+`annotations`, alongside the CIMD identity ID and Agent Badge URL. Each agent
+badge embeds the exact same record in `credentialSubject.badge` and includes a
+SHA-256 `relatedResource` digest over its canonical JSON. A verifier can
+compare a Directory result with the signed badge, but Directory search alone
+does not grant capability.
+
+Runtime records pushed after a task are marked `record_type=audit`. Discovery
+uses an agent-only search helper, so audit history cannot be mistaken for the
+agent's standing description. ID-JAGs remain short-lived request authorizations
+and are never stored in the Directory.
+
+The implemented discovery flow is:
+
+1. Search the Directory by agent name.
+2. Read the OASF skills, domains, locator, identity ID, and badge URL.
+3. Resolve the identity through the Identity Node.
+4. Fetch and verify the Agent Badge from the Identity Node.
+5. Compare `credentialSubject.badge` and its digest with the Directory record.
+6. Use a separate ID-JAG for the authorized request.
+
+Before step 6, the live flow also obtains a verifier challenge, requests the
+independent Organization VC, assembles a VP containing exactly the Agent Badge
+VC and Organization VC, and signs the VP as the CIMD holder. The verifier
+checks both issuer signatures and validity windows, holder control, nonce and
+audience, `AgentBadge.credentialSubject.operatedBy ==
+OrganizationCredential.credentialSubject.id`, issuer-to-enterprise policy,
+and the OASF Directory payload/digest binding. The VP is evidence; the
+configured issuer, resolver, and enterprise policy are the trust anchors.
+
 ## What's real vs. mocked
 
 | Step(s) | What | Real or mocked |
 |---|---|---|
-| 1 | Sarah's OIDC login at Keycloak A | **Real** |
+| 1 | Security Autonomous Agent's client-credentials grant at Keycloak A | **Real** |
+| — | A2A Agent Card discovery and JSON-RPC `SendMessage` / Task transport across all agent hops | **Real** |
 | 2 | Code scan — OpenCode analyses source fetched from the Org B repo | **Real** agent analysis of real source; reports a CWE (falls back to the known fixture finding when no model is reachable) |
 | — | Read chain: read-scoped ID-JAG mint → Org A egress PDP → Keycloak B redemption → source fetch through Envoy B | **Real** — a second, narrower assertion (`gitea:read`, repo-bound) minted and enforced end to end |
 | — | OpenCode remediation plan (headless `opencode-server`, Ollama/Anthropic) | **Real** agent + LLM call (`skipped` without a provider) |
-| — | Badge-scope PDP at Envoy A — verify Sarah's KC-A token, return task-scoped badge intent | **Real** JWT verification + inline OPA |
+| — | Badge-scope PDP at Envoy A — verify the autonomous agent's KC-A token, return task-scoped badge intent | **Real** JWT verification + inline OPA |
 | 3–4 | AGNTCY Directory push + search (gRPC) | **Real** |
 | 5–6 | CIMD generate/resolve id (Vault-signed proof JWT → identity-node) + agent badge issued as a **W3C Verifiable Credential**: built by the agent, signed with the org's Vault trust-authority key, published to identity-node's VC API and verified by it | **Real** |
+| — | Independent Organization VC issuance, two-VC VP assembly, CIMD-holder signature, challenge/audience checks, and deployed verifier binding policy | **Real** |
 | — | Every agent (OpenCode, Triage, Sub-Agent) publishes its own credential; each side of a handoff resolves the other's and requires it to agree with the assertion presented | **Real** |
 | 7 | RFC 8693 token exchange at Keycloak A | **Real** call; see note below on `act` claims |
 | 8 | ID-JAG mint for Org B triage-agent | **Real** |
-| 9–10 | Org A egress PDP — may Sarah delegate this scope to Org B? | **Real** single-token JWT verification + inline OPA policy |
+| 9–10 | Org A egress PDP — may the Security Autonomous Agent delegate this scope to Org B? | **Real** single-token JWT verification + inline OPA policy |
 | 11 | Keycloak B `jwt-bearer` redemption | **Real** |
 | 12–13 | Envoy ingress, ticket creation, OPA check, plan, sub-badge mint | **Real** two-token JWT verification + inline delegation-aware OPA policy |
 | — | Triage identity lifecycle: in-agent ID-JAG verification (KC-A JWKS), own CIMD identity under the **org-b** trust authority, sub-badge scope PDP at Envoy B, **native KC-B sub-badge mint** (keycloak-idjag-spi) | **Real** |
@@ -106,6 +155,8 @@ Each milestone replaced something simulated with the real thing. In order:
 | **M12** | **Policy-gated code scan**: reading Org B's source is itself a cross-domain act, so it gets its own narrower assertion (`gitea:read`, repo-bound) — minted, egress-checked, redeemed and enforced at Envoy B before OpenCode analyses real source and reports a CWE |
 | **M13** | Badges became **real AGNTCY Verifiable Credentials** — built by the agent, signed with the org's Vault trust-authority key, published to the Identity Node's VC API and verified by it. `vc-issuer` retired |
 | **M14** | **Every agent publishes a credential**, distinguishing what it may do (`caps`) from what it may grant onward (`delegatable`), and each side of a handoff resolves the other's credential and requires it to agree with the assertion presented |
+| **M15** | Added an independent **Organization VC**, a holder-signed VP containing exactly two credentials, and fail-closed verifier checks for issuer trust, nonce/audience, CIMD holder control, `operatedBy`, and Directory OASF/digest equality |
+| **M16** | Converted the runtime agents to **A2A 1.0** Agent Cards, JSON-RPC `SendMessage`, and Tasks; added the client-credentials-backed **Security Autonomous Agent** as the initiating A2A agent |
 
 Every agent in the demo, across both orgs, now holds a real cryptographic
 identity, publishes a resolvable credential, and verifies its inbound
@@ -170,11 +221,10 @@ behaviour.
 
 ```mermaid
 flowchart TB
-    Sarah(("Sarah"))
-
     subgraph OrgA[" Org A "]
+        SAA(("Security Autonomous Agent\nA2A server + client"))
         KCA["Keycloak A\norg-a realm"]
-        OC["OpenCode Agent"]
+        Tool["OpenCode Engine\ninternal tool"]
         EnvoyA["Built On Envoy\ninline OPA — egress"]
     end
 
@@ -182,7 +232,8 @@ flowchart TB
         Dir["Directory Node\ngRPC, OASF records"]
         IdNode["Identity Node\nCIMD"]
         Vault[("Vault\ntransit engine")]
-        VC["VC Badge Issuer"]
+        Secondary["Independent\nOrganization VC issuer"]
+        Verifier["Two-VC VP\nTrust Verifier"]
     end
 
     subgraph OrgB[" Org B "]
@@ -194,23 +245,27 @@ flowchart TB
         Gitea[("Gitea")]
     end
 
-    Sarah -->|"OIDC login"| OC
-    OC -->|"push / search records"| Dir
-    OC -->|"generate / resolve id"| IdNode
+    SAA -.->|"internal planning API"| Tool
+    SAA -->|"push / search records"| Dir
+    SAA -->|"generate / resolve id; publish Agent Badge VC"| IdNode
     IdNode -.->|"proof JWT signing"| Vault
-    OC -->|"issue + verify badge"| VC
-    OC -->|"mint assertion (native, SPI)"| KCA
-    OC -->|"egress check: assertion"| EnvoyA
-    EnvoyA -->|"verify JWT + enforce scope, intent, chain"| OC
-    OC -->|"jwt-bearer exchange"| KCB
-    OC -->|"POST /api/ticket"| Envoy
+    SAA -->|"request Organization VC"| Secondary
+    SAA -->|"present holder-signed VP containing both VCs"| Verifier
+    Verifier -->|"resolve holder + verify Agent Badge"| IdNode
+    Verifier -->|"match signed OASF payload + digest"| Dir
+    Verifier -->|"resolve issuer JWKS"| Secondary
+    SAA -->|"mint assertion (native, SPI)"| KCA
+    SAA -->|"egress check: assertion"| EnvoyA
+    EnvoyA -->|"verify JWT + enforce scope, intent, chain"| SAA
+    SAA -->|"jwt-bearer exchange"| KCB
+    SAA -->|"A2A SendMessage"| Envoy
     Envoy -->|"verify both JWTs + enforce delegation"| Triage
     Triage -->|"verify inbound ID-JAG (JWKS)"| KCA
     Triage -->|"generate / resolve id (org-b)"| IdNode
     Triage -->|"sub-badge scope check"| Envoy
     Triage -->|"mint narrowed sub-badge (native, SPI)"| KCB
     Triage -->|"push turn / discover delegate"| Dir
-    Triage -->|"spawn"| Sub
+    Triage -->|"A2A SendMessage"| Sub
     Sub -->|"verify sub-badge (JWKS), then jwt-bearer exchange"| KCB
     Sub -->|"generate / resolve id (org-b)"| IdNode
     Sub -->|"push turn record"| Dir
@@ -221,16 +276,16 @@ flowchart TB
     classDef orgA fill:#dbe9fe,stroke:#1f6feb,color:#0d1117;
     classDef orgB fill:#dafbe1,stroke:#1a7f37,color:#0d1117;
     classDef shared fill:#f1e4ff,stroke:#8250df,color:#0d1117;
-    class KCA,OC,EnvoyA orgA;
+    class KCA,SAA,Tool,EnvoyA orgA;
     class KCB,Triage,Sub,GW,Gitea orgB;
-    class Dir,IdNode,Vault,VC shared;
+    class Dir,IdNode,Vault,Secondary,Verifier shared;
 ```
 
 23 services on one Docker network (`cd-net`):
 
 | Service | Image | Host port(s) | Purpose |
 |---|---|---|---|
-| `keycloak-a` | built from `./keycloak-a` (`quay.io/keycloak/keycloak:26.7` + `keycloak-idjag-spi`) | `8082` | Org A IdP (`org-a` realm), authenticates Sarah, natively mints ID-JAG assertions via a custom token-exchange SPI |
+| `keycloak-a` | built from `./keycloak-a` (`quay.io/keycloak/keycloak:26.7` + `keycloak-idjag-spi`) | `8082` | Org A IdP (`org-a` realm), authenticates the Security Autonomous Agent with client credentials, and natively mints ID-JAG assertions via a custom token-exchange SPI |
 | `kc-a-init` | `quay.io/keycloak/keycloak:26.7` | _(one-shot)_ | Registers `triage:create` optional scope |
 | `keycloak-b` | built from `./keycloak-b` (`quay.io/keycloak/keycloak:26.7` + `keycloak-idjag-spi`) | `8083` | Org B IdP (`org-b` realm), redeems ID-JAG assertions, natively mints Triage's narrowed sub-badge |
 | `kc-b-init` | `quay.io/keycloak/keycloak:26.7` | _(one-shot)_ | Registers `triage:create`/`gitea:*` optional scopes |
@@ -241,7 +296,7 @@ flowchart TB
 | `dir-postgres` | `postgres:16` | _(internal)_ | Search index DB for the Directory |
 | `dir-zot` | `ghcr.io/project-zot/zot:v2.1.17` | `5556` | OCI registry backing the Directory's content-addressed storage |
 | `dir-apiserver` | `ghcr.io/agntcy/dir-apiserver:v1.6.0` | `8888` | AGNTCY Directory Node (gRPC only) |
-| `agent-dir-init` | built from `./agent-dir-init` | _(one-shot)_ | Pushes static OASF records for all 3 demo agents |
+| `agent-dir-init` | built from `./agent-dir-init` | _(one-shot)_ | Pushes static OASF records for the Security Autonomous Agent and the 3 execution agents |
 | `gitea` | `gitea/gitea:1.22` | `3002` (HTTP), `2223` (SSH) | Protected resource (repo server) |
 | `gitea-init` | `gitea/gitea:1.22` | _(one-shot)_ | Seeds the Gitea admin + demo repo |
 | `gitea-gateway` | built from `./gitea-gateway` | _(internal only)_ | Requires Envoy policy metadata, then rechecks token scope before using Gitea admin credentials |
@@ -266,7 +321,7 @@ the same flow the webapp's UI animates step by step.
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Sarah
+    actor SAA as Security Autonomous Agent
     participant OC as OpenCode (Org A)
     participant KCA as Keycloak A
     participant Dir as AGNTCY Directory
@@ -282,8 +337,8 @@ sequenceDiagram
     participant GW as Gitea Gateway
     participant Gitea
 
-    Sarah->>OC: "Fix the CVE in the Org B repo"
-    OC->>KCA: OIDC password grant
+    SAA->>OC: "Fix the CVE in the Org B repo"
+    OC->>KCA: OAuth client_credentials grant
     KCA-->>OC: access token
 
     Note over OC,IdNode: OpenCode registers its OWN identity — before any work
@@ -294,7 +349,7 @@ sequenceDiagram
     OC->>IdNode: resolve id
     IdNode-->>OC: ResolverMetadata + public key
 
-    OC->>EnvoyA: POST /api/badge-scope-check (Sarah's access token + requested task)
+    OC->>EnvoyA: POST /api/badge-scope-check (Security Autonomous Agent token + requested task)
     Note over EnvoyA: verify KC-A JWT; OPA scopes the task down
     EnvoyA-->>OC: ALLOW + x-agntcy-scoped-intent
 
@@ -326,10 +381,10 @@ sequenceDiagram
     OC->>Dir: search "triage-agent"
     Dir-->>OC: agent record
 
-    OC->>KCA: token-exchange (subject_token=Sarah, actor_token=badge)
+    OC->>KCA: token-exchange (subject_token=Security Autonomous Agent, actor_token=badge)
     Note over KCA: validates subject_token; does not process actor_token<br/>into an act claim (real Keycloak behavior, see README note)
     KCA-->>OC: exchanged access token
-    OC->>KCA: mint assertion (token-exchange, native SPI; sub=Sarah, scope=triage:create, intent=create-pr-fix)
+    OC->>KCA: mint assertion (token-exchange, native SPI; sub=Security Autonomous Agent, scope=triage:create, intent=create-pr-fix)
     KCA-->>OC: signed assertion (RS256)
 
     OC->>EnvoyA: POST /api/egress-check (assertion as Bearer)
@@ -356,7 +411,7 @@ sequenceDiagram
     Triage->>Envoy: POST /api/subbadge-scope-check (may this be narrowed?)
     Envoy-->>Triage: ALLOW + scoped scope/resource
     Triage->>KCB: mint sub-badge natively (token-exchange, requested_token_type=id-jag,<br/>scope/resource = the Envoy B OPA-approved narrowing)
-    KCB-->>Triage: sub-badge (act_chain: Sarah→OpenCode→Triage)
+    KCB-->>Triage: sub-badge (act_chain: Security Autonomous Agent→OpenCode→Triage)
     Triage->>Dir: push Triage turn record (OASF)
     Dir-->>Triage: CID
     Triage->>Dir: search "sub-agent"
@@ -392,7 +447,7 @@ sequenceDiagram
     Dir-->>Sub: CID
     Sub-->>Triage: PR link + denied-attempt result
     Triage-->>OC: ticket complete
-    OC-->>Sarah: PR ready — full act-chain audit trail
+    OC-->>SAA: PR ready — full act-chain audit trail
 ```
 
 ## Quick start
@@ -400,7 +455,8 @@ sequenceDiagram
 ```bash
 cd cross-domain-id-jag-vc
 cp .env.example .env
-# SARAH_PASSWORD / OPENCODE_CLIENT_SECRET / TRIAGE_CLIENT_SECRET /
+# SECURITY_AUTONOMOUS_AGENT_CLIENT_SECRET / OPENCODE_CLIENT_SECRET /
+# TRIAGE_CLIENT_SECRET /
 # SUB_AGENT_CLIENT_SECRET must stay as the .env.example defaults (or be
 # changed to match keycloak-a/org-a-realm.json + keycloak-b/org-b-realm.json)
 # — everything else can be freely changed.
@@ -497,7 +553,7 @@ all-in-one container — no external tracing backend or extra setup needed.
 field, so you can jump straight to a specific run:
 `http://localhost:16686/trace/<trace_id>`.
 
-The webapp's sequence diagram goes one step further: every step (`sarah-login`,
+The webapp's sequence diagram goes one step further: every step (`security-agent-login`,
 `resolve-badge`, `egress-check`, `open-pr`, …) is wrapped server-side in its own
 named span, `step:<id>` (see `tracing.py`'s `step_span()` in `webapp`,
 `triage-agent`, and `sub-agent`). Clicking any step in the diagram after a run
@@ -995,18 +1051,17 @@ Docker, Docker Compose, `curl`, and `jq`.
    (`keycloak-idjag-spi`) and present it straight to the egress listener:
 
    ```bash
-   SARAH_TOKEN="$(curl --silent --show-error -X POST \
+   AUTONOMOUS_TOKEN="$(curl --silent --show-error -X POST \
      http://localhost:8082/realms/org-a/protocol/openid-connect/token \
-     -d grant_type=password -d client_id=opencode-agent \
-     -d client_secret=demo-opencode-secret-change-me \
-     -d username=sarah -d password=demo-sarah-password-change-me \
-     -d 'scope=openid profile email' | jq -r .access_token)"
+     -d grant_type=client_credentials -d client_id=security-autonomous-agent \
+     -d client_secret=demo-security-autonomous-secret-change-me \
+     | jq -r .access_token)"
 
    BAD_ASSERTION="$(curl --silent --show-error -X POST \
      http://localhost:8082/realms/org-a/protocol/openid-connect/token \
      -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
      -d client_id=opencode-agent -d client_secret=demo-opencode-secret-change-me \
-     -d "subject_token=$SARAH_TOKEN" \
+     -d "subject_token=$AUTONOMOUS_TOKEN" \
      -d subject_token_type=urn:ietf:params:oauth:token-type:access_token \
      -d requested_token_type=urn:ietf:params:oauth:token-type:id-jag \
      -d audience=http://keycloak-b:8080/keycloak-b/realms/org-b \
@@ -1070,21 +1125,20 @@ above: `subject_token` is validated, `actor_token` is not.
 
 3. Demonstrate the documented `actor_token` platform behavior directly —
    run the same exchange with a garbage `actor_token` and with none at all,
-   using a real `subject_token` from step 1's Sarah login:
+   using a real `subject_token` from the Security Autonomous Agent's client-credentials grant:
 
    ```bash
-   SARAH_TOKEN="$(curl --silent --show-error -X POST \
+   AUTONOMOUS_TOKEN="$(curl --silent --show-error -X POST \
      http://localhost:8082/realms/org-a/protocol/openid-connect/token \
-     -d grant_type=password -d client_id=opencode-agent \
-     -d client_secret=demo-opencode-secret-change-me \
-     -d username=sarah -d password=demo-sarah-password-change-me \
-     -d 'scope=openid profile email' | jq -r .access_token)"
+     -d grant_type=client_credentials -d client_id=security-autonomous-agent \
+     -d client_secret=demo-security-autonomous-secret-change-me \
+     | jq -r .access_token)"
 
    curl --silent --show-error -o /dev/null -w 'with garbage actor_token: %{http_code}\n' \
      -X POST http://localhost:8082/realms/org-a/protocol/openid-connect/token \
      -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
      -d client_id=opencode-agent -d client_secret=demo-opencode-secret-change-me \
-     -d "subject_token=$SARAH_TOKEN" \
+     -d "subject_token=$AUTONOMOUS_TOKEN" \
      -d subject_token_type=urn:ietf:params:oauth:token-type:access_token \
      -d actor_token=not-a-real-jwt-at-all \
      -d actor_token_type=urn:ietf:params:oauth:token-type:jwt
@@ -1093,7 +1147,7 @@ above: `subject_token` is validated, `actor_token` is not.
      -X POST http://localhost:8082/realms/org-a/protocol/openid-connect/token \
      -d grant_type=urn:ietf:params:oauth:grant-type:token-exchange \
      -d client_id=opencode-agent -d client_secret=demo-opencode-secret-change-me \
-     -d "subject_token=$SARAH_TOKEN" \
+     -d "subject_token=$AUTONOMOUS_TOKEN" \
      -d subject_token_type=urn:ietf:params:oauth:token-type:access_token
    ```
 
@@ -1137,7 +1191,7 @@ enforcement point (policy-scoped badge BEFORE any task work).
    rm "$RUN_OUTPUT"
    ```
 
-   Expected: `ok=true`; step order starts `sarah-login, cimd-generate-id,
+   Expected: `ok=true`; step order starts `security-agent-login, cimd-generate-id,
    cimd-resolve-id, badge-scope-check, resolve-badge, scan, opencode-plan, …`
    (identity and policy-scoped badge BEFORE any work);
    `badge_scope.scoped_intent` and `badge_intent` both equal
@@ -1145,18 +1199,17 @@ enforcement point (policy-scoped badge BEFORE any task work).
    running, `skipped` without.
 
 4. Prove the badge-scope PDP denies out-of-policy badge requests — a valid
-   Sarah token asking for a repo outside the org-a allowlist:
+   Security Autonomous Agent token asking for a repo outside the org-a allowlist:
 
    ```bash
-   SARAH_TOKEN="$(curl -s -X POST \
+   AUTONOMOUS_TOKEN="$(curl -s -X POST \
      http://localhost:8082/realms/org-a/protocol/openid-connect/token \
-     -d grant_type=password -d client_id=opencode-agent \
-     -d client_secret=demo-opencode-secret-change-me \
-     -d username=sarah -d password=demo-sarah-password-change-me \
-     -d 'scope=openid profile email' | jq -r .access_token)"
+     -d grant_type=client_credentials -d client_id=security-autonomous-agent \
+     -d client_secret=demo-security-autonomous-secret-change-me \
+     | jq -r .access_token)"
 
    curl -s --include -X POST http://localhost:12000/api/badge-scope-check \
-     -H "Authorization: Bearer $SARAH_TOKEN" \
+     -H "Authorization: Bearer $AUTONOMOUS_TOKEN" \
      -H 'x-agntcy-requested-action: scan-remediate' \
      -H 'x-agntcy-requested-repo: demo-admin/other-service'
    ```
@@ -1537,7 +1590,7 @@ omit either and you'll get an opaque failure with no useful error message.
   running image isn't stale before debugging the code. `docker compose up -d`
   reuses existing images, so a container can quietly run a build from before
   the fix you're looking at. This has produced three separate red herrings in
-  this stack: ~10-minute runs and an "expired" Sarah token (both pre-`7ac84e6`
+  this stack: ~10-minute runs and an expired initiator token (both pre-`7ac84e6`
   `opencode-agent`), and Triage reporting `X-AGNTCY-Actor-Token header
   missing` (a pre-M9 `envoy-org-b` whose config still had `forward: false` on
   the actor-token JWT provider). After pulling changes, rebuild before

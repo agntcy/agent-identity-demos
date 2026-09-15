@@ -3,14 +3,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Registers cross-domain scopes in Org A (org-a realm).
-# OpenCode requests triage:create when minting the ID-JAG assertion for Org B.
+# The Security Autonomous Agent requests triage:create when minting ID-JAG.
 set -euo pipefail
 
 KC="${KC_URL:-http://keycloak-a:8080}"
 REALM="${KC_REALM:-org-a}"
 ADMIN="${KC_ADMIN:-admin}"
 ADMIN_PW="${KC_ADMIN_PASSWORD:?KC_ADMIN_PASSWORD required}"
-CLIENT_ID="${REQUESTER_CLIENT:-opencode-agent}"
+CLIENT_ID="${REQUESTER_CLIENT:-security-autonomous-agent}"
 KCADM=/opt/keycloak/bin/kcadm.sh
 
 echo "[kc-a-init] waiting for Keycloak A at ${KC} ..."

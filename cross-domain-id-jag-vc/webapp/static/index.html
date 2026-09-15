@@ -100,6 +100,131 @@
     .run-progress { height: 4px; border-radius: 2px; background: #21262d; margin-bottom: 10px; overflow: hidden; }
     .run-progress > div { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--teal));
       transition: width .3s ease; }
+    /* Guided overview: one phase at a time, so readers understand the trust
+       story before opening the exhaustive protocol trace below. */
+    .journey { margin: 14px 0 18px; border: 1px solid var(--border); border-radius: 12px;
+      overflow: hidden; background: linear-gradient(145deg, #161b22 0%, #111820 100%); }
+    .journey-intro { padding: 18px 20px 14px; border-bottom: 1px solid var(--border); }
+    .journey-eyebrow { color: var(--teal); font-size: 10px; font-weight: 800; letter-spacing: .12em;
+      text-transform: uppercase; }
+    .journey-intro h2 { margin: 3px 0 5px; font-size: 20px; line-height: 1.25; }
+    .journey-intro p { margin: 0; color: #c9d1d9; font-size: 13px; max-width: 900px; }
+    .journey-legend { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+    .journey-chip { padding: 3px 8px; border: 1px solid var(--border); border-radius: 20px;
+      color: var(--muted); background: #0d1117; font-size: 10px; font-weight: 700; }
+    .journey-chip.identity { border-color: rgba(188,140,255,.45); color: var(--purple); }
+    .journey-chip.directory { border-color: rgba(57,197,207,.45); color: var(--teal); }
+    .journey-chip.authorization { border-color: rgba(47,129,247,.5); color: #79b8ff; }
+    .journey-chip.execution { border-color: rgba(63,185,80,.45); color: var(--ok); }
+    .journey-phases { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+      background: var(--border); border-bottom: 1px solid var(--border); }
+    .journey-phase { position: relative; border: 0; border-radius: 0; background: #111820;
+      color: var(--muted); padding: 11px 13px; text-align: left; cursor: pointer; min-height: 66px; }
+    .journey-phase:hover { background: #18212b; color: var(--text); }
+    .journey-phase .phase-num { display: inline-grid; place-items: center; width: 20px; height: 20px;
+      margin-right: 6px; border-radius: 50%; background: #21262d; font-size: 10px; font-weight: 800; }
+    .journey-phase .phase-title { font-size: 12px; font-weight: 750; }
+    .journey-phase .phase-proof { display: block; margin: 4px 0 0 27px; font-size: 10px; color: var(--muted); }
+    .journey-phase.active { background: rgba(47,129,247,.11); color: var(--text);
+      box-shadow: inset 0 -3px 0 var(--accent); }
+    .journey-phase.active .phase-num { background: var(--accent); color: white; }
+    .journey-phase.complete { color: var(--ok); }
+    .journey-phase.complete .phase-num { background: rgba(63,185,80,.18); color: var(--ok); }
+    .journey-stage { position: relative; min-height: 292px; padding: 20px;
+      background-image: radial-gradient(circle at 15% 10%, rgba(47,129,247,.09), transparent 35%),
+        radial-gradient(circle at 82% 80%, rgba(188,140,255,.07), transparent 32%); }
+    .journey-scene { display: none; animation: journey-enter .28s ease both; }
+    .journey-scene.active { display: block; }
+    @keyframes journey-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+    .journey-story { display: grid; grid-template-columns: minmax(190px, .65fr) minmax(330px, 1.5fr);
+      gap: 18px; align-items: center; }
+    .journey-story-copy h3 { margin: 0 0 5px; font-size: 16px; }
+    .journey-story-copy p { margin: 0 0 10px; color: #c9d1d9; font-size: 12.5px; }
+    .journey-proof { padding: 8px 10px; border-left: 3px solid var(--accent); background: rgba(47,129,247,.08);
+      border-radius: 0 6px 6px 0; color: #c9d1d9; font-size: 11px; }
+    .journey-proof b { color: var(--text); }
+    .journey-flow { display: grid; grid-template-columns: minmax(115px, 1fr) 72px minmax(115px, 1fr) 72px minmax(115px, 1fr);
+      align-items: center; gap: 7px; }
+    .journey-node { position: relative; min-height: 92px; display: flex; flex-direction: column;
+      justify-content: center; padding: 13px; border: 1px solid var(--border); border-radius: 9px;
+      background: #0d1117; transition: border-color .25s, box-shadow .25s, transform .25s, opacity .25s; }
+    .journey-node .node-kicker { color: var(--muted); font-size: 9px; font-weight: 800;
+      letter-spacing: .08em; text-transform: uppercase; }
+    .journey-node .node-title { color: var(--text); font-size: 12px; font-weight: 750; margin-top: 2px; }
+    .journey-node .node-detail { color: var(--muted); font-size: 10px; margin-top: 3px; }
+    .journey-node.active { border-color: var(--run); transform: translateY(-2px);
+      box-shadow: 0 0 0 1px rgba(210,153,34,.2), 0 6px 24px rgba(210,153,34,.12);
+      animation: journey-pulse 1.1s ease-in-out infinite; }
+    .journey-node.ok { border-color: rgba(63,185,80,.7); box-shadow: inset 0 0 0 1px rgba(63,185,80,.08); }
+    .journey-node.error { border-color: var(--err); }
+    .journey-node.denied { border-color: var(--denied); }
+    @keyframes journey-pulse { 50% { box-shadow: 0 0 0 4px rgba(210,153,34,.11), 0 7px 26px rgba(210,153,34,.16); } }
+    .journey-arrow { position: relative; height: 2px; background: #3d4855; }
+    .journey-arrow::after { content: ""; position: absolute; right: -1px; top: -4px;
+      border-left: 7px solid #3d4855; border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+    .journey-arrow .arrow-label { position: absolute; left: 50%; bottom: 7px; transform: translateX(-50%);
+      width: 100px; text-align: center; color: var(--muted); font-size: 9px; line-height: 1.2; }
+    .journey-scene.active .journey-arrow::before { content: ""; position: absolute; top: -3px; left: 0;
+      width: 8px; height: 8px; border-radius: 50%; background: var(--run); box-shadow: 0 0 7px var(--run);
+      animation: journey-packet 1.8s ease-in-out infinite; }
+    @keyframes journey-packet { 0% { left: 0; opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { left: calc(100% - 8px); opacity: 0; } }
+    .credential-merge { display: grid; grid-template-columns: minmax(160px, 1.15fr) 78px minmax(120px, .8fr) 70px minmax(135px, 1fr);
+      gap: 9px; align-items: center; }
+    .credential-stack { display: grid; gap: 10px; }
+    .vc-card { min-height: 88px; }
+    .vc-card .vc-number { position: absolute; right: 8px; top: 8px; width: 21px; height: 21px;
+      display: grid; place-items: center; border-radius: 50%; background: rgba(188,140,255,.16);
+      color: var(--purple); font-size: 10px; font-weight: 800; }
+    .merge-rail { position: relative; height: 148px; }
+    .merge-rail::before, .merge-rail::after { content: ""; position: absolute; left: 0; width: 55%;
+      height: 2px; background: #4c3d64; }
+    .merge-rail::before { top: 25%; transform: rotate(24deg); transform-origin: left; }
+    .merge-rail::after { bottom: 25%; transform: rotate(-24deg); transform-origin: left; }
+    .merge-rail span { position: absolute; right: 0; top: calc(50% - 1px); width: 56%; height: 2px; background: #4c3d64; }
+    .merge-rail span::after { content: ""; position: absolute; right: -1px; top: -4px;
+      border-left: 7px solid #4c3d64; border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+    .journey-scene.active .merge-rail i { position: absolute; left: 0; top: calc(50% - 4px); width: 8px; height: 8px;
+      border-radius: 50%; background: var(--purple); box-shadow: 0 0 8px var(--purple);
+      animation: merge-packet 1.6s ease-in-out infinite; }
+    @keyframes merge-packet { from { left: 0; opacity: 0; } 20% { opacity: 1; } to { left: calc(100% - 8px); opacity: 0; } }
+    .vp-node { border-color: rgba(188,140,255,.55); background: linear-gradient(150deg, rgba(188,140,255,.13), #0d1117 60%); }
+    .verifier-node { border-color: rgba(57,197,207,.45); }
+    .binding { margin-top: 14px; padding: 8px 10px; border: 1px dashed rgba(188,140,255,.45); border-radius: 7px;
+      text-align: center; color: #c9d1d9; font-size: 10.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .binding b { color: var(--purple); }
+    .journey-live { display: flex; align-items: center; gap: 9px; min-height: 40px; padding: 9px 14px;
+      border-top: 1px solid var(--border); background: #0d1117; font-size: 11px; color: #c9d1d9; }
+    .journey-live-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--muted); }
+    .journey-live.running .journey-live-dot { background: var(--run); box-shadow: 0 0 7px var(--run); animation: pulse-msg 1s infinite; }
+    .journey-live.complete .journey-live-dot { background: var(--ok); }
+    .technical-sequence { margin: 0 0 18px; }
+    .technical-sequence > summary { cursor: pointer; list-style: none; display: flex; align-items: center;
+      justify-content: space-between; gap: 12px; padding: 11px 14px; border: 1px solid var(--border);
+      border-radius: 8px; background: var(--panel); color: #c9d1d9; font-size: 12px; font-weight: 700; }
+    .technical-sequence > summary::-webkit-details-marker { display: none; }
+    .technical-sequence > summary::after { content: "Open +"; color: var(--accent); font-size: 10px; }
+    .technical-sequence[open] > summary::after { content: "Close −"; }
+    .technical-sequence[open] > summary { border-radius: 8px 8px 0 0; }
+    .technical-sequence .diagram { border-radius: 0 0 8px 8px; border-top: 0; margin-bottom: 0; }
+    @media (max-width: 900px) {
+      .journey-phases { grid-template-columns: repeat(2, 1fr); }
+      .journey-story { grid-template-columns: 1fr; }
+      .journey-flow, .credential-merge { grid-template-columns: 1fr; }
+      .journey-arrow { width: 2px; height: 34px; margin: 0 auto; }
+      .journey-arrow::after { right: -4px; top: auto; bottom: -1px; border-left: 5px solid transparent;
+        border-right: 5px solid transparent; border-top: 7px solid #3d4855; border-bottom: 0; }
+      .journey-arrow .arrow-label { left: 12px; bottom: 10px; transform: none; text-align: left; }
+      .journey-scene.active .journey-arrow::before { animation-name: journey-packet-mobile; }
+      @keyframes journey-packet-mobile { from { top: 0; opacity: 0; } 20% { opacity: 1; } to { top: calc(100% - 8px); opacity: 0; } }
+      .merge-rail { height: 38px; width: 2px; margin: 0 auto; background: #4c3d64; }
+      .merge-rail::before, .merge-rail::after, .merge-rail span { display: none; }
+      .journey-scene.active .merge-rail i { left: -3px; top: 0; animation-name: merge-packet-mobile; }
+      @keyframes merge-packet-mobile { from { top: 0; opacity: 0; } 20% { opacity: 1; } to { top: calc(100% - 8px); opacity: 0; } }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .journey-scene, .journey-node.active, .journey-scene.active .journey-arrow::before,
+      .journey-scene.active .merge-rail i, .journey-live.running .journey-live-dot { animation: none !important; }
+    }
     /* static doc diagrams */
     .diagram.doc .seq-msg { stroke: var(--accent); stroke-width: 1.6; fill: none; }
     .diagram.doc .seq-msg.ret { stroke: var(--muted); stroke-dasharray: 6 4; }
@@ -145,6 +270,26 @@
     .tag.org-a { background: rgba(47,129,247,.15); color: var(--accent); }
     .tag.org-b { background: rgba(63,185,80,.12); color: var(--ok); }
     .tag.agntcy { background: rgba(188,140,255,.15); color: var(--purple); }
+    .trust-explainer { margin: 18px 0 24px; padding: 17px 18px; border: 1px solid rgba(188,140,255,.38);
+      border-radius: 10px; background: linear-gradient(145deg, rgba(188,140,255,.08), rgba(47,129,247,.05)); }
+    .trust-explainer h2 { margin: 0 0 8px; }
+    .trust-explainer .trust-summary { margin-bottom: 12px; max-width: 980px; }
+    .trust-terms { display: grid; grid-template-columns: repeat(auto-fit, minmax(205px, 1fr));
+      gap: 8px; margin: 12px 0 16px; }
+    .trust-term { padding: 9px 10px; background: #0d1117; border-left: 3px solid var(--purple); }
+    .trust-term b { display: block; color: var(--text); font-size: 12px; }
+    .trust-term span { color: var(--muted); font-size: 11px; }
+    .mermaid-wrap { overflow-x: auto; padding: 14px; border: 1px solid var(--border); border-radius: 8px;
+      background: #0b0f14; }
+    .mermaid-wrap .mermaid { min-width: 1050px; max-height: none; margin: 0; padding: 0;
+      border: 0; background: transparent; overflow: visible; color: #c9d1d9; white-space: pre; }
+    .mermaid-wrap .mermaid svg { display: block; width: 100%; height: auto; min-width: 1050px; }
+    .mermaid-caption { margin-top: 8px !important; color: var(--muted) !important; font-size: 11px !important; }
+    .mermaid-error { color: var(--err); font-size: 12px; padding: 8px; }
+    @media (max-width: 700px) {
+      .trust-explainer { padding: 14px; }
+      .mermaid-wrap { padding: 8px; }
+    }
     [hidden] { display: none !important; }
     .status-bar { font-size: 12px; color: var(--muted); padding: 6px 0; margin-bottom: 4px; min-height: 22px; }
     .status-spinner { display: inline-block; width: 10px; height: 10px; margin-right: 7px;
@@ -225,7 +370,7 @@
 <header>
   <div>
     <h1>Cross-Domain AI Agent Remediation &mdash; ID-JAG + AGNTCY Directory &amp; Identity</h1>
-    <div class="sub">Sarah (Org A) &rarr; OpenCode &rarr; <b>ID-JAG</b> &rarr; Keycloak B &rarr; Triage (Org B) &rarr; Sub-Agent &rarr; Gitea PR &nbsp;|&nbsp; <b>AGNTCY</b> dir + identity-node for agent VC registry</div>
+    <div class="sub">Discover with <b>AGNTCY Directory</b> &rarr; prove agent + operator with <b>two VCs in one VP</b> &rarr; authorize with <b>ID-JAG</b> &rarr; execute over <b>A2A</b></div>
   </div>
   <nav class="tabs">
     <button class="tab active" data-tab="demo">Live demo</button>
@@ -256,7 +401,7 @@
       <div class="config" id="vaultKeys"><div><i>Loading…</i></div></div>
     </details>
     <details class="config-wrap">
-      <summary>Registered agents (Identity Node)</summary>
+      <summary>Registered agents (AGNTCY Directory + Identity Node)</summary>
       <div class="config" id="registeredAgents"><div><i>Loading…</i></div></div>
     </details>
     <div class="status-bar" id="legend" style="margin-top:-8px"></div>
@@ -265,15 +410,170 @@
     <div class="status-bar" id="traceLink" style="margin-top:-8px"></div>
     <div class="run-progress"><div id="runProgressBar"></div></div>
 
-    <!-- ── Sequence diagram ── -->
-    <div class="diagram">
+    <section class="journey" aria-labelledby="journeyTitle">
+      <div class="journey-intro">
+        <div class="journey-eyebrow">The 30-second story</div>
+        <h2 id="journeyTitle">One agent request. Two credentials. One policy-bound action.</h2>
+        <p>Follow four chapters. The Directory helps agents find each other; Identity proves who the agent is;
+          a second VC proves its operator; the VP binds both proofs; and ID-JAG authorizes only this request.</p>
+        <div class="journey-legend" aria-label="Security artifact legend">
+          <span class="journey-chip directory">Directory = discover + audit</span>
+          <span class="journey-chip identity">VC / VP = identity evidence</span>
+          <span class="journey-chip authorization">ID-JAG = request authority</span>
+          <span class="journey-chip execution">A2A = agent transport</span>
+        </div>
+      </div>
+
+      <div class="journey-phases" role="tablist" aria-label="Trust journey phases">
+        <button class="journey-phase active" type="button" role="tab" aria-selected="true" data-journey-phase="1">
+          <span class="phase-num">1</span><span class="phase-title">Receive &amp; identify</span>
+          <span class="phase-proof">Which agent received the task?</span>
+        </button>
+        <button class="journey-phase" type="button" role="tab" aria-selected="false" data-journey-phase="2">
+          <span class="phase-num">2</span><span class="phase-title">Establish trust</span>
+          <span class="phase-proof">Who is it, and who operates it?</span>
+        </button>
+        <button class="journey-phase" type="button" role="tab" aria-selected="false" data-journey-phase="3">
+          <span class="phase-num">3</span><span class="phase-title">Authorize request</span>
+          <span class="phase-proof">What may it do right now?</span>
+        </button>
+        <button class="journey-phase" type="button" role="tab" aria-selected="false" data-journey-phase="4">
+          <span class="phase-num">4</span><span class="phase-title">Execute &amp; audit</span>
+          <span class="phase-proof">What happened, and can we prove it?</span>
+        </button>
+      </div>
+
+      <div class="journey-stage">
+        <div class="journey-scene active" role="tabpanel" data-journey-scene="1">
+          <div class="journey-story">
+            <div class="journey-story-copy">
+              <h3>One autonomous agent, with OpenCode as an internal tool</h3>
+              <p>The webapp sends an A2A task to the Security Autonomous Agent. That same agent authenticates, owns the CIMD identity and Agent Badge, uses OpenCode internally, and later delegates to Triage.</p>
+              <div class="journey-proof"><b>Directory is not authorization.</b> It returns capabilities, a locator, an identity ID, a badge URL, and a content digest.</div>
+            </div>
+            <div class="journey-flow" aria-label="Webapp dispatches the Security Autonomous Agent, which uses OpenCode internally">
+              <div class="journey-node" data-journey-node="webapp">
+                <span class="node-kicker">Task trigger · A2A client</span><span class="node-title">Demo Webapp</span>
+                <span class="node-detail">Creates the initial task</span>
+              </div>
+              <div class="journey-arrow"><span class="arrow-label">A2A SendMessage</span></div>
+              <div class="journey-node" data-journey-node="autonomous-agent">
+                <span class="node-kicker">Org A · A2A server + client</span><span class="node-title">Security Autonomous Agent</span>
+                <span class="node-detail">OAuth · CIMD · VC · VP · delegation</span>
+              </div>
+              <div class="journey-arrow"><span class="arrow-label">internal API</span></div>
+              <div class="journey-node" data-journey-node="opencode">
+                <span class="node-kicker">Private planning runtime</span><span class="node-title">OpenCode Engine</span>
+                <span class="node-detail">No Agent Card · no separate identity</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="journey-scene" role="tabpanel" data-journey-scene="2">
+          <div class="journey-story">
+            <div class="journey-story-copy">
+              <h3>Two issuers, two claims, one presentation</h3>
+              <p>The first VC attests to the agent and embeds the canonical OASF definition. The independent second VC attests to the operating organization. The holder presents both together.</p>
+              <div class="journey-proof"><b>The VP is a container, not the trust anchor.</b> Trust comes from issuer keys, the CIMD holder key, and verifier policy.</div>
+            </div>
+            <div>
+              <div class="credential-merge" aria-label="Agent Badge VC and Organization VC merge into a Verifiable Presentation">
+                <div class="credential-stack">
+                  <div class="journey-node vc-card" data-journey-node="agent-vc">
+                    <span class="vc-number">1</span><span class="node-kicker">Identity Service issuer</span>
+                    <span class="node-title">Agent Badge VC</span><span class="node-detail">CIMD subject · OASF badge · operatedBy</span>
+                  </div>
+                  <div class="journey-node vc-card" data-journey-node="org-vc">
+                    <span class="vc-number">2</span><span class="node-kicker">Secondary independent issuer</span>
+                    <span class="node-title">Organization VC</span><span class="node-detail">Verified organization URI</span>
+                  </div>
+                </div>
+                <div class="merge-rail" aria-hidden="true"><span></span><i></i></div>
+                <div class="journey-node vp-node" data-journey-node="vp">
+                  <span class="node-kicker">Holder-signed</span><span class="node-title">Verifiable Presentation</span>
+                  <span class="node-detail">2 VCs · challenge · audience</span>
+                </div>
+                <div class="journey-arrow"><span class="arrow-label">present</span></div>
+                <div class="journey-node verifier-node" data-journey-node="verifier">
+                  <span class="node-kicker">Counterparty policy</span><span class="node-title">Trust Verifier</span>
+                  <span class="node-detail">signatures · dates · binding · digest</span>
+                </div>
+              </div>
+              <div class="binding"><b>Required binding:</b> AgentBadge.operatedBy == OrganizationVC.credentialSubject.id</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="journey-scene" role="tabpanel" data-journey-scene="3">
+          <div class="journey-story">
+            <div class="journey-story-copy">
+              <h3>Turn trusted identity into narrow request authority</h3>
+              <p>After identity checks pass, the Security Autonomous Agent discovers Triage in the AGNTCY Directory and mints a short-lived ID-JAG. Org A constrains it; Org B independently validates it.</p>
+              <div class="journey-proof"><b>Identity and authorization remain separate.</b> A valid badge cannot grant access by itself; the ID-JAG carries the exact action, resource, audience, and act chain.</div>
+            </div>
+            <div class="journey-flow" aria-label="ID-JAG crosses enterprise policy boundaries">
+              <div class="journey-node" data-journey-node="idjag">
+                <span class="node-kicker">Short-lived assertion</span><span class="node-title">ID-JAG</span>
+                <span class="node-detail">action · repo · audience · act</span>
+              </div>
+              <div class="journey-arrow"><span class="arrow-label">OPA egress</span></div>
+              <div class="journey-node" data-journey-node="org-a">
+                <span class="node-kicker">Enterprise A</span><span class="node-title">Org A policy boundary</span>
+                <span class="node-detail">sender + delegation checks</span>
+              </div>
+              <div class="journey-arrow"><span class="arrow-label">JWT exchange</span></div>
+              <div class="journey-node" data-journey-node="org-b">
+                <span class="node-kicker">Enterprise B</span><span class="node-title">Org B policy boundary</span>
+                <span class="node-detail">independent keys + local policy</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="journey-scene" role="tabpanel" data-journey-scene="4">
+          <div class="journey-story">
+            <div class="journey-story-copy">
+              <h3>Execute through A2A agents and leave verifiable evidence</h3>
+              <p>Triage narrows authority again, dispatches a remediation sub-agent through A2A, and creates the pull request. Every agent turn is catalogued as an OASF audit record.</p>
+              <div class="journey-proof"><b>Least privilege is visible.</b> The sub-agent can write the approved file and open one PR; the deliberate out-of-scope attempt must be denied.</div>
+            </div>
+            <div class="journey-flow" aria-label="Triage delegates to remediation and records the result">
+              <div class="journey-node" data-journey-node="triage">
+                <span class="node-kicker">Org B · A2A agent</span><span class="node-title">Triage Agent</span>
+                <span class="node-detail">verify · plan · narrow scope</span>
+              </div>
+              <div class="journey-arrow"><span class="arrow-label">A2A SendMessage</span></div>
+              <div class="journey-node" data-journey-node="remediation">
+                <span class="node-kicker">Org B · A2A agent</span><span class="node-title">Remediation Agent</span>
+                <span class="node-detail">commit patch under sub-badge</span>
+              </div>
+              <div class="journey-arrow"><span class="arrow-label">PR + OASF audit</span></div>
+              <div class="journey-node" data-journey-node="gitea">
+                <span class="node-kicker">Evidence</span><span class="node-title">Gitea PR + Directory CID</span>
+                <span class="node-detail">result linked to the full act chain</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="journey-live" id="journeyLive" aria-live="polite">
+        <span class="journey-live-dot"></span><span id="journeyLiveLabel"><b>Ready.</b> Choose a chapter or run the demo to watch evidence accumulate.</span>
+      </div>
+    </section>
+
+    <details class="technical-sequence" id="technicalSequence">
+      <summary>Technical sequence — inspect every identity, policy, and agent hop</summary>
+      <!-- ── Detailed authorization and execution sequence ── -->
+      <div class="diagram">
       <!-- Actor-box header lives in its own small SVG, sticky-pinned above
            the scrolling body SVG below, so column labels stay visible while
            scrolling through a long run. Both share the same viewBox width
            (1432) and are scaled via the same `.diagram svg { width:100% }`
            rule, so their columns stay pixel-aligned at any container width. -->
       <div class="diagram-header-sticky">
-        <svg viewBox="0 0 1310 50" role="img" aria-label="Sequence diagram actors">
+        <svg viewBox="0 0 1554 50" role="img" aria-label="Sequence diagram actors">
         <defs>
           <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="context-stroke" />
@@ -322,7 +622,7 @@
             d="M4.209 4.603c-.247 0-.525.02-.84.088-.333.07-1.28.283-2.054 1.027C-.403 7.25.035 9.685.089 10.052c.065.446.263 1.687 1.21 2.768 1.749 2.141 5.513 2.092 5.513 2.092s.462 1.103 1.168 2.119c.955 1.263 1.936 2.248 2.89 2.367 2.406 0 7.212-.004 7.212-.004s.458.004 1.08-.394c.535-.324 1.013-.893 1.013-.893s.492-.527 1.18-1.73c.21-.37.385-.729.538-1.068 0 0 2.107-4.471 2.107-8.823-.042-1.318-.367-1.55-.443-1.627-.156-.156-.366-.153-.366-.153s-4.475.252-6.792.306c-.508.011-1.012.023-1.512.027v4.474l-.634-.301c0-1.39-.004-4.17-.004-4.17-1.107.016-3.405-.084-3.405-.084s-5.399-.27-5.987-.324c-.187-.011-.401-.032-.648-.032zm.354 1.832h.111s.271 2.269.6 3.597C5.549 11.147 6.22 13 6.22 13s-.996-.119-1.641-.348c-.99-.324-1.409-.714-1.409-.714s-.73-.511-1.096-1.52C1.444 8.73 2.021 7.7 2.021 7.7s.32-.859 1.47-1.145c.395-.106.863-.12 1.072-.12zm8.33 2.554c.26.003.509.127.509.127l.868.422-.529 1.075a.686.686 0 0 0-.614.359.685.685 0 0 0 .072.756l-.939 1.924a.69.69 0 0 0-.66.527.687.687 0 0 0 .347.763.686.686 0 0 0 .867-.206.688.688 0 0 0-.069-.882l.916-1.874a.667.667 0 0 0 .237-.02.657.657 0 0 0 .271-.137 8.826 8.826 0 0 1 1.016.512.761.761 0 0 1 .286.282c.073.21-.073.569-.073.569-.087.29-.702 1.55-.702 1.55a.692.692 0 0 0-.676.477.681.681 0 1 0 1.157-.252c.073-.141.141-.282.214-.431.19-.397.515-1.16.515-1.16.035-.066.218-.394.103-.814-.095-.435-.48-.638-.48-.638-.467-.301-1.116-.58-1.116-.58s0-.156-.042-.27a.688.688 0 0 0-.148-.241l.516-1.062 2.89 1.401s.48.218.583.619c.073.282-.019.534-.069.657-.24.587-2.1 4.317-2.1 4.317s-.232.554-.748.588a1.065 1.065 0 0 1-.393-.045l-.202-.08-4.31-2.1s-.417-.218-.49-.596c-.083-.31.104-.691.104-.691l2.073-4.272s.183-.37.466-.497a.855.855 0 0 1 .35-.077z"/></symbol>
         </defs>
 
-        <!-- Actor boxes — 11 columns. Icon sits inline to the left of the
+        <!-- Actor boxes — 12 columns. Icon sits inline to the left of the
              title (not stacked above it), with the icon+title group
              horizontally centered — text_x/icon_x below were computed from
              each label's actual rendered width (getComputedTextLength), not
@@ -330,8 +630,8 @@
              their label alone. -->
         <rect class="seq-actor-box" x="10" y="10" width="104" height="36" rx="5"/>
         <use href="#ico-agent" class="actor-icon" x="23.25" y="21.5" width="14" height="14"/>
-        <text class="seq-actor" x="42.25" y="28" style="text-anchor:start">OpenCode</text>
-        <text class="seq-actor-sub" x="62" y="41">Org A agent</text>
+        <text class="seq-actor" x="42.25" y="28" style="text-anchor:start">Security Agent</text>
+        <text class="seq-actor-sub" x="62" y="41">Org A autonomous</text>
         <rect class="seq-actor-box" x="132" y="10" width="104" height="36" rx="5"/>
         <use href="#ico-keycloak" class="actor-icon" x="143.85" y="21.5" width="14" height="14"/>
         <text class="seq-actor" x="162.85" y="28" style="text-anchor:start">Keycloak A</text>
@@ -368,25 +668,35 @@
         <use href="#ico-gitea" class="actor-icon" x="1135.8" y="21.5" width="14" height="14"/>
         <text class="seq-actor" x="1154.8" y="28" style="text-anchor:start">Gitea</text>
         <text class="seq-actor-sub" x="1160" y="41">via gateway</text>
+        <rect class="seq-actor-box" x="1230" y="10" width="104" height="36" rx="5"/>
+        <use href="#ico-doc" class="actor-icon" x="1240" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="1259" y="28" style="text-anchor:start">Org VC Issuer</text>
+        <text class="seq-actor-sub" x="1282" y="41">secondary issuer</text>
+        <rect class="seq-actor-box" x="1352" y="10" width="104" height="36" rx="5"/>
+        <use href="#ico-badge" class="actor-icon" x="1369" y="21.5" width="14" height="14"/>
+        <text class="seq-actor" x="1388" y="28" style="text-anchor:start">Verifier</text>
+        <text class="seq-actor-sub" x="1404" y="41">trust policy</text>
         </svg>
       </div><!-- /diagram-header-sticky -->
 
-      <svg id="seqSvg" viewBox="0 46 1310 2446" role="img" aria-label="Cross-domain remediation sequence diagram">
+      <svg id="seqSvg" viewBox="0 46 1554 2796" role="img" aria-label="Cross-domain remediation sequence diagram including Agent Badge VC, Organization VC, and VP verification">
         <!-- Lifelines -->
-        <line class="seq-life" x1="62" y1="46" x2="62" y2="2480"/>
-        <line class="seq-life" x1="184" y1="46" x2="184" y2="2480"/>
-        <line class="seq-life" x1="306" y1="46" x2="306" y2="2480"/>
-        <line class="seq-life" x1="428" y1="46" x2="428" y2="2480"/>
-        <line class="seq-life" x1="550" y1="46" x2="550" y2="2480"/>
-        <line class="seq-life" x1="672" y1="46" x2="672" y2="2480"/>
-        <line class="seq-life" x1="794" y1="46" x2="794" y2="2480"/>
-        <line class="seq-life" x1="916" y1="46" x2="916" y2="2480"/>
-        <line class="seq-life" x1="1038" y1="46" x2="1038" y2="2480"/>
-        <line class="seq-life" x1="1160" y1="46" x2="1160" y2="2480"/>
+        <line class="seq-life" x1="62" y1="46" x2="62" y2="2830"/>
+        <line class="seq-life" x1="184" y1="46" x2="184" y2="2830"/>
+        <line class="seq-life" x1="306" y1="46" x2="306" y2="2830"/>
+        <line class="seq-life" x1="428" y1="46" x2="428" y2="2830"/>
+        <line class="seq-life" x1="550" y1="46" x2="550" y2="2830"/>
+        <line class="seq-life" x1="672" y1="46" x2="672" y2="2830"/>
+        <line class="seq-life" x1="794" y1="46" x2="794" y2="2830"/>
+        <line class="seq-life" x1="916" y1="46" x2="916" y2="2830"/>
+        <line class="seq-life" x1="1038" y1="46" x2="1038" y2="2830"/>
+        <line class="seq-life" x1="1160" y1="46" x2="1160" y2="2830"/>
+        <line class="seq-life" x1="1282" y1="46" x2="1282" y2="2830"/>
+        <line class="seq-life" x1="1404" y1="46" x2="1404" y2="2830"/>
 
-        <g data-step="sarah-login" class="g">
+        <g data-step="security-agent-login" class="g">
           <text class="seq-num" x="72" y="64">1</text>
-          <text class="seq-label" x="90" y="64">OIDC password grant (Sarah)</text>
+          <text class="seq-label" x="90" y="64">OAuth client credentials grant (Security Autonomous Agent)</text>
           <line class="seq-msg" x1="62" y1="70" x2="184" y2="70" marker-end="url(#arr)"/>
           <text class="seq-label" x="182" y="90" text-anchor="end">access token</text>
           <line class="seq-msg ret" x1="184" y1="96" x2="66" y2="96" marker-end="url(#arr)"/>
@@ -394,12 +704,12 @@
 
         <g data-step="cimd-generate-id" class="g">
           <text class="seq-num" x="72" y="116">2</text>
-          <text class="seq-label" x="90" y="116">OpenCode registers its identity &#8212; generate id for opencode-agent (Vault-signed proof, org-a authority)</text>
+          <text class="seq-label" x="90" y="116">Security Autonomous Agent registers its identity (Vault-signed proof, org-a authority)</text>
           <line class="seq-msg" x1="62" y1="122" x2="550" y2="122" marker-end="url(#arr)"/>
           <text class="seq-label" x="548" y="140" text-anchor="end">RS256 signature (private key stays in Vault)</text>
           <line class="seq-msg ret" x1="550" y1="146" x2="66" y2="146" marker-end="url(#arr)"/>
           <line class="seq-msg" x1="62" y1="160" x2="428" y2="160" marker-end="url(#arr)"/>
-          <text class="seq-label" x="426" y="178" text-anchor="end">id = AGNTCY-opencode-agent</text>
+          <text class="seq-label" x="426" y="178" text-anchor="end">id = AGNTCY-security-autonomous-agent</text>
           <line class="seq-msg ret" x1="428" y1="184" x2="66" y2="184" marker-end="url(#arr)"/>
         </g>
 
@@ -413,7 +723,7 @@
 
         <g data-step="badge-scope-check" class="g">
           <text class="seq-num" x="72" y="258">4</text>
-          <text class="seq-label" x="90" y="258">badge request (Sarah's OAuth token) &#8594; Envoy A + OPA &#8594; scoped-down intent</text>
+          <text class="seq-label" x="90" y="258">badge request (Security Autonomous Agent token) &#8594; Envoy A + OPA &#8594; scoped-down intent</text>
           <line class="seq-msg" x1="62" y1="264" x2="794" y2="264" marker-end="url(#arr)"/>
           <text class="seq-label" x="792" y="282" text-anchor="end">ALLOW + scoped_intent=scan-remediate:&#8230;</text>
           <line class="seq-msg ret" x1="794" y1="288" x2="66" y2="288" marker-end="url(#arr)"/>
@@ -430,106 +740,144 @@
           <line class="seq-msg ret" x1="428" y1="378" x2="66" y2="378" marker-end="url(#arr)"/>
         </g>
 
+        <g data-step="secondary-organization-vc" class="g">
+          <text class="seq-num" x="70" y="400">5a</text>
+          <text class="seq-label" x="97" y="400">request independent operating-organization attestation</text>
+          <line class="seq-msg" x1="62" y1="406" x2="1282" y2="406" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1280" y="424" text-anchor="end">verify Org A + sign Organization VC with secondary issuer key</text>
+          <line class="seq-msg" x1="1282" y1="430" x2="550" y2="430" marker-end="url(#arr)"/>
+          <text class="seq-label" x="552" y="448">independent RS256 signature</text>
+          <line class="seq-msg ret" x1="550" y1="454" x2="1280" y2="454" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1280" y="472" text-anchor="end">Organization VC: subject.id=urn:agntcy:organization:org-a</text>
+          <line class="seq-msg ret" x1="1282" y1="478" x2="66" y2="478" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="assemble-two-vc-vp" class="g">
+          <text class="seq-num" x="70" y="504">5b</text>
+          <text class="seq-label" x="97" y="504">assemble Agent Badge VC + Organization VC into one challenge-bound VP</text>
+          <line class="seq-msg" x1="62" y1="510" x2="428" y2="510" marker-end="url(#arr)"/>
+          <text class="seq-label" x="426" y="528" text-anchor="end">resolve holder CIMD verification method</text>
+          <line class="seq-msg ret" x1="428" y1="534" x2="66" y2="534" marker-end="url(#arr)"/>
+          <line class="seq-msg" x1="62" y1="548" x2="550" y2="548" marker-end="url(#arr)"/>
+          <text class="seq-label" x="548" y="566" text-anchor="end">sign VP with CIMD-managed holder key</text>
+          <line class="seq-msg ret" x1="550" y1="572" x2="66" y2="572" marker-end="url(#arr)"/>
+        </g>
+
+        <g data-step="verify-two-vc-vp" class="g">
+          <text class="seq-num" x="70" y="598">5c</text>
+          <text class="seq-label" x="97" y="598">present two-VC VP with challenge + audience to counterparty verifier</text>
+          <line class="seq-msg" x1="62" y1="604" x2="1404" y2="604" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1402" y="622" text-anchor="end">resolve holder key through CIMD</text>
+          <line class="seq-msg" x1="1404" y1="628" x2="428" y2="628" marker-end="url(#arr)"/>
+          <line class="seq-msg ret" x1="428" y1="648" x2="1402" y2="648" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1402" y="666" text-anchor="end">fetch canonical OASF record + digest</text>
+          <line class="seq-msg" x1="1404" y1="672" x2="306" y2="672" marker-end="url(#arr)"/>
+          <line class="seq-msg ret" x1="306" y1="692" x2="1402" y2="692" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1396" y="714" text-anchor="end">verify VP + both VC signatures + validity + digest</text>
+          <path class="seq-msg" d="M1404,720 L1432,720 L1432,730 L1406,730" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1396" y="746" text-anchor="end">require AgentBadge.operatedBy == OrganizationVC.subject.id</text>
+        </g>
+
         <g data-step="mint-read-idjag" class="g">
-          <text class="seq-num" x="70" y="400">5b</text>
-          <text class="seq-label" x="97" y="400">mint READ assertion (Keycloak A, native SPI)  scope=gitea:read  resource=this repo</text>
-          <line class="seq-msg" x1="62" y1="406" x2="184" y2="406" marker-end="url(#arr)"/>
-          <text class="seq-label" x="182" y="424" text-anchor="end">signed read assertion (RS256)</text>
-          <line class="seq-msg ret" x1="184" y1="430" x2="66" y2="430" marker-end="url(#arr)"/>
+          <text class="seq-num" x="70" y="750">5d</text>
+          <text class="seq-label" x="97" y="750">mint READ assertion (Keycloak A, native SPI)  scope=gitea:read  resource=this repo</text>
+          <line class="seq-msg" x1="62" y1="756" x2="184" y2="756" marker-end="url(#arr)"/>
+          <text class="seq-label" x="182" y="774" text-anchor="end">signed read assertion (RS256)</text>
+          <line class="seq-msg ret" x1="184" y1="780" x2="66" y2="780" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="read-egress-check" class="g">
-          <text class="seq-num" x="70" y="452">5c</text>
-          <text class="seq-label" x="97" y="452">Org A egress PDP &#8212; may Sarah delegate a READ of this repo to Org B?</text>
-          <line class="seq-msg" x1="62" y1="458" x2="794" y2="458" marker-end="url(#arr)"/>
-          <text class="seq-label" x="792" y="476" text-anchor="end">ALLOW  rule=org-a-egress-source-read</text>
-          <line class="seq-msg ret" x1="794" y1="482" x2="66" y2="482" marker-end="url(#arr)"/>
+          <text class="seq-num" x="70" y="802">5e</text>
+          <text class="seq-label" x="97" y="802">Org A egress PDP &#8212; may Security Autonomous Agent delegate a READ of this repo to Org B?</text>
+          <line class="seq-msg" x1="62" y1="808" x2="794" y2="808" marker-end="url(#arr)"/>
+          <text class="seq-label" x="792" y="826" text-anchor="end">ALLOW  rule=org-a-egress-source-read</text>
+          <line class="seq-msg ret" x1="794" y1="832" x2="66" y2="832" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="kc-b-read-exchange" class="g">
-          <text class="seq-num" x="70" y="504">5d</text>
-          <text class="seq-label" x="97" y="504">jwt-bearer grant (read assertion) &#8594; Keycloak B</text>
-          <line class="seq-msg" x1="62" y1="510" x2="916" y2="510" marker-end="url(#arr)"/>
-          <text class="seq-label" x="914" y="528" text-anchor="end">access token (gitea:read only)</text>
-          <line class="seq-msg ret" x1="916" y1="534" x2="66" y2="534" marker-end="url(#arr)"/>
+          <text class="seq-num" x="70" y="854">5f</text>
+          <text class="seq-label" x="97" y="854">jwt-bearer grant (read assertion) &#8594; Keycloak B</text>
+          <line class="seq-msg" x1="62" y1="860" x2="916" y2="860" marker-end="url(#arr)"/>
+          <text class="seq-label" x="914" y="878" text-anchor="end">access token (gitea:read only)</text>
+          <line class="seq-msg ret" x1="916" y1="884" x2="66" y2="884" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="fetch-source" class="g">
-          <text class="seq-num" x="70" y="556">5e</text>
-          <text class="seq-label" x="97" y="556">GET source through Envoy B + inline OPA (repo-bound, read-scoped)</text>
-          <line class="seq-msg" x1="62" y1="562" x2="672" y2="562" marker-end="url(#arr)"/>
-          <text class="seq-label" x="670" y="580" text-anchor="end">PaymentLookupRepository.java &#8212; real source</text>
-          <line class="seq-msg ret" x1="672" y1="586" x2="66" y2="586" marker-end="url(#arr)"/>
+          <text class="seq-num" x="70" y="906">5g</text>
+          <text class="seq-label" x="97" y="906">GET source through Envoy B + inline OPA (repo-bound, read-scoped)</text>
+          <line class="seq-msg" x1="62" y1="912" x2="672" y2="912" marker-end="url(#arr)"/>
+          <text class="seq-label" x="670" y="930" text-anchor="end">PaymentLookupRepository.java &#8212; real source</text>
+          <line class="seq-msg ret" x1="672" y1="936" x2="66" y2="936" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="scan" class="g">
-          <text class="seq-num" x="72" y="608">6</text>
-          <text class="seq-label" x="90" y="608">scan repo (under task-scoped badge) &#8594; CVE found (HIGH)</text>
-          <path class="seq-msg" d="M62,614 Q46,620 46,626 Q46,632 62,632" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="958">6</text>
+          <text class="seq-label" x="90" y="958">scan repo (under task-scoped badge) &#8594; CVE found (HIGH)</text>
+          <path class="seq-msg" d="M62,964 Q46,970 46,976 Q46,982 62,982" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="opencode-plan" class="g">
-          <text class="seq-num" x="72" y="650">6b</text>
-          <text class="seq-label" x="90" y="650">real OpenCode (opencode-server) analyzes the CVE &#8594; remediation plan</text>
-          <path class="seq-msg" d="M62,656 Q46,662 46,668 Q46,674 62,674" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="1000">6b</text>
+          <text class="seq-label" x="90" y="1000">real OpenCode (opencode-server) analyzes the CVE &#8594; remediation plan</text>
+          <path class="seq-msg" d="M62,1006 Q46,1012 46,1018 Q46,1024 62,1024" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="dir-push" class="g">
-          <text class="seq-num" x="72" y="692">7</text>
-          <text class="seq-label" x="90" y="692">push turn record (OASF, schema_version=1.1.0)</text>
-          <line class="seq-msg" x1="62" y1="698" x2="306" y2="698" marker-end="url(#arr)"/>
-          <text class="seq-label" x="304" y="716" text-anchor="end">CID (content-addressed)</text>
-          <line class="seq-msg ret" x1="306" y1="722" x2="66" y2="722" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="1042">7</text>
+          <text class="seq-label" x="90" y="1042">push turn record (OASF, schema_version=1.1.0)</text>
+          <line class="seq-msg" x1="62" y1="1048" x2="306" y2="1048" marker-end="url(#arr)"/>
+          <text class="seq-label" x="304" y="1066" text-anchor="end">CID (content-addressed)</text>
+          <line class="seq-msg ret" x1="306" y1="1072" x2="66" y2="1072" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="dir-search" class="g">
-          <text class="seq-num" x="72" y="744">8</text>
-          <text class="seq-label" x="90" y="744">search: name=triage-agent</text>
-          <line class="seq-msg" x1="62" y1="750" x2="306" y2="750" marker-end="url(#arr)"/>
-          <text class="seq-label" x="304" y="768" text-anchor="end">agent record + CID</text>
-          <line class="seq-msg ret" x1="306" y1="774" x2="66" y2="774" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="1094">8</text>
+          <text class="seq-label" x="90" y="1094">search: name=triage-agent</text>
+          <line class="seq-msg" x1="62" y1="1100" x2="306" y2="1100" marker-end="url(#arr)"/>
+          <text class="seq-label" x="304" y="1118" text-anchor="end">agent record + CID</text>
+          <line class="seq-msg ret" x1="306" y1="1124" x2="66" y2="1124" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="kc-a-exchange" class="g">
-          <text class="seq-num" x="72" y="796">9</text>
-          <text class="seq-label" x="90" y="796">RFC 8693 token exchange &#8212; subject=Sarah, actor_token=task-scoped badge</text>
-          <line class="seq-msg" x1="62" y1="802" x2="184" y2="802" marker-end="url(#arr)"/>
-          <text class="seq-label" x="182" y="820" text-anchor="end">exchanged access token</text>
-          <line class="seq-msg ret" x1="184" y1="826" x2="66" y2="826" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="1146">9</text>
+          <text class="seq-label" x="90" y="1146">RFC 8693 token exchange &#8212; subject=Security Autonomous Agent, actor_token=task-scoped badge</text>
+          <line class="seq-msg" x1="62" y1="1152" x2="184" y2="1152" marker-end="url(#arr)"/>
+          <text class="seq-label" x="182" y="1170" text-anchor="end">exchanged access token</text>
+          <line class="seq-msg ret" x1="184" y1="1176" x2="66" y2="1176" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="mint-idjag" class="g">
-          <text class="seq-num" x="72" y="848">10</text>
-          <text class="seq-label" x="90" y="848">mint ID-JAG (Keycloak A, native — SPI)  sub=sarah  aud=KC-B  scope=triage:create</text>
-          <line class="seq-msg" x1="62" y1="854" x2="184" y2="854" marker-end="url(#arr)"/>
-          <text class="seq-label" x="182" y="872" text-anchor="end">signed assertion (RS256)</text>
-          <line class="seq-msg ret" x1="184" y1="878" x2="66" y2="878" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="1198">10</text>
+          <text class="seq-label" x="90" y="1198">mint ID-JAG (Keycloak A, native — SPI)  sub=Security Autonomous Agent  aud=KC-B  scope=triage:create</text>
+          <line class="seq-msg" x1="62" y1="1204" x2="184" y2="1204" marker-end="url(#arr)"/>
+          <text class="seq-label" x="182" y="1222" text-anchor="end">signed assertion (RS256)</text>
+          <line class="seq-msg ret" x1="184" y1="1228" x2="66" y2="1228" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="egress-check" class="g">
-          <text class="seq-num" x="70" y="900">10b</text>
-          <text class="seq-label" x="97" y="900">Org A egress PDP &#8212; may Sarah delegate this scope to Org B?</text>
-          <line class="seq-msg" x1="62" y1="906" x2="794" y2="906" marker-end="url(#arr)"/>
-          <text class="seq-label" x="792" y="924" text-anchor="end">ALLOW + policy decision headers</text>
-          <line class="seq-msg ret" x1="794" y1="930" x2="66" y2="930" marker-end="url(#arr)"/>
+          <text class="seq-num" x="70" y="1250">10b</text>
+          <text class="seq-label" x="97" y="1250">Org A egress PDP &#8212; may Security Autonomous Agent delegate this scope to Org B?</text>
+          <line class="seq-msg" x1="62" y1="1256" x2="794" y2="1256" marker-end="url(#arr)"/>
+          <text class="seq-label" x="792" y="1274" text-anchor="end">ALLOW + policy decision headers</text>
+          <line class="seq-msg ret" x1="794" y1="1280" x2="66" y2="1280" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="kc-b-exchange" class="g">
-          <text class="seq-num" x="72" y="952">11</text>
-          <text class="seq-label" x="90" y="952">jwt-bearer grant  assertion=&#8230;  scope=triage:create</text>
-          <line class="seq-msg" x1="62" y1="958" x2="916" y2="958" marker-end="url(#arr)"/>
-          <text class="seq-label" x="914" y="976" text-anchor="end">access token (triage:create, act=opencode)</text>
-          <line class="seq-msg ret" x1="916" y1="982" x2="66" y2="982" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="1302">11</text>
+          <text class="seq-label" x="90" y="1302">jwt-bearer grant  assertion=&#8230;  scope=triage:create</text>
+          <line class="seq-msg" x1="62" y1="1308" x2="916" y2="1308" marker-end="url(#arr)"/>
+          <text class="seq-label" x="914" y="1326" text-anchor="end">access token (triage:create, act=security-autonomous-agent)</text>
+          <line class="seq-msg ret" x1="916" y1="1332" x2="66" y2="1332" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="create-ticket" class="g">
-          <text class="seq-num" x="72" y="1004">12</text>
-          <text class="seq-label" x="90" y="1004">POST /api/ticket  access + actor tokens  cve=&#8230;  intent=create-pr-fix</text>
-          <line class="seq-msg" x1="62" y1="1010" x2="1038" y2="1010" marker-end="url(#arr)"/>
+          <text class="seq-num" x="72" y="1354">12</text>
+          <text class="seq-label" x="90" y="1354">POST /api/ticket  access + actor tokens  cve=&#8230;  intent=create-pr-fix</text>
+          <line class="seq-msg" x1="62" y1="1360" x2="1038" y2="1360" marker-end="url(#arr)"/>
         </g>
 
         <!-- ── Org B: Triage's own lifecycle (t1–t7) ────────────────────────
-             Same shape as OpenCode's in Org A — verify inbound credentials,
+             Same shape as the Security Autonomous Agent's in Org A — verify inbound credentials,
              register its own identity, get the narrowing approved by policy,
              work, then delegate narrower. Step ids repeat across orgs
              (cimd-generate-id, dir-push, kc-b-exchange), so data-step is
@@ -537,183 +885,184 @@
              This whole section is generated; see tasks/ for the row spec. -->
 
         <g data-step="tri:opa-ingress" class="g">
-          <text class="seq-label" x="1032" y="1034" text-anchor="end">Envoy B + inline OPA: both JWTs &#10003; chain &#10003; scope &#10003; intent &#10003; &#8594; ALLOW, forward to Triage</text>
-          <line class="seq-msg" x1="672" y1="1040" x2="1034" y2="1040" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1384" text-anchor="end">Envoy B + inline OPA: both JWTs &#10003; chain &#10003; scope &#10003; intent &#10003; &#8594; ALLOW, forward to Triage</text>
+          <line class="seq-msg" x1="672" y1="1390" x2="1034" y2="1390" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:verify-idjag" class="g">
-          <text class="seq-label" x="1032" y="1068" text-anchor="end">Triage verifies the ID-JAG itself &#8212; signature vs Keycloak A's JWKS (defense in depth)</text>
-          <line class="seq-msg" x1="1038" y1="1074" x2="184" y2="1074" marker-end="url(#arr)"/>
-          <text class="seq-label" x="186" y="1092">JWKS &#8594; iss &#10003; aud &#10003; act_chain=[opencode-agent]</text>
-          <line class="seq-msg ret" x1="184" y1="1098" x2="1034" y2="1098" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1418" text-anchor="end">Triage verifies the ID-JAG itself &#8212; signature vs Keycloak A's JWKS (defense in depth)</text>
+          <line class="seq-msg" x1="1038" y1="1424" x2="184" y2="1424" marker-end="url(#arr)"/>
+          <text class="seq-label" x="186" y="1442">JWKS &#8594; iss &#10003; aud &#10003; act_chain=[security-autonomous-agent]</text>
+          <line class="seq-msg ret" x1="184" y1="1448" x2="1034" y2="1448" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:verify-sender-badge" class="g">
-          <text class="seq-label" x="1032" y="1120.0" text-anchor="end">resolve the delegating agent&#39;s credential &#8212; does it permit granting this?</text>
-          <line class="seq-msg" x1="1038" y1="1126.0" x2="428" y2="1126.0" marker-end="url(#arr)"/>
-          <text class="seq-label" x="430" y="1144.0">AGNTCY-opencode-agent: delegatable=[openid, triage:create] &#10003;</text>
-          <line class="seq-msg ret" x1="428" y1="1150.0" x2="1034" y2="1150.0" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1470" text-anchor="end">resolve the delegating agent&#39;s credential &#8212; does it permit granting this?</text>
+          <line class="seq-msg" x1="1038" y1="1476" x2="428" y2="1476" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="1494">AGNTCY-security-autonomous-agent: delegatable=[openid, triage:create] &#10003;</text>
+          <line class="seq-msg ret" x1="428" y1="1500" x2="1034" y2="1500" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:cimd-generate-id" class="g">
-          <text class="seq-label" x="1032" y="1180" text-anchor="end">Triage registers its identity &#8212; generate id for triage-agent (Vault-signed proof, org-b authority)</text>
-          <line class="seq-msg" x1="1038" y1="1186" x2="550" y2="1186" marker-end="url(#arr)"/>
-          <text class="seq-label" x="552" y="1204">RS256 signature (org-b key stays in Vault)</text>
-          <line class="seq-msg ret" x1="550" y1="1210" x2="1034" y2="1210" marker-end="url(#arr)"/>
-          <line class="seq-msg" x1="1038" y1="1224" x2="428" y2="1224" marker-end="url(#arr)"/>
-          <text class="seq-label" x="430" y="1242">id = AGNTCY-triage-agent</text>
-          <line class="seq-msg ret" x1="428" y1="1248" x2="1034" y2="1248" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1530" text-anchor="end">Triage registers its identity &#8212; generate id for triage-agent (Vault-signed proof, org-b authority)</text>
+          <line class="seq-msg" x1="1038" y1="1536" x2="550" y2="1536" marker-end="url(#arr)"/>
+          <text class="seq-label" x="552" y="1554">RS256 signature (org-b key stays in Vault)</text>
+          <line class="seq-msg ret" x1="550" y1="1560" x2="1034" y2="1560" marker-end="url(#arr)"/>
+          <line class="seq-msg" x1="1038" y1="1574" x2="428" y2="1574" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="1592">id = AGNTCY-triage-agent</text>
+          <line class="seq-msg ret" x1="428" y1="1598" x2="1034" y2="1598" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:cimd-resolve-id" class="g">
-          <text class="seq-label" x="1032" y="1276" text-anchor="end">resolve id &#8594; ResolverMetadata + JWK (org-b issuer)</text>
-          <line class="seq-msg" x1="1038" y1="1282" x2="428" y2="1282" marker-end="url(#arr)"/>
-          <text class="seq-label" x="430" y="1300">ResolverMetadata + JWK</text>
-          <line class="seq-msg ret" x1="428" y1="1306" x2="1034" y2="1306" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1626" text-anchor="end">resolve id &#8594; ResolverMetadata + JWK (org-b issuer)</text>
+          <line class="seq-msg" x1="1038" y1="1632" x2="428" y2="1632" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="1650">ResolverMetadata + JWK</text>
+          <line class="seq-msg ret" x1="428" y1="1656" x2="1034" y2="1656" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:subbadge-scope-check" class="g">
-          <text class="seq-label" x="1032" y="1332" text-anchor="end">sub-badge scope check &#8212; may this delegation be narrowed? &#8594; Envoy B + OPA</text>
-          <line class="seq-msg" x1="1038" y1="1338" x2="672" y2="1338" marker-end="url(#arr)"/>
-          <text class="seq-label" x="674" y="1356">ALLOW + scoped_scope=gitea:write gitea:pr, scoped_resource=repo</text>
-          <line class="seq-msg ret" x1="672" y1="1362" x2="1034" y2="1362" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1682" text-anchor="end">sub-badge scope check &#8212; may this delegation be narrowed? &#8594; Envoy B + OPA</text>
+          <line class="seq-msg" x1="1038" y1="1688" x2="672" y2="1688" marker-end="url(#arr)"/>
+          <text class="seq-label" x="674" y="1706">ALLOW + scoped_scope=gitea:write gitea:pr, scoped_resource=repo</text>
+          <line class="seq-msg ret" x1="672" y1="1712" x2="1034" y2="1712" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:resolve-badge" class="g">
-          <text class="seq-label" x="1032" y="1384.0" text-anchor="end">publish Triage&#39;s own agent badge VC (org-b Vault-signed)</text>
-          <line class="seq-msg" x1="1038" y1="1390.0" x2="428" y2="1390.0" marker-end="url(#arr)"/>
-          <text class="seq-label" x="430" y="1408.0">caps=[triage:create]  delegatable=[gitea:write, gitea:pr]</text>
-          <line class="seq-msg ret" x1="428" y1="1414.0" x2="1034" y2="1414.0" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1734" text-anchor="end">publish Triage&#39;s own agent badge VC (org-b Vault-signed)</text>
+          <line class="seq-msg" x1="1038" y1="1740" x2="428" y2="1740" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="1758">caps=[triage:create]  delegatable=[gitea:write, gitea:pr]</text>
+          <line class="seq-msg ret" x1="428" y1="1764" x2="1034" y2="1764" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:plan" class="g">
-          <text class="seq-label" x="1032" y="1444" text-anchor="end">create ticket, plan the remediation, decide the sub-agent</text>
-          <path class="seq-msg" d="M1038,1450 Q1070,1456 1070,1464 Q1070,1472 1038,1472" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1794" text-anchor="end">create ticket, plan the remediation, decide the sub-agent</text>
+          <path class="seq-msg" d="M1038,1800 Q1070,1806 1070,1814 Q1070,1822 1038,1822" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:mint-sub-badge" class="g">
-          <text class="seq-label" x="1032" y="1492" text-anchor="end">mint narrowed sub-badge natively at Keycloak B (keycloak-idjag-spi)  scope from the policy decision</text>
-          <line class="seq-msg" x1="1038" y1="1498" x2="916" y2="1498" marker-end="url(#arr)"/>
-          <text class="seq-label" x="918" y="1516">sub-badge (act_chain: sarah&#8594;opencode&#8594;triage)</text>
-          <line class="seq-msg ret" x1="916" y1="1522" x2="1034" y2="1522" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1842" text-anchor="end">mint narrowed sub-badge natively at Keycloak B (keycloak-idjag-spi)  scope from the policy decision</text>
+          <line class="seq-msg" x1="1038" y1="1848" x2="916" y2="1848" marker-end="url(#arr)"/>
+          <text class="seq-label" x="918" y="1866">sub-badge (act_chain: Security Autonomous Agent&#8594;triage)</text>
+          <line class="seq-msg ret" x1="916" y1="1872" x2="1034" y2="1872" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:dir-push" class="g">
-          <text class="seq-label" x="1032" y="1548" text-anchor="end">push Triage turn record (OASF) &#8594; CID</text>
-          <line class="seq-msg" x1="1038" y1="1554" x2="306" y2="1554" marker-end="url(#arr)"/>
-          <text class="seq-label" x="308" y="1572">CID (content-addressed)</text>
-          <line class="seq-msg ret" x1="306" y1="1578" x2="1034" y2="1578" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1898" text-anchor="end">push Triage turn record (OASF) &#8594; CID</text>
+          <line class="seq-msg" x1="1038" y1="1904" x2="306" y2="1904" marker-end="url(#arr)"/>
+          <text class="seq-label" x="308" y="1922">CID (content-addressed)</text>
+          <line class="seq-msg ret" x1="306" y1="1928" x2="1034" y2="1928" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:dir-search" class="g">
-          <text class="seq-label" x="1032" y="1604" text-anchor="end">search: name=sub-agent &#8212; discover the delegate before handing it authority</text>
-          <line class="seq-msg" x1="1038" y1="1610" x2="306" y2="1610" marker-end="url(#arr)"/>
-          <text class="seq-label" x="308" y="1628">agent record + skills</text>
-          <line class="seq-msg ret" x1="306" y1="1634" x2="1034" y2="1634" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="1954" text-anchor="end">search: name=sub-agent &#8212; discover the delegate before handing it authority</text>
+          <line class="seq-msg" x1="1038" y1="1960" x2="306" y2="1960" marker-end="url(#arr)"/>
+          <text class="seq-label" x="308" y="1978">agent record + skills</text>
+          <line class="seq-msg ret" x1="306" y1="1984" x2="1034" y2="1984" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="tri:spawn-sub-agent" class="g">
-          <text class="seq-label" x="1032" y="1660" text-anchor="end">spawn Sub-Agent with the narrowed sub-badge + intent</text>
-          <path class="seq-msg" d="M1038,1666 Q1070,1672 1070,1680 Q1070,1688 1038,1688" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2010" text-anchor="end">spawn Sub-Agent with the narrowed sub-badge + intent</text>
+          <path class="seq-msg" d="M1038,2016 Q1070,2022 1070,2030 Q1070,2038 1038,2038" marker-end="url(#arr)"/>
         </g>
         <!-- ── Org B: the bounded Sub-Agent, same lifecycle one level down ── -->
 
         <g data-step="sub:verify-subbadge" class="g">
-          <text class="seq-label" x="1032" y="1708" text-anchor="end">Sub-Agent verifies the sub-badge itself &#8212; vs Keycloak B JWKS, BEFORE redeeming it</text>
-          <line class="seq-msg" x1="1038" y1="1714" x2="916" y2="1714" marker-end="url(#arr)"/>
-          <text class="seq-label" x="918" y="1732">typ=oauth-id-jag+jwt &#10003; client_id=sub-agent &#10003; scope &#8838; bound &#10003; repo &#10003;</text>
-          <line class="seq-msg ret" x1="916" y1="1738" x2="1034" y2="1738" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2058" text-anchor="end">Sub-Agent verifies the sub-badge itself &#8212; vs Keycloak B JWKS, BEFORE redeeming it</text>
+          <line class="seq-msg" x1="1038" y1="2064" x2="916" y2="2064" marker-end="url(#arr)"/>
+          <text class="seq-label" x="918" y="2082">typ=oauth-id-jag+jwt &#10003; client_id=sub-agent &#10003; scope &#8838; bound &#10003; repo &#10003;</text>
+          <line class="seq-msg ret" x1="916" y1="2088" x2="1034" y2="2088" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:cimd-generate-id" class="g">
-          <text class="seq-label" x="1032" y="1764" text-anchor="end">Sub-Agent registers its identity &#8212; generate id for sub-agent (Vault-signed proof, org-b authority)</text>
-          <line class="seq-msg" x1="1038" y1="1770" x2="550" y2="1770" marker-end="url(#arr)"/>
-          <text class="seq-label" x="552" y="1788">RS256 signature (org-b key stays in Vault)</text>
-          <line class="seq-msg ret" x1="550" y1="1794" x2="1034" y2="1794" marker-end="url(#arr)"/>
-          <line class="seq-msg" x1="1038" y1="1808" x2="428" y2="1808" marker-end="url(#arr)"/>
-          <text class="seq-label" x="430" y="1826">id = AGNTCY-sub-agent</text>
-          <line class="seq-msg ret" x1="428" y1="1832" x2="1034" y2="1832" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2114" text-anchor="end">Sub-Agent registers its identity &#8212; generate id for sub-agent (Vault-signed proof, org-b authority)</text>
+          <line class="seq-msg" x1="1038" y1="2120" x2="550" y2="2120" marker-end="url(#arr)"/>
+          <text class="seq-label" x="552" y="2138">RS256 signature (org-b key stays in Vault)</text>
+          <line class="seq-msg ret" x1="550" y1="2144" x2="1034" y2="2144" marker-end="url(#arr)"/>
+          <line class="seq-msg" x1="1038" y1="2158" x2="428" y2="2158" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="2176">id = AGNTCY-sub-agent</text>
+          <line class="seq-msg ret" x1="428" y1="2182" x2="1034" y2="2182" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:cimd-resolve-id" class="g">
-          <text class="seq-label" x="1032" y="1860" text-anchor="end">resolve id &#8594; ResolverMetadata + JWK (org-b issuer)</text>
-          <line class="seq-msg" x1="1038" y1="1866" x2="428" y2="1866" marker-end="url(#arr)"/>
-          <text class="seq-label" x="430" y="1884">ResolverMetadata + JWK</text>
-          <line class="seq-msg ret" x1="428" y1="1890" x2="1034" y2="1890" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2210" text-anchor="end">resolve id &#8594; ResolverMetadata + JWK (org-b issuer)</text>
+          <line class="seq-msg" x1="1038" y1="2216" x2="428" y2="2216" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="2234">ResolverMetadata + JWK</text>
+          <line class="seq-msg ret" x1="428" y1="2240" x2="1034" y2="2240" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:resolve-badge" class="g">
-          <text class="seq-label" x="1032" y="1912.0" text-anchor="end">publish Sub-Agent&#39;s agent badge VC &#8212; the leaf: delegatable=[]</text>
-          <line class="seq-msg" x1="1038" y1="1918.0" x2="428" y2="1918.0" marker-end="url(#arr)"/>
-          <text class="seq-label" x="430" y="1936.0">caps=[gitea:write, gitea:pr]  delegatable=[] &#8212; chain ends here</text>
-          <line class="seq-msg ret" x1="428" y1="1942.0" x2="1034" y2="1942.0" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2262" text-anchor="end">publish Sub-Agent&#39;s agent badge VC &#8212; the leaf: delegatable=[]</text>
+          <line class="seq-msg" x1="1038" y1="2268" x2="428" y2="2268" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="2286">caps=[gitea:write, gitea:pr]  delegatable=[] &#8212; chain ends here</text>
+          <line class="seq-msg ret" x1="428" y1="2292" x2="1034" y2="2292" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:verify-sender-badge" class="g">
-          <text class="seq-label" x="1032" y="1964.0" text-anchor="end">resolve Triage&#39;s credential &#8212; may it delegate what our sub-badge grants?</text>
-          <line class="seq-msg" x1="1038" y1="1970.0" x2="428" y2="1970.0" marker-end="url(#arr)"/>
-          <text class="seq-label" x="430" y="1988.0">granted &#8838; delegatable &#10003;  act_chain agrees &#10003;</text>
-          <line class="seq-msg ret" x1="428" y1="1994.0" x2="1034" y2="1994.0" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2314" text-anchor="end">resolve Triage&#39;s credential &#8212; may it delegate what our sub-badge grants?</text>
+          <line class="seq-msg" x1="1038" y1="2320" x2="428" y2="2320" marker-end="url(#arr)"/>
+          <text class="seq-label" x="430" y="2338">granted &#8838; delegatable &#10003;  act_chain agrees &#10003;</text>
+          <line class="seq-msg ret" x1="428" y1="2344" x2="1034" y2="2344" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:kc-b-exchange" class="g">
-          <text class="seq-label" x="1032" y="2028" text-anchor="end">jwt-bearer grant (assertion = the verified sub-badge) &#8594; Keycloak B</text>
-          <line class="seq-msg" x1="1038" y1="2034" x2="916" y2="2034" marker-end="url(#arr)"/>
-          <text class="seq-label" x="918" y="2052">access token (gitea:write, gitea:pr &#8212; no triage:create)</text>
-          <line class="seq-msg ret" x1="916" y1="2058" x2="1034" y2="2058" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2378" text-anchor="end">jwt-bearer grant (assertion = the verified sub-badge) &#8594; Keycloak B</text>
+          <line class="seq-msg" x1="1038" y1="2384" x2="916" y2="2384" marker-end="url(#arr)"/>
+          <text class="seq-label" x="918" y="2402">access token (gitea:write, gitea:pr &#8212; no triage:create)</text>
+          <line class="seq-msg ret" x1="916" y1="2408" x2="1034" y2="2408" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:idjag-gitea" class="g">
-          <text class="seq-label" x="1032" y="2084" text-anchor="end">resource credentials: scoped access token + verified sub-badge</text>
-          <path class="seq-msg" d="M1038,2090 Q1070,2096 1070,2104 Q1070,2112 1038,2112" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2434" text-anchor="end">resource credentials: scoped access token + verified sub-badge</text>
+          <path class="seq-msg" d="M1038,2440 Q1070,2446 1070,2454 Q1070,2462 1038,2462" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:push-file" class="g">
-          <text class="seq-label" x="1032" y="2132" text-anchor="end">push fix to agent branch (needs gitea:write) &#8212; via Envoy B + gitea-gateway</text>
-          <line class="seq-msg" x1="1038" y1="2138" x2="1160" y2="2138" marker-end="url(#arr)"/>
-          <text class="seq-label" x="1158" y="2156" text-anchor="end">branch + commit &#10003;</text>
-          <line class="seq-msg ret" x1="1160" y1="2162" x2="1034" y2="2162" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2482" text-anchor="end">push fix to agent branch (needs gitea:write) &#8212; via Envoy B + gitea-gateway</text>
+          <line class="seq-msg" x1="1038" y1="2488" x2="1160" y2="2488" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1158" y="2506" text-anchor="end">branch + commit &#10003;</text>
+          <line class="seq-msg ret" x1="1160" y1="2512" x2="1034" y2="2512" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:open-pr" class="g">
-          <text class="seq-label" x="1032" y="2188" text-anchor="end">open PR (branch &#8594; main, needs the separate gitea:pr scope)</text>
-          <line class="seq-msg" x1="1038" y1="2194" x2="1160" y2="2194" marker-end="url(#arr)"/>
-          <text class="seq-label" x="1158" y="2212" text-anchor="end">PR created &#10003;</text>
-          <line class="seq-msg ret" x1="1160" y1="2218" x2="1034" y2="2218" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2538" text-anchor="end">open PR (branch &#8594; main, needs the separate gitea:pr scope)</text>
+          <line class="seq-msg" x1="1038" y1="2544" x2="1160" y2="2544" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1158" y="2562" text-anchor="end">PR created &#10003;</text>
+          <line class="seq-msg ret" x1="1160" y1="2568" x2="1034" y2="2568" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:denied-pr-attempt" class="g">
-          <text class="seq-label" x="1032" y="2244" text-anchor="end">same PR against demo-protected (deny-listed, outside the signed repo)</text>
-          <line class="seq-msg" x1="1038" y1="2250" x2="1160" y2="2250" marker-end="url(#arr)"/>
-          <text class="seq-label" x="1158" y="2268" text-anchor="end">denied &#10007; (403 &#8212; scope alone isn&#39;t enough)</text>
-          <line class="seq-msg ret" x1="1160" y1="2274" x2="1034" y2="2274" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2594" text-anchor="end">same PR against demo-protected (deny-listed, outside the signed repo)</text>
+          <line class="seq-msg" x1="1038" y1="2600" x2="1160" y2="2600" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1158" y="2618" text-anchor="end">denied &#10007; (403 &#8212; scope alone isn&#39;t enough)</text>
+          <line class="seq-msg ret" x1="1160" y1="2624" x2="1034" y2="2624" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:opa-egress" class="g">
-          <text class="seq-label" x="1032" y="2300" text-anchor="end">Envoy B resource policy: both JWTs &#10003; depth &#10003; scope &#8838; parent &#10003; repo &#10003;</text>
-          <line class="seq-msg" x1="1038" y1="2306" x2="672" y2="2306" marker-end="url(#arr)"/>
-          <text class="seq-label" x="674" y="2324">ALLOW + policy decision headers</text>
-          <line class="seq-msg ret" x1="672" y1="2330" x2="1034" y2="2330" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2650" text-anchor="end">Envoy B resource policy: both JWTs &#10003; depth &#10003; scope &#8838; parent &#10003; repo &#10003;</text>
+          <line class="seq-msg" x1="1038" y1="2656" x2="672" y2="2656" marker-end="url(#arr)"/>
+          <text class="seq-label" x="674" y="2674">ALLOW + policy decision headers</text>
+          <line class="seq-msg ret" x1="672" y1="2680" x2="1034" y2="2680" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:dir-push" class="g">
-          <text class="seq-label" x="1032" y="2356" text-anchor="end">push Sub-Agent turn record (OASF) &#8594; CID</text>
-          <line class="seq-msg" x1="1038" y1="2362" x2="306" y2="2362" marker-end="url(#arr)"/>
-          <text class="seq-label" x="308" y="2380">CID (content-addressed)</text>
-          <line class="seq-msg ret" x1="306" y1="2386" x2="1034" y2="2386" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2706" text-anchor="end">push Sub-Agent turn record (OASF) &#8594; CID</text>
+          <line class="seq-msg" x1="1038" y1="2712" x2="306" y2="2712" marker-end="url(#arr)"/>
+          <text class="seq-label" x="308" y="2730">CID (content-addressed)</text>
+          <line class="seq-msg ret" x1="306" y1="2736" x2="1034" y2="2736" marker-end="url(#arr)"/>
         </g>
 
         <g data-step="sub:pr-created" class="g">
-          <text class="seq-label" x="1032" y="2412" text-anchor="end">PR live &#8212; causal act-chain audit</text>
-          <path class="seq-msg" d="M1038,2418 L1066,2418 L1066,2428 L1040,2428" marker-end="url(#arr)"/>
-          <text class="seq-label" x="1032" y="2456" text-anchor="end">PR created &#10003; &#8212; Sarah &#8594; OpenCode &#8594; Triage &#8594; Sub-Agent</text>
-          <line class="seq-msg ret" x1="1030" y1="2462" x2="66" y2="2462" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2762" text-anchor="end">PR live &#8212; causal act-chain audit</text>
+          <path class="seq-msg" d="M1038,2768 L1066,2768 L1066,2778 L1040,2778" marker-end="url(#arr)"/>
+          <text class="seq-label" x="1032" y="2806" text-anchor="end">PR created &#10003; &#8212; Security Autonomous Agent &#8594; Triage &#8594; Sub-Agent</text>
+          <line class="seq-msg ret" x1="1030" y1="2812" x2="66" y2="2812" marker-end="url(#arr)"/>
         </g>
 
         <circle id="travelDot" r="5"/>
 
       </svg>
-    </div><!-- /diagram -->
+      </div><!-- /diagram -->
+    </details>
 
     <div id="steps"></div>
   </section>
@@ -722,21 +1071,100 @@
   <section id="tab-how" class="prose" hidden>
 
     <h2>What this demo shows</h2>
-    <p>A cross-domain AI agent remediation scenario where <b>Sarah</b> (an engineer at Org A) asks
-    <b>OpenCode</b> (her Org A AI agent) to fix a CVE found in a repo owned by <b>Org B</b>.
-    Because Org B has its own IdP and access control, OpenCode cannot act directly — it must
-    <i>assert</i> Sarah's delegation cross-domain using the ID-JAG protocol.</p>
+    <p>A cross-domain AI agent remediation scenario where the <b>Security Autonomous Agent</b>
+    in Org A uses its internal <b>OpenCode engine</b> to analyze a repository owned by <b>Org B</b>.
+    Because Org B has its own IdP and access control, the agent cannot act directly — it must
+    present a short-lived ID-JAG authorization across the trust boundary.</p>
 
-    <div class="note"><b>Two signed objects, and they are not the same thing.</b>
-    A <b>credential</b> (<code>typ=JOSE</code>, type <code>AgentBadge</code>) is signed with the
+    <div class="note"><b>The live flow now uses two VCs, a VP, and a separate request assertion.</b>
+    The <b>Agent Badge VC</b> (<code>typ=JOSE</code>, type <code>AgentBadge</code>) is signed with the
     org's Vault trust-authority key and published to the Identity Node, where anyone can resolve it
     at <code>/v1alpha1/vc/{id}/.well-known/vcs.json</code>. It says <i>what an agent is and what it
-    may do or delegate</i>, and lasts about an hour. An <b>assertion</b>
+    may do or delegate</i>. A distinct secondary issuer signs an <b>Organization VC</b>. The agent
+    places both credentials in a challenge-bound, holder-signed <b>Verifiable Presentation</b>, and
+    the verifier checks the VP, both issuers, <code>operatedBy</code>, CIMD, and Directory binding.
+    The <b>ID-JAG assertion</b>
     (<code>typ=oauth-id-jag+jwt</code>) is minted by Keycloak per task, lives about five minutes, and
     says <i>this particular request is authorised</i>. Policy at the four Envoy boundaries acts on the
     <b>assertion</b>; the <b>credential</b> is what a counterparty resolves independently before
     trusting a handoff. Where a step says "sub-badge" it means an assertion — the JWT header type is
     always authoritative.</div>
+
+    <div class="trust-explainer">
+      <h2>How the two-VC trust flow works</h2>
+      <p class="trust-summary">The flow separates four questions that must not be answered by one
+      artifact: <b>what the agent is</b>, <b>which organization operates it</b>, <b>whether the agent
+      controls its identity key</b>, and <b>whether this specific request is authorized</b>.</p>
+
+      <div class="trust-terms" aria-label="Trust artifact definitions">
+        <div class="trust-term"><b>Agent Badge VC</b><span>Signed identity and capability claims about the agent, including its CIMD subject, OASF definition, and <code>operatedBy</code>.</span></div>
+        <div class="trust-term"><b>Organization VC</b><span>Independently signed claim that identifies the operating organization through its organization URI.</span></div>
+        <div class="trust-term"><b>Verifiable Presentation</b><span>Holder-signed presentation containing both VCs plus the verifier's nonce and audience.</span></div>
+        <div class="trust-term"><b>ID-JAG</b><span>Separate, short-lived authorization for one action, resource, audience, and delegation chain.</span></div>
+      </div>
+
+      <p>The Security Autonomous Agent first constructs its Agent Badge VC from the canonical OASF definition
+      and has it signed by Org A's Vault trust-authority key. A separate Organization VC issuer
+      independently issues the Organization VC. The agent then places exactly those two credentials
+      into a Verifiable Presentation and signs the presentation using the key associated with its
+      CIMD identity.</p>
+      <p>The Trust Verifier does not trust the presentation merely because it is signed. It resolves
+      the holder's CIMD verification method, validates both issuer signatures and validity periods,
+      checks the nonce and audience, confirms the agent-to-organization binding, and compares the
+      signed OASF definition with the AGNTCY Directory record. Only after those checks pass can the
+      request proceed to the separate ID-JAG authorization flow.</p>
+
+      <div class="mermaid-wrap" aria-label="Two credential verifiable presentation sequence">
+        <pre class="mermaid" id="trustMermaid">sequenceDiagram
+    autonumber
+    participant Agent as Security Autonomous Agent (Holder)
+    participant Vault as Org A Vault Trust Authority
+    participant CIMD as AGNTCY Identity Node / CIMD
+    participant Directory as AGNTCY Directory
+    participant OrgIssuer as Secondary Organization VC Issuer
+    participant Verifier as Trust Verifier
+
+    Agent->>Agent: Build Agent Badge VC from canonical OASF definition
+    Agent->>Vault: Sign Agent Badge VC with Org A issuer key
+    Vault-->>Agent: JOSE Agent Badge VC
+    Agent->>CIMD: Publish signed Agent Badge VC
+    CIMD-->>Agent: Credential URL and verification metadata
+
+    Agent->>OrgIssuer: Request Organization VC for organization URI
+    OrgIssuer->>OrgIssuer: Verify organization and sign with independent issuer key
+    OrgIssuer-->>Agent: Organization VC
+
+    Verifier->>Agent: Request VP with nonce and audience
+    Agent->>CIMD: Resolve holder verification method
+    CIMD-->>Agent: CIMD ResolverMetadata and public key
+    Agent->>Agent: Assemble VP containing both VCs
+    Agent->>Agent: Sign VP with CIMD holder key
+    Agent->>Verifier: Present holder-signed VP
+
+    par Resolve cryptographic identity
+        Verifier->>CIMD: Resolve holder and issuer verification keys
+        CIMD-->>Verifier: ResolverMetadata and JWKS
+    and Resolve canonical description
+        Verifier->>Directory: Fetch canonical OASF record and digest
+        Directory-->>Verifier: OASF agent definition, identity ID, badge URL, CID
+    end
+
+    Verifier->>Verifier: Verify nonce, audience, VP signature, and validity
+    Verifier->>Verifier: Verify Agent Badge VC issuer signature and validity
+    Verifier->>Verifier: Verify Organization VC issuer signature and validity
+    Verifier->>Verifier: Require AgentBadge.operatedBy == OrganizationVC.credentialSubject.id
+    Verifier->>Verifier: Compare signed OASF payload and digest with Directory
+
+    alt Every verification succeeds
+        Verifier-->>Agent: Accept verified agent and operator identity
+    else Any verification fails
+        Verifier-->>Agent: Reject the trust presentation
+    end</pre>
+      </div>
+      <p class="mermaid-caption">The trust anchors are the configured Agent Badge issuer key, the
+      independent Organization VC issuer key, the CIMD holder key, and the verifier's trust policy.
+      The VP carries the evidence; it is not itself a trust anchor.</p>
+    </div>
 
     <p>The credential side follows the standard W3C VC roles — <b>Issuer</b>, <b>Holder</b>,
     <b>Verifier</b> — each mapped onto a specific component here, not left abstract:</p>
@@ -749,7 +1177,7 @@
         <code>issue</code> verb, it only registers a credential the issuer already signed, so the
         trust anchor is the org's registered issuer JWKS, not any one service's keypair.</td></tr>
       <tr><td><b>Holder</b></td><td>The agent the credential is about
-        (OpenCode, Triage, or Sub-Agent)</td><td>Builds its own <code>AgentBadge</code>, gets it
+        (Security Autonomous Agent, Triage, or Sub-Agent)</td><td>Builds its own <code>AgentBadge</code>, gets it
         signed by its org's issuer key, publishes it to the Identity Node, and later <i>presents</i>
         it — as the <code>actor_token</code> at an ID-JAG mint, or resolved by a counterparty at a
         handoff. One live credential per identity; publish-once, not re-issued per task.</td></tr>
@@ -757,7 +1185,7 @@
         it</td><td>Not one party — this demo verifies at every boundary that relies on the badge:
         the Identity Node on <code>/vc/verify</code>, Keycloak A's SPI before it will mint an
         ID-JAG on that badge's authority, and — since M14 — the <i>other side of every handoff</i>
-        (Triage resolves and checks OpenCode's credential; Sub-Agent resolves and checks Triage's)
+        (Triage resolves and checks the Security Autonomous Agent's credential; Sub-Agent resolves and checks Triage's)
         rather than trusting the assertion alone.</td></tr>
     </table>
 
@@ -766,9 +1194,9 @@
     the alternative, built on three design principles:</p>
     <table>
       <tr><th>Principle</th><th>What it means here</th></tr>
-      <tr><td><b>Identity ≠ Execution</b></td><td>Who initiated (Sarah's <code>sub</code>) and who
-        executed (the agent's <code>act</code>) are kept distinct at every hop — never collapsed
-        into one identity, so human accountability survives every delegation.</td></tr>
+      <tr><td><b>Identity ≠ Execution</b></td><td>Who initiated (the Security Autonomous Agent's
+        <code>sub</code>) and who executed (the agent's <code>act</code>) are kept distinct at every
+        hop — never collapsed into one identity.</td></tr>
       <tr><td><b>Independent Trust Domains</b></td><td>Org A and Org B each verify signatures
         against their own JWKS and evaluate their own policy — no shared IdP, PKI, or governance
         is required for either side to trust the other's assertions.</td></tr>
@@ -780,27 +1208,31 @@
     <table>
       <tr><th>Layer</th><th>Standard / Protocol</th><th>What it does in this demo</th></tr>
       <tr><td><b>AGNTCY Directory</b></td><td>OASF v1.1.0 records, gRPC</td><td>Stores per-turn and per-agent records, content-addressed by CID — immutable audit trail</td></tr>
-      <tr><td><b>AGNTCY Identity Node (CIMD)</b></td><td>Self-issued proof JWTs, Vault-backed keys</td><td>org-a is a registered local trust authority; OpenCode generates/resolves a real cryptographic id for <i>itself</i> before requesting any badge or doing any work</td></tr>
-      <tr><td><b>ID-JAG assertion</b></td><td>IETF draft-ietf-oauth-identity-assertion-authz-grant</td><td>OpenCode mints a signed JWT asserting "Sarah authorises me to act as triage-agent in Org B"</td></tr>
+      <tr><td><b>AGNTCY Identity Node (CIMD)</b></td><td>Self-issued proof JWTs, Vault-backed keys</td><td>org-a is a registered local trust authority; the Security Autonomous Agent generates and resolves its cryptographic identity before requesting any badge or doing work</td></tr>
+      <tr><td><b>Secondary Organization VC</b></td><td>W3C VC, independent Vault issuer key</td><td>Attests the operating enterprise without using D-U-N-S-specific claims</td></tr>
+      <tr><td><b>Two-VC presentation</b></td><td>Holder-signed VP, challenge + audience bound</td><td>Contains exactly one Agent Badge VC and one Organization VC; the verifier checks both trust chains and their <code>operatedBy</code> binding</td></tr>
+      <tr><td><b>Agent-to-Agent transport</b></td><td>A2A 1.0 Agent Card + JSON-RPC <code>SendMessage</code></td><td>Security Autonomous Agent → Triage → Remediation Agent interactions use A2A tasks and JSON data artifacts; OpenCode is an internal API call</td></tr>
+      <tr><td><b>ID-JAG assertion</b></td><td>IETF draft-ietf-oauth-identity-assertion-authz-grant</td><td>The Security Autonomous Agent obtains a signed JWT authorizing Triage to act in Org B</td></tr>
       <tr><td><b>jwt-bearer grant</b></td><td>RFC 7523 / Keycloak 26.7</td><td>Org B's Keycloak validates the ID-JAG assertion and issues a scoped access token</td></tr>
-      <tr><td><b>Act-chain</b></td><td>RFC 8693 <code>act</code> claim</td><td>Nested delegation: Sarah → OpenCode → Triage → Sub-Agent — every token carries the full chain</td></tr>
+      <tr><td><b>Act-chain</b></td><td>RFC 8693 <code>act</code> claim</td><td>Nested delegation: Security Autonomous Agent → Triage → Remediation Agent — OpenCode is absent because tools are not delegation principals</td></tr>
       <tr><td><b>Bounded privilege</b></td><td>Parameterized scopes</td><td>Triage mints a <i>narrowed</i> sub-badge for Sub-Agent: <code>gitea:write gitea:pr</code> only — no <code>triage:create</code></td></tr>
     </table>
 
     <h2>Step-by-step walkthrough</h2>
 
-    <h3>Phase A — OpenCode authenticates &amp; registers its own identity (steps 1–3)</h3>
-    <p>Sarah signs in via OIDC password grant using the <code>opencode-agent</code> client in Org A's Keycloak realm.
-    OpenCode does <i>not</i> start working yet — it first registers its <b>own</b> CIMD identity
-    (<code>AGNTCY-opencode-agent</code>) at identity-node, the same Vault-backed proof-JWT flow described
+    <h3>Phase A — the Security Autonomous Agent authenticates and registers its identity (steps 1–3)</h3>
+    <p>The agent obtains a client-credentials token using its confidential
+    <code>security-autonomous-agent</code> client in Org A's Keycloak realm. It does <i>not</i>
+    start working yet — it first registers its CIMD identity
+    (<code>AGNTCY-security-autonomous-agent</code>) at identity-node, using the Vault-backed proof-JWT flow described
     below, then resolves it back to confirm the registration.</p>
 
     <h3>Policy-scoped badge — least privilege before any work runs (steps 4–5)</h3>
-    <p>OpenCode presents Sarah's delegated access token, plus the action and repo it wants to perform,
+    <p>The Security Autonomous Agent presents its access token, plus the action and repo it wants to perform,
     to <b>Envoy A + inline OPA</b> at a new endpoint: <code>/api/badge-scope-check</code>. Policy decides
     whether — and how narrowly — to scope this task, returning a scoped-down intent
     (e.g. <code>scan-remediate:demo-admin/payments-service</code>) as a response header. Only <i>then</i>
-    does OpenCode issue the badge, bound to exactly that intent — it cannot be broader than what
+    does the agent issue the badge, bound to exactly that intent — it cannot be broader than what
     policy already approved. The badge is a genuine W3C Verifiable Credential: built by the agent,
     signed with <b>org-a's Vault trust-authority key</b> (the same key CIMD proofs use — the private
     half never leaves Vault), and published to the <b>AGNTCY Identity Node</b>, which verifies it and
@@ -809,7 +1241,7 @@
     signed, so the trust anchor is the org's registered issuer key rather than any one service's
     keypair.</p>
     <pre><code>POST /api/badge-scope-check          # Envoy A + inline OPA
-  Authorization: Bearer &lt;Sarah's access token&gt;
+  Authorization: Bearer &lt;Security Autonomous Agent's access token&gt;
   x-agntcy-requested-action: scan-remediate
   x-agntcy-requested-repo: demo-admin/payments-service
 → 200 OK
@@ -823,22 +1255,37 @@ POST /v1alpha1/vc/publish             # AGNTCY Identity Node
 POST /v1alpha1/vc/verify              # the node verifies, not the issuer
 → {"status": true, "document": {"type": ["VerifiableCredential", "AgentBadge"], …}}</code></pre>
 
-    <h3>The work — scan + a real OpenCode agent (steps 6–6b)</h3>
+    <h3>Cross-enterprise trust bundle — two VCs in one VP (steps 5a–5c)</h3>
+    <p>A separate <b>secondary-vc-issuer</b>, backed by its own Vault key, issues a generic
+    Organization VC for <code>urn:agntcy:organization:org-a</code>. The Security Autonomous Agent requests a nonce and
+    audience from <b>trust-verifier</b>, assembles the Organization VC and Agent Badge VC into one VP,
+    and signs the VP with the key resolved for its CIMD identity. The verifier accepts only if the
+    challenge is fresh, the VP signature resolves through CIMD, both VC signatures and dates are
+    valid, the badge subject is the holder, <code>badge.operatedBy == organizationVC.subject.id</code>,
+    and the badge's OASF record and digest match AGNTCY Directory.</p>
+
+    <h3>The work — scan + the internal OpenCode engine (steps 6–6b)</h3>
     <p>Only now, under the task-scoped badge, does the actual work begin: a scan of source actually
     fetched from Org B through the delegation chain (a real Gitea read, not a hardcoded finding), then a
-    real remediation analysis from the <b>real open-source OpenCode agent</b> (opencode.ai, headless
-    in its own <code>opencode-server</code> container) — a genuine LLM call, not a canned response.
+    real remediation analysis from the <b>open-source OpenCode engine</b> (opencode.ai, headless
+    in its own <code>opencode-server</code> container). It is an internal tool call, not another A2A hop or identity.
     This step is deliberately non-fatal: without a reachable model provider it reports
     <code>skipped</code> and the identity chain continues, so the security-relevant part of this demo
     never depends on model availability.</p>
 
-    <h3>AGNTCY Directory — per-turn record &amp; agent discovery (steps 7–8)</h3>
-    <p>OpenCode pushes an OASF record to the <b>AGNTCY Directory Node</b> (<code>dir-apiserver:8888</code>, gRPC).
-    The directory returns a <b>CID</b> — a content-addressed, immutable identifier that proves this remediation turn happened.
-    OpenCode then searches the directory by agent name to discover the triage-agent's endpoint.</p>
+    <h3>AGNTCY Directory — canonical description, discovery, and audit (steps 7–8)</h3>
+    <p>The <b>AGNTCY Directory Node</b> (<code>dir-apiserver:8888</code>, gRPC) stores two deliberately
+    separate record types. The bootstrapped <code>record_type=agent</code> record is the canonical OASF
+    description plus the CIMD identity ID and Agent Badge URL. Each task produces a
+    <code>record_type=audit</code> record; the Directory returns a <b>CID</b> for that immutable turn history.
+    Directory records are searchable discovery/audit data, not authorization credentials.</p>
+    <p>After searching by name, the counterparty resolves the returned identity at the
+    <b>AGNTCY Identity Node</b>, fetches the signed Agent Badge, and compares its
+    <code>credentialSubject.badge</code> and SHA-256 digest with the Directory's OASF copy. Only the
+    separate ID-JAG authorizes the specific request.</p>
     <pre><code># Push turn record (gRPC bidirectional stream)
 stub.Push([Record(data={
-    "name": "opencode-agent", "schema_version": "1.1.0",
+    "name": "security-autonomous-agent", "schema_version": "1.1.0",
     "annotations": {"cve": "CVE-2024-12345", "repo": "…"}
 })])
 → RecordRef(cid="baeare…")   # immutable, content-addressed
@@ -856,33 +1303,33 @@ stub.SearchRecords(SearchRecordsRequest(queries=[RecordQuery(
     public key, and self-signs a proof JWT (<code>iss=agntcy:org-a</code>, a <code>sub_jwk</code> claim
     carrying the public key) via Vault's <code>/transit/sign</code> API to register the issuer. Steps
     2–3 above sign a fresh proof JWT the same way to mint and resolve an id for
-    <b>opencode-agent</b> itself under org-a's authority.</div>
+    <b>security-autonomous-agent</b> under org-a's authority.</div>
 
     <h3>Cross-domain token exchange (steps 9–12)</h3>
-    <p>OpenCode mints an ID-JAG assertion at <b>Keycloak A itself</b> — a real
+    <p>The Security Autonomous Agent obtains an ID-JAG assertion from <b>Keycloak A</b> — a real
     <code>grant_type=token-exchange</code> call handled by a custom SPI
     extension (<code>keycloak-idjag-spi</code>), following
     <code>draft-ietf-oauth-identity-assertion-authz-grant</code>'s
     <code>requested_token_type=urn:ietf:params:oauth:token-type:id-jag</code>.
-    The result is a short-lived RS256 JWT with <code>sub=sarah@org-a.example</code>,
-    <code>act_chain=[opencode-agent]</code>, <code>aud=KC-B org-b realm</code>,
+    The result is a short-lived RS256 JWT with <code>sub=service-account-security-autonomous-agent</code>,
+    <code>act_chain=[security-autonomous-agent]</code>, <code>aud=KC-B org-b realm</code>,
     <code>scope=triage:create</code>, and <code>intent=[create-pr-fix]</code> —
     signed with Keycloak's own realm key, not a separate mock issuer's
     throwaway keypair. Before it ever leaves Org A, Envoy A + inline OPA independently re-check its
     scope, intent, and delegation-chain depth (the egress PDP). Org B's Keycloak then validates the
-    assertion against that same JWKS, maps Sarah's identity, and issues a scoped access
+    assertion against that same JWKS, maps the Security Autonomous Agent's identity, and issues a scoped access
     token. Triage's later narrowed sub-badge is minted the same native way, by
     <b>Keycloak B</b> through its own copy of the SPI — no mock issuer remains
     anywhere in the delegation path.</p>
     <pre><code>POST /realms/org-a/protocol/openid-connect/token   # Keycloak A
   grant_type          = urn:ietf:params:oauth:grant-type:token-exchange
-  subject_token       = &lt;Sarah's exchanged KC-A access token&gt;
+  subject_token       = &lt;Security Autonomous Agent's exchanged KC-A access token&gt;
   subject_token_type  = urn:ietf:params:oauth:token-type:access_token
   requested_token_type = urn:ietf:params:oauth:token-type:id-jag
   audience            = http://keycloak-b:8080/realms/org-b
   scope               = openid triage:create
   target_client_id    = triage-agent
-  act_chain           = opencode-agent
+  act_chain           = security-autonomous-agent
   intent              = create-pr-fix
 → {"access_token": "eyJ…", "issued_token_type": "urn:ietf:params:oauth:token-type:id-jag"}
 
@@ -894,10 +1341,10 @@ POST /realms/org-b/protocol/openid-connect/token
 → {"access_token": "eyJ…", "scope": "triage:create"}</code></pre>
 
     <h3>Org B — Triage agent &amp; bounded sub-agent (steps 13+)</h3>
-    <p>OpenCode calls <code>POST /api/ticket</code> through Envoy with the scoped
+    <p>The Security Autonomous Agent sends an A2A 1.0 JSON-RPC <code>SendMessage</code> task through Envoy with the scoped
     access token and signed actor token. Envoy validates both signatures and
     runs the inline OPA delegation policy — and then Triage repeats, inside Org B,
-    exactly the lifecycle OpenCode just ran in Org A:</p>
+    its own verification and narrowing lifecycle:</p>
     <ol>
       <li><b>Verify what it was handed.</b> Triage fetches Keycloak A's JWKS and
       re-verifies the ID-JAG's signature, issuer, audience, and act-chain
@@ -914,7 +1361,7 @@ POST /realms/org-b/protocol/openid-connect/token
       <li><b>Delegate narrower.</b> <b>Keycloak B</b> natively mints the sub-badge
       (same <code>keycloak-idjag-spi</code> extension, signed with org-b's realm key):
       caps ⊆ parent — only <code>gitea:write gitea:pr</code>, no <code>triage:create</code> —
-      with the act-chain <code>Sarah → OpenCode → Triage</code>, signed intent
+      with the act-chain <code>Security Autonomous Agent → Triage</code>, signed intent
       <code>create-pr-fix</code>, and signed resource <code>demo-admin/payments-service</code>.
       Triage also pushes its own turn record to the Directory.</li>
     </ol>
@@ -936,7 +1383,7 @@ POST /realms/org-b/protocol/openid-connect/token
       OPA permits only the repo-bound push and pull-request operations before Gitea Gateway can
       use its admin credential — and refuses the same PR against the deny-listed
       <code>demo-protected</code> repo, even though the token still carries <code>gitea:pr</code>.</li>
-      <li><b>Record the turn</b> in the Directory. Three turn records now exist — OpenCode's,
+      <li><b>Record the turn</b> in the Directory. Three turn records now exist — the Security Autonomous Agent's,
       Triage's, and Sub-Agent's — so the whole delegation is reconstructible from the Directory
       alone, independently of the tokens.</li>
     </ol>
@@ -963,7 +1410,7 @@ POST /realms/org-b/protocol/openid-connect/token
         </g>
         <g>
           <text class="seq-num" x="80" y="70">1</text>
-          <text class="seq-label" x="96" y="70">Sarah OIDC login</text>
+          <text class="seq-label" x="96" y="70">Security Autonomous Agent client credentials</text>
           <line class="seq-msg" x1="70" y1="76" x2="174" y2="76" marker-end="url(#arr)"/>
           <line class="seq-msg ret" x1="174" y1="86" x2="76" y2="86" marker-end="url(#arr)"/>
         </g>
@@ -1010,12 +1457,30 @@ POST /realms/org-b/protocol/openid-connect/token
 
 <script>
   // ── Tab switching ──────────────────────────────────────────────────────────
-  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-    t.classList.add('active');
-    document.getElementById('tab-demo').hidden = t.dataset.tab !== 'demo';
-    document.getElementById('tab-how').hidden  = t.dataset.tab !== 'how';
+  function tabFromLocation() {
+    return window.location.hash === '#how-it-works' ? 'how' : 'demo';
+  }
+
+  function selectTab(tabName) {
+    const selected = tabName === 'how' ? 'how' : 'demo';
+    document.querySelectorAll('.tab').forEach(tab => {
+      const active = tab.dataset.tab === selected;
+      tab.classList.toggle('active', active);
+      tab.setAttribute('aria-selected', String(active));
+    });
+    document.getElementById('tab-demo').hidden = selected !== 'demo';
+    document.getElementById('tab-how').hidden = selected !== 'how';
+    if (selected === 'how') requestAnimationFrame(() => window.renderTrustMermaid?.());
+  }
+
+  document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => {
+    const hash = tab.dataset.tab === 'how' ? '#how-it-works' : '#live-demo';
+    if (window.location.hash !== hash) history.pushState(null, '', hash);
+    selectTab(tab.dataset.tab);
   }));
+  window.addEventListener('hashchange', () => selectTab(tabFromLocation()));
+  window.addEventListener('popstate', () => selectTab(tabFromLocation()));
+  selectTab(tabFromLocation());
 
   // ── Config ─────────────────────────────────────────────────────────────────
   let CONFIG = {};
@@ -1027,10 +1492,10 @@ POST /realms/org-b/protocol/openid-connect/token
       document.getElementById('config').innerHTML =
         `<div><b>KC-A:</b> ${esc(c.kc_a_url)} / ${esc(c.kc_a_realm)}</div>
          <div><b>KC-B:</b> ${esc(c.kc_b_url)} / ${esc(c.kc_b_realm)}</div>
-         <div><b>OpenCode client:</b> ${esc(c.opencode_client_id)}</div>
-         <div><b>OpenCode agent:</b> ${esc(c.opencode_agent_url)} (model: ${esc(c.opencode_model)})</div>
+         <div><b>Security Autonomous Agent:</b> ${esc(c.security_autonomous_agent_url)}</div>
+         <div><b>Internal OpenCode engine:</b> model ${esc(c.opencode_model)} (not a separate agent identity)</div>
          <div><b>Triage client:</b> ${esc(c.triage_client_id)}</div>
-         <div><b>User:</b> ${esc(c.sarah_user)} (${esc(c.sarah_email)})</div>
+         <div><b>Workload:</b> Security Autonomous Agent<br><code>${esc(c.security_autonomous_agent_principal)}</code></div>
          <div><b>ID-JAG issuer:</b> Keycloak A, natively (keycloak-idjag-spi) — no separate service</div>
          <div><b>Identity node:</b> ${esc(c.identity_node_url)}</div>
          <div><b>VC badge issuer:</b> org trust authority, Vault-signed — see the Vault Keys panel below</div>
@@ -1074,10 +1539,12 @@ POST /realms/org-b/protocol/openid-connect/token
     }
   }
 
-  // ── Registered agents (Identity Node) ─────────────────────────────────────
+  // ── Registered agents (Directory + Identity Node) ─────────────────────────
   // There is no "list all registered identities" API on the Identity Node or
   // the Directory, so this is a curated view over this demo's known agents,
-  // not a live enumeration. Each row separates the three W3C VC roles: the
+  // not a live enumeration. Each row shows the Directory's discovery copy
+  // separately from the Identity Node's signed credential. It also separates
+  // the three W3C VC roles: the
   // Holder (the agent itself), its Issuer (the org's Vault trust authority —
   // shown via the credential's kid), and the fact that this credential gets
   // independently Verified at multiple points downstream (not shown per-row,
@@ -1103,12 +1570,16 @@ POST /realms/org-b/protocol/openid-connect/token
           : '<span style="color:var(--muted)">no live credential published</span>';
         return `<div style="margin-bottom:8px">
           <b>${esc(a.name)}</b> — Holder id <code>${esc(a.holder_id)}</code> (${esc(a.org)})<br/>
+          <span style="color:var(--muted)">Directory OASF:</span> ${a.directory_record
+            ? `agent record ✓ · digest <code>${esc(a.directory_record.oasf_digest||'')}</code><br/>
+               <span style="color:var(--muted)">Badge URL:</span> <code>${esc(a.directory_record.badge_url||'')}</code>`
+            : '<span style="color:var(--muted)">record not available</span>'}<br/>
           <span style="color:var(--muted)">Issuer:</span> ${esc(a.issuer_kid || 'unknown')} (Vault-signed)<br/>
           <span style="color:var(--muted)">Credential:</span> ${cred}
           &nbsp;<a href="${esc(vcsLink)}" target="_blank" rel="noopener">view raw &#8594;</a>
         </div>`;
       }).join('') +
-        '<div style="margin-top:6px"><i>Curated view over this demo\'s known agents — neither the Identity Node nor the Directory expose a list-all API. Issuer/Holder/Verifier roles follow the W3C VC model; see the How It Works tab for the full mapping.</i></div>';
+        '<div style="margin-top:6px"><i>Directory = searchable OASF description and audit/CID layer; Identity Node = CIMD resolution and signed Agent Badge layer. This is a curated view over known agents — neither service exposes a list-all API.</i></div>';
     } catch (e) {
       el.innerHTML = '<div style="color:var(--err)">Could not reach /api/registered-agents.</div>';
     }
@@ -1122,7 +1593,7 @@ POST /realms/org-b/protocol/openid-connect/token
   function renderLegend(c) {
     const entries = [
       { label: 'Gitea', url: c.gitea_ui_url, note: `admin: ${c.gitea_admin_user || 'demo-admin'}` },
-      { label: 'Keycloak A (org-a)', url: c.kc_a_ui_url, note: `users: ${esc(c.sarah_user)}, admin` },
+      { label: 'Keycloak A (org-a)', url: c.kc_a_ui_url, note: `client: ${esc(c.security_autonomous_agent_client_id)}, admin` },
       { label: 'Keycloak B (org-b)', url: c.kc_b_ui_url, note: 'user: admin' },
     ].filter(e => e.url);
     const el = document.getElementById('legend');
@@ -1133,17 +1604,18 @@ POST /realms/org-b/protocol/openid-connect/token
   }
 
   // ── Story overview (shown once, before the animated run starts) ───────────
-  const INTRO_STORY = "Sarah (Org A) asks OpenCode to fix a security weakness in a repository she " +
-    "cannot access directly — it belongs to Org B. OpenCode (a real, non-mocked agent) crosses that " +
-    "trust boundary on her behalf to read the actual source and find the weakness itself, " +
-    "following three design principles. Identity ≠ Execution: Sarah's " +
-    "`sub` claim and the agent's `act` claim remain distinct at every hop and are never collapsed " +
-    "into a single identity. Independent Trust Domains: Org A and Org B each validate signatures " +
+  const INTRO_STORY = "The Security Autonomous Agent (Org A) receives an A2A task to fix a security weakness " +
+    "in a repository it cannot access directly because it belongs to Org B. It uses OpenCode as an internal " +
+    "planning engine — OpenCode is not a separate A2A agent, OAuth principal, or CIMD identity. " +
+    "Identity and execution remain explicit: the autonomous agent is the workload subject, while each downstream " +
+    "delegate appears in the signed `act` chain. Independent Trust Domains: Org A and Org B each validate signatures " +
     "against their own JWKS and evaluate policy independently, with no shared IdP. Complete " +
     "Auditability: every hop is independently verified and recorded in the token's `act` chain, " +
-    "not merely logged. OpenCode registers its own Vault-backed identity, obtains policy approval " +
+    "not merely logged. Every agent publishes an A2A 1.0 Agent Card and receives work through " +
+    "SendMessage tasks. The Security Autonomous Agent registers its Vault-backed identity, presents an Agent Badge VC " +
+    "together with an independently issued Organization VC in a holder-signed VP, obtains policy approval " +
     "to scope a delegation credential to this exact task before any work executes, mints a signed " +
-    "ID-JAG asserting Sarah's delegation, and hands off to Triage, which narrows the privilege " +
+    "ID-JAG authorizing the cross-domain handoff to Triage, which narrows the privilege " +
     "further before spawning a bounded Sub-Agent that opens the remediation PR.";
 
   // ── Step explainer (right-side toast) ─────────────────────────────────────
@@ -1154,44 +1626,48 @@ POST /realms/org-b/protocol/openid-connect/token
   // being cryptographically verified, not merely parsed. Written for an
   // audience already fluent in OAuth/OIDC/JWT — precision over exposition.
   const STEP_EXPLAIN = {
-    'sarah-login': "Sarah authenticates against Org A's Keycloak — the only step in this flow with a human principal. This establishes `sub=sarah@org-a.example` as the anchor claim; every downstream token carries it forward unaltered, kept distinct from whichever agent is actually executing (`act`). Identity and execution are not permitted to collapse into a single principal at any point in the chain.",
-    'cimd-generate-id': "OpenCode requires its own provable identity, independent of Sarah's — an agent asserting its principal's identity as its own would defeat accountability rather than establish it. Org A's private signing key resides in Vault's Transit secrets engine, which functions here as a signing oracle: the key never leaves Vault's boundary, is never exported, and is never held by any calling service. To register, OpenCode submits a claim to Vault's /transit/sign endpoint; Vault returns only the RS256 signature, never the key material. identity-node verifies that signature against org-a's previously registered public key before minting the id. This signature is the root of trust every subsequent `act` claim traces back to.",
-    'cimd-resolve-id': "OpenCode resolves its own id back to its ResolverMetadata and public key, independently confirming the registration rather than relying on the mint operation's own success response.",
-    'badge-scope-check': "Authorization is enforced here, prior to any work being performed. OpenCode presents Sarah's own OAuth access token, plus the requested action and resource, to Envoy A and inline OPA. Policy determines the narrowest permissible intent for this task — least privilege is a policy decision, not a constraint the agent self-imposes.",
+    'a2a-autonomous-dispatch': "The webapp sends a real A2A 1.0 JSON-RPC SendMessage request to the Security Autonomous Agent. The agent is the A2A server for this inbound task and later becomes the A2A client when it delegates to Triage. OpenCode is only an internal planning API and publishes no Agent Card or independent identity.",
+    'security-agent-login': "The Security Autonomous Agent authenticates against Org A's Keycloak with the `client_credentials` grant. This establishes `sub=service-account-security-autonomous-agent` as the workload anchor; every downstream token carries it forward, kept distinct from whichever agent is actually executing (`act`).",
+    'cimd-generate-id': "The Security Autonomous Agent registers one provable CIMD identity for the merged runtime. Org A's private signing key resides in Vault Transit and never leaves Vault; the Identity Node verifies the returned proof signature before minting AGNTCY-security-autonomous-agent. OpenCode receives no identity because it is an internal tool.",
+    'cimd-resolve-id': "The Security Autonomous Agent resolves its own CIMD id back to ResolverMetadata and a public verification key, independently confirming registration.",
+    'badge-scope-check': "Authorization is enforced before any work. The Security Autonomous Agent presents its client-credentials token, requested action, and resource to Envoy A and inline OPA. Policy determines the narrowest permissible task intent.",
     'resolve-badge': "The badge is a W3C Verifiable Credential scoped to exactly the intent OPA approved, signed with org-a's Vault trust-authority key and published to the AGNTCY Identity Node — which verifies it and serves it publicly at /v1alpha1/vc/{id}/.well-known/vcs.json. It then travels as the `actor_token` at the ID-JAG mint, where Keycloak A re-verifies it against the org's registered issuer JWKS and refuses to sign unless it attests delegation by this same subject. One identity resolves to one live credential: an existing valid one is reused rather than minting a new badge per task, since per-task narrowing is what the ID-JAG assertion carries.",
+    'secondary-organization-vc': "A genuinely separate issuer, with a separate Vault Transit signing key, attests the operating enterprise in a generic Organization VC. This is the second issuer and second VC; it is intentionally not a D-U-N-S-specific credential.",
+    'assemble-two-vc-vp': "The Security Autonomous Agent obtains a fresh verifier challenge and audience, places exactly the Agent Badge VC and Organization VC into one Verifiable Presentation, and signs it as the CIMD holder. The VP proves presentation and key control; it is not itself a trust anchor.",
+    'verify-two-vc-vp': "The deployed verifier resolves the VP holder through AGNTCY CIMD, verifies the VP signature, independently verifies each VC against its issuer, requires badge.operatedBy to equal the Organization VC subject, consumes the nonce, and compares the signed OASF payload and digest with AGNTCY Directory.",
     'mint-read-idjag': "Scanning means reading source that belongs to Org B, which is itself a cross-domain privileged act — so it gets its own assertion rather than riding on the remediation one. Keycloak A mints a second ID-JAG scoped to gitea:read alone, bound to this one repository, with intent=scan-source. Two narrow assertions rather than one broad one: the credential that reads cannot write, and the credential that writes is not issued until later.",
-    'read-egress-check': "Org A decides, unilaterally and before anything leaves, whether Sarah may delegate a *read* of this repository to Org B. Envoy A validates the assertion against Keycloak A's JWKS and inline OPA checks it carries gitea:read and nothing else — a read assertion that also carried gitea:write or triage:create is refused here, not downstream.",
+    'read-egress-check': "Org A decides, unilaterally and before anything leaves, whether the Security Autonomous Agent may delegate a *read* of this repository to Org B. Envoy A validates the assertion against Keycloak A's JWKS and inline OPA checks it carries gitea:read and nothing else — a read assertion that also carried gitea:write or triage:create is refused here, not downstream.",
     'kc-b-read-exchange': "Keycloak B independently validates the read assertion against Keycloak A's JWKS and issues its own local access token carrying gitea:read only. The same trust boundary the remediation path crosses later, crossed first with strictly less authority.",
     'fetch-source': "The file comes through Envoy B and inline OPA, never from Gitea directly. Policy requires gitea:read, rejects a token that also carries write or PR authority, and allows the read only for the repository signed into the assertion — asking for a different one is refused at the gateway, whatever the token says.",
     'scan': "Now the agent analyses the source it actually fetched — real code obtained through the delegation chain, not a hardcoded constant. It reports a CWE rather than a CVE, because a weakness found by reading code has no CVE: that identifier describes a vulnerability in a released product. The finding that emerges here is what flows into the badge intent, the ticket, and the remediation plan.",
-    'opencode-plan': "The real OpenCode agent (opencode.ai), running headless in its own container, produces the remediation plan via an actual model completion, streamed live above through opencode-server's own SSE event API. This step is non-fatal by design: if the model backend is unreachable, it reports `skipped` rather than failing the run, since model availability is orthogonal to the correctness of the identity and delegation chain. The \"Real OpenCode (LLM)\" toggle forces a fast, explicitly labeled mock plan — a deliberate fallback, not error suppression.",
-    'dir-push': "OpenCode pushes an OASF turn record to the AGNTCY Directory, content-addressed by CID. This is the first entry in an audit trail that exists independently of the tokens' own claims.",
-    'dir-search': "OpenCode resolves triage-agent's endpoint via a directory lookup by name — service discovery through a shared record, not a hardcoded URL or pre-shared network topology.",
-    'kc-a-exchange': "RFC 8693 token exchange at Keycloak A: `subject_token` is Sarah's access token, `actor_token` is the VC. Keycloak validates `subject_token` cryptographically but — a documented platform behavior, not a workaround — does not itself emit an `act` claim derived from `actor_token`. This is precisely why the ID-JAG is minted as its own explicit, signed assertion in the next step.",
+    'opencode-plan': "The Security Autonomous Agent calls its internal OpenCode engine (opencode.ai), running headless in a private container, to produce the remediation plan via an actual model completion. The result is streamed through the engine's SSE event API. OpenCode has no Agent Card, CIMD identity, OAuth client, Agent Badge, or act-chain entry. This step is non-fatal by design: if the model backend is unreachable, it reports `skipped` rather than failing the run, since model availability is orthogonal to the correctness of the identity and delegation chain. The \"Real OpenCode (LLM)\" toggle selects between the model-backed engine and a fast, explicitly labeled mock plan.",
+    'dir-push': "The Security Autonomous Agent pushes an OASF audit record to the AGNTCY Directory, content-addressed by CID. This audit entry is separate from its canonical agent description.",
+    'dir-search': "The Security Autonomous Agent searches the AGNTCY Directory for triage-agent and receives its OASF description, CIMD identity ID, locator, Agent Badge URL, and digest. Directory provides discovery; Identity Node provides signed identity evidence.",
+    'kc-a-exchange': "RFC 8693 token exchange at Keycloak A: `subject_token` is the Security Autonomous Agent's access token, `actor_token` is the VC. Keycloak validates `subject_token` cryptographically but — a documented platform behavior, not a workaround — does not itself emit an `act` claim derived from `actor_token`. This is precisely why the ID-JAG is minted as its own explicit, signed assertion in the next step.",
     'egress-check': "Org A's own policy decision point, evaluated before the assertion crosses the org boundary: Envoy validates the ID-JAG's signature against Keycloak A's JWKS, and inline OPA checks scope, intent, and delegation-chain depth. This decision is made unilaterally by Org A; it does not defer to Org B's evaluation.",
-    'mint-idjag': "Keycloak A mints the ID-JAG natively via grant_type=token-exchange (keycloak-idjag-spi), with requested_token_type=urn:ietf:params:oauth:token-type:id-jag, signed with Keycloak's own realm key — so Envoy and Keycloak B validate against the same JWKS Keycloak already publishes, with no separate mock issuer. The resulting token carries sub=sarah@org-a.example and act_chain=[opencode-agent] as sibling claims under one signature — the sub/act separation made portable across the trust boundary. Before signing, the SPI verifies the VC badge sent as actor_token against the org's registered issuer JWKS at the Identity Node, and requires its credentialSubject.delegating_user to equal the verified subject_token's subject — an issuer refusing to mint authority on an attestation it has not checked.",
+    'mint-idjag': "Keycloak A mints the ID-JAG natively via token exchange and signs it with the realm key. The token carries sub=service-account-security-autonomous-agent and act_chain=[security-autonomous-agent]. Before signing, the SPI verifies the Agent Badge VC against the registered issuer JWKS and binds its delegating_user to the authenticated subject.",
     'kc-b-exchange': "Keycloak B independently validates the ID-JAG's signature against Keycloak A's JWKS — with no shared IdP and no pre-established federation beyond each side publishing its own JWKS — then issues its own scoped access token via a jwt-bearer grant (RFC 7523). This is the actual trust boundary: Org B's evaluation is authoritative, not Org A's assertion.",
-    'create-ticket': "Both the Org B access token and the original ID-JAG actor token are presented to Envoy. Each signature is validated independently against its own issuer's JWKS before Org B's inline OPA evaluates subject, scope, delegation chain, signed intent, and target repository.",
-    'tri:verify-sender-badge': "Triage resolves OpenCode's credential from the Identity Node and requires it to agree with the assertion just presented: the credential's act-chain must match the ticket's, and the scope the ID-JAG granted must be within what OpenCode's credential says it may *delegate*. An assertion exceeding what its issuer is permitted to grant is refused here. Note the limit: this proves org-a published such a credential, not that the process we spoke to holds that identity's key — CIMD registers no per-agent keypair.",
-    'tri:resolve-badge': "Triage publishes its own agent badge, signed with org-b's Vault key — Org B attesting its own agents exactly as Org A attests OpenCode. The credential distinguishes what Triage may do itself (triage:create) from what it may grant onward (gitea:write, gitea:pr). Those are genuinely different authorities here, and a credential carrying only one of them would misrepresent the agent.",
+    'create-ticket': "The Security Autonomous Agent invokes Triage through A2A 1.0 SendMessage while presenting the Org B access token and original ID-JAG actor token to Envoy. Org B independently validates both signatures and evaluates the normalized A2A data part, scope, chain, intent, and repository.",
+    'tri:verify-sender-badge': "Triage searches Directory for the Security Autonomous Agent's canonical OASF record, resolves its CIMD identity, fetches the signed Agent Badge, and requires the embedded description and digest to match Directory before accepting the ID-JAG delegation.",
+    'tri:resolve-badge': "Triage publishes its own Agent Badge, signed with Org B's Vault key. Its credential distinguishes what Triage may do from what it may delegate to the Remediation Agent.",
     'sub:resolve-badge': "The leaf of the chain publishes a credential too, so every registered identity resolves to both a 'who' (/id/resolve) and a 'what' (/vc/{id}/.well-known/vcs.json). Its delegatable list is empty — the credential states that the chain ends here rather than leaving it implied.",
-    'sub:verify-sender-badge': "Sub-Agent independently resolves Triage's credential and checks the sub-badge it holds is within what Triage is permitted to delegate — not merely within what Triage itself may do. Comparing against the wrong one of those two would reject every legitimate narrowing in this demo.",
+    'sub:verify-sender-badge': "Sub-Agent searches the Directory for Triage's canonical OASF record, resolves its CIMD identity, fetches the signed Agent Badge, and checks the embedded OASF description and digest before validating the sub-badge. The sub-badge must be within what Triage is permitted to delegate — not merely within what Triage itself may do.",
     'tri:opa-ingress': "Org B evaluates its own policy over delegation chain, scope, intent, method, path, and repository, independent of Org A's egress decision. Two unilateral policy evaluations are applied to the same request.",
     'tri:plan': "Triage plans the remediation and delegates execution to a bounded Sub-Agent rather than performing the change itself.",
-    'tri:mint-sub-badge': "Triage's own policy decision point determines the narrowed scope, and Triage mints the sub-badge natively at Keycloak B, scoped to gitea:write/gitea:pr only — a strict subset of Triage's own grant, cryptographically bound to the target repository. The chain now carries Sarah → OpenCode → Triage → Sub-Agent.",
-    'tri:spawn-sub-agent': "Sub-Agent is spawned with the narrowed badge as its actual capability boundary; Triage's own process privileges are not inherited — the badge, not the parent process, is what gets enforced downstream.",
+    'tri:mint-sub-badge': "Triage's policy decision point determines the narrowed scope, and Keycloak B mints the sub-badge with gitea:write/gitea:pr only. The chain now carries Security Autonomous Agent → Triage → Remediation Agent.",
+    'tri:spawn-sub-agent': "Triage invokes Sub-Agent through A2A 1.0 SendMessage and carries the narrowed ID-JAG as the HTTP bearer credential. Triage's own process privileges are not inherited; the signed assertion is the enforced boundary.",
     'sub:idjag-gitea': "Sub-Agent presents two independently issued and independently verified credentials at the resource boundary: its own Keycloak B access token and the signed sub-badge. Envoy validates both signatures separately; neither is sufficient alone.",
     'sub:push-file': "gitea:write, signed intent, delegation chain, and exact repository are all checked by inline OPA before the push is forwarded.",
     'sub:open-pr': "A separate gitea:pr scope is required, along with base/feature branch constraints and the repository bound into the sub-badge — evaluated as independent conditions, not implied by gitea:write.",
     'sub:denied-pr-attempt': "The same operation is attempted against a repository outside the sub-badge's signed resource claim, and is denied despite the token still carrying gitea:pr. The same chain-integrity check applied on the allow path is applied here without exception; the denial itself becomes part of the audit record.",
     'sub:opa-egress': "The final inline resource-policy evaluation checks both JWTs, delegation depth, narrowed scope, signed intent, operation shape, and exact repository before Gitea Gateway receives the request.",
-    'sub:pr-created': "The completed act_chain (Sarah → OpenCode → Triage → Sub-Agent) is itself the audit artifact: claims independently verified at every hop, not a mutable log entry describing what occurred after the fact.",
+    'sub:pr-created': "The completed act_chain (Security Autonomous Agent → Triage → Remediation Agent) is independently verified at every hop and linked to the resulting audit evidence.",
     'tri:verify-idjag': "Triage does not treat Envoy's decision as sufficient. It fetches Keycloak A's JWKS directly and re-validates the ID-JAG's signature, issuer, audience, and act_chain in-agent. Gateway and workload evaluate the same assertion independently — a compromised or misconfigured gateway does not silently become the only thing standing between the assertion and the workload.",
     'tri:cimd-generate-id': "Triage registers its own identity under org-b's trust authority — a separate Vault Transit key and a separate registered issuer from org-a's. Two organizations, two independent roots of trust, one shared identity node: neither org can mint identities attributable to the other, which is what makes the cross-domain act_chain meaningful rather than decorative.",
     'tri:cimd-resolve-id': "Triage resolves its own id back to its ResolverMetadata under the org-b issuer, confirming registration before it delegates any authority onward.",
     'tri:subbadge-scope-check': "Org B's policy decision point evaluates the proposed narrowing before any sub-badge exists. Envoy B and inline OPA return the approved scope and the exact resource, so the boundary Sub-Agent will operate within is determined by policy rather than chosen by the agent that benefits from it.",
     'tri:dir-push': "Triage records its own turn as a content-addressed OASF record — the second audit entry, written from the other side of the trust boundary and independent of Org A's.",
-    'tri:dir-search': "Triage resolves sub-agent through the same directory lookup by name that OpenCode used to find Triage. Delegation targets are discovered through a shared record, not hardcoded.",
+    'tri:dir-search': "Triage resolves sub-agent through the same Directory lookup by name that the Security Autonomous Agent used to find Triage. Delegation targets are discovered through a shared record, not hardcoded.",
     'sub:verify-subbadge': "Sub-Agent validates the sub-badge against Keycloak B's JWKS before presenting it anywhere: that it is an ID-JAG (typ=oauth-id-jag+jwt), addressed to this client_id, carrying the act_chain it was spawned with, bound to this repository — and that its scope is a strict subset of what this agent may ever hold. A badge granting anything beyond that subset is refused outright rather than merely under-used, so an upstream narrowing failure is caught by the party it would privilege. Verification precedes redemption: a badge that fails never reaches Keycloak B.",
     'sub:cimd-generate-id': "The leaf of the delegation chain holds a provable identity on the same terms as every other hop — its own id under org-b's trust authority, proven by a Vault-held key. No participant in the chain is anonymous.",
     'sub:cimd-resolve-id': "Sub-Agent resolves its own id back to its ResolverMetadata, confirming registration before touching any resource.",
@@ -1231,6 +1707,10 @@ POST /realms/org-b/protocol/openid-connect/token
     if (r.id) facts.push({ label: 'CIMD id', value: r.id, copyable: true });
     if (r.verification_method_id) facts.push({ label: 'Verification method', value: r.verification_method_id });
     if (r.record_name) facts.push({ label: 'Directory record', value: r.record_name });
+    if (r.identity_id) facts.push({ label: 'Directory identity ID', value: r.identity_id });
+    if (r.badge_url) facts.push({ label: 'Agent Badge URL', value: r.badge_url, copyable: true });
+    if (r.oasf_digest) facts.push({ label: 'Canonical OASF digest', value: r.oasf_digest });
+    if (r.record_type) facts.push({ label: 'Directory record type', value: r.record_type });
     if (r.pull_request && r.pull_request.html_url) facts.push({ label: 'Pull request', value: r.pull_request.html_url, copyable: true });
     if (r.pushed && r.pushed.branch) facts.push({ label: 'Branch', value: r.pushed.branch });
     if (r.plan) facts.push({ label: r.mock ? 'Remediation plan (MOCKED)' : `Remediation plan (${r.model || 'real'})`, value: r.plan, copyable: true });
@@ -1344,12 +1824,13 @@ POST /realms/org-b/protocol/openid-connect/token
 
   // ── State ──────────────────────────────────────────────────────────────────
   // SVG groups that map to step IDs for diagram highlighting, in the real
-  // backend's own lifecycle order (see opencode-agent/app.py): authenticate
+  // backend's own lifecycle order (Security Autonomous Agent implementation): authenticate
   // -> register own identity (CIMD) -> policy-scoped badge (Envoy A + OPA)
   // -> work (scan + real OpenCode) -> delegate cross-domain (ID-JAG).
   const SVG_STEPS = [
-    'sarah-login', 'cimd-generate-id', 'cimd-resolve-id', 'badge-scope-check',
-    'resolve-badge', 'mint-read-idjag', 'read-egress-check', 'kc-b-read-exchange',
+    'security-agent-login', 'cimd-generate-id', 'cimd-resolve-id', 'badge-scope-check',
+    'resolve-badge', 'secondary-organization-vc', 'assemble-two-vc-vp', 'verify-two-vc-vp',
+    'mint-read-idjag', 'read-egress-check', 'kc-b-read-exchange',
     'fetch-source', 'scan', 'opencode-plan', 'dir-push',
     'dir-search', 'kc-a-exchange', 'mint-idjag', 'egress-check',
     'kc-b-exchange', 'create-ticket', 'tri:opa-ingress', 'tri:verify-idjag',
@@ -1375,12 +1856,118 @@ POST /realms/org-b/protocol/openid-connect/token
   const resetBtn = document.getElementById('reset');
   const autoZoomEl = document.getElementById('autoZoom');
   const progressBarEl = document.getElementById('runProgressBar');
+  const technicalSequenceEl = document.getElementById('technicalSequence');
+  const journeyLiveEl = document.getElementById('journeyLive');
+  const journeyLiveLabelEl = document.getElementById('journeyLiveLabel');
+  let selectedJourneyPhase = 1;
+
+  const TRUST_STEPS = new Set([
+    'badge-scope-check', 'resolve-badge', 'secondary-organization-vc',
+    'assemble-two-vc-vp', 'verify-two-vc-vp'
+  ]);
+  const JOURNEY_NODES_BY_STEP = {
+    'a2a-autonomous-dispatch': ['webapp', 'autonomous-agent'],
+    'security-agent-login': ['autonomous-agent'],
+    'cimd-generate-id': ['autonomous-agent'],
+    'cimd-resolve-id': ['autonomous-agent'],
+    'badge-scope-check': ['agent-vc'],
+    'resolve-badge': ['agent-vc'],
+    'secondary-organization-vc': ['org-vc'],
+    'assemble-two-vc-vp': ['vp'],
+    'verify-two-vc-vp': ['verifier'],
+    'mint-read-idjag': ['idjag'],
+    'mint-idjag': ['idjag'],
+    'read-egress-check': ['org-a'],
+    'egress-check': ['org-a'],
+    'kc-b-read-exchange': ['org-b'],
+    'kc-b-exchange': ['org-b'],
+    'dir-search': ['directory'],
+    'create-ticket': ['autonomous-agent', 'triage'],
+    'tri:opa-ingress': ['triage'],
+    'tri:verify-idjag': ['triage'],
+    'tri:spawn-sub-agent': ['triage', 'remediation'],
+    'sub:verify-subbadge': ['remediation'],
+    'sub:push-file': ['remediation'],
+    'sub:open-pr': ['gitea'],
+    'sub:denied-pr-attempt': ['gitea'],
+    'sub:dir-push': ['gitea'],
+    'sub:pr-created': ['gitea']
+  };
+  const JOURNEY_PHASE_COPY = {
+    1: 'Receiving an A2A task and establishing the Security Autonomous Agent’s CIMD identity.',
+    2: 'Building two independently issued credentials and binding them in one VP.',
+    3: 'Converting verified identity into narrowly scoped cross-enterprise authority.',
+    4: 'Executing through A2A agents and recording verifiable outcome evidence.'
+  };
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, c =>
       ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function journeyPhaseForStep(stepId) {
+    if (!stepId) return selectedJourneyPhase;
+    if (stepId === 'tri:spawn-sub-agent' || stepId.startsWith('sub:')) return 4;
+    if (TRUST_STEPS.has(stepId)) return 2;
+    if (stepId === 'a2a-autonomous-dispatch' || stepId === 'security-agent-login' || stepId.startsWith('cimd-')) return 1;
+    return 3;
+  }
+
+  function showJourneyPhase(phase) {
+    selectedJourneyPhase = Number(phase) || 1;
+    document.querySelectorAll('[data-journey-phase]').forEach(btn => {
+      const active = Number(btn.dataset.journeyPhase) === selectedJourneyPhase;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', String(active));
+    });
+    document.querySelectorAll('[data-journey-scene]').forEach(scene => {
+      scene.classList.toggle('active', Number(scene.dataset.journeyScene) === selectedJourneyPhase);
+    });
+  }
+
+  document.querySelectorAll('[data-journey-phase]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      showJourneyPhase(btn.dataset.journeyPhase);
+      if (!allSteps.length) {
+        journeyLiveLabelEl.textContent = JOURNEY_PHASE_COPY[selectedJourneyPhase];
+      }
+    });
+  });
+
+  function updateJourney() {
+    const revealed = allSteps.slice(0, cursor);
+    const latest = revealed[revealed.length - 1];
+    const livePhase = journeyPhaseForStep(activeStepId || latest?.id);
+    if (revealed.length) showJourneyPhase(livePhase);
+
+    const nodeEls = document.querySelectorAll('[data-journey-node]');
+    nodeEls.forEach(node => node.classList.remove('active', 'ok', 'error', 'denied', 'skip', 'running'));
+    revealed.forEach(step => {
+      const status = step.status || 'ok';
+      (JOURNEY_NODES_BY_STEP[step.id] || []).forEach(nodeId => {
+        document.querySelectorAll(`[data-journey-node="${nodeId}"]`).forEach(node => node.classList.add(status));
+      });
+    });
+    (JOURNEY_NODES_BY_STEP[activeStepId] || []).forEach(nodeId => {
+      document.querySelectorAll(`[data-journey-node="${nodeId}"]`).forEach(node => node.classList.add('active'));
+    });
+
+    document.querySelectorAll('[data-journey-phase]').forEach(btn => {
+      const phase = Number(btn.dataset.journeyPhase);
+      btn.classList.toggle('complete', revealed.length > 0 && (phase < livePhase || cursor === allSteps.length));
+    });
+
+    journeyLiveEl.classList.toggle('running', revealed.length > 0 && cursor < allSteps.length);
+    journeyLiveEl.classList.toggle('complete', allSteps.length > 0 && cursor === allSteps.length);
+    if (!revealed.length) {
+      journeyLiveLabelEl.textContent = 'Ready. Choose a chapter or run the demo to watch evidence accumulate.';
+    } else if (cursor === allSteps.length) {
+      journeyLiveLabelEl.textContent = `Complete. ${allSteps.length} checks produced a verified agent-to-agent remediation trail.`;
+    } else {
+      journeyLiveLabelEl.textContent = `Now: ${latest?.title || latest?.id || JOURNEY_PHASE_COPY[livePhase]}`;
+    }
   }
 
   // ── Diagram ────────────────────────────────────────────────────────────────
@@ -1416,6 +2003,7 @@ POST /realms/org-b/protocol/openid-connect/token
       if (activeStepId === stepId) {
         activeStepId = null;
         updateDiagram();
+        updateJourney();
       }
     }, ms);
   }
@@ -1451,7 +2039,7 @@ POST /realms/org-b/protocol/openid-connect/token
   }
 
   function focusOnStep(stepId) {
-    if (!autoZoomEl.checked) return;
+    if (!autoZoomEl.checked || !technicalSequenceEl.open) return;
     const g = document.querySelector(`[data-step="${stepId}"]`);
     if (!g) return;
     const bbox = g.getBBox();
@@ -1488,6 +2076,7 @@ POST /realms/org-b/protocol/openid-connect/token
   const travelDot = document.getElementById('travelDot');
 
   function animateTravelDot(stepId) {
+    if (!technicalSequenceEl.open) { travelDot.setAttribute('opacity', '0'); return; }
     const g = document.querySelector(`[data-step="${stepId}"]`);
     const line = g && g.querySelector('.seq-msg:not(.ret)');
     if (!line) { travelDot.setAttribute('opacity', '0'); return; }
@@ -1516,7 +2105,9 @@ POST /realms/org-b/protocol/openid-connect/token
   // Bundles everything that should happen the moment a step becomes "live".
   function activateStep(stepId, settleMs) {
     activeStepId = stepId;
+    selectedJourneyPhase = journeyPhaseForStep(stepId);
     updateDiagram();
+    updateJourney();
     focusOnStep(stepId);
     animateTravelDot(stepId);
     scheduleSettle(stepId, settleMs);
@@ -1562,7 +2153,7 @@ POST /realms/org-b/protocol/openid-connect/token
 
   function openStepMenu(stepId, x, y) {
     closeStepMenu();
-    const svgIndex = SVG_STEPS.indexOf(stepId);
+    const svgIndex = allSteps.findIndex(step => step.id === stepId);
     const step = svgIndex >= 0 ? allSteps[svgIndex] : null;
     const traceUrl = traceUrlForStep(stepId);
 
@@ -1608,24 +2199,31 @@ POST /realms/org-b/protocol/openid-connect/token
     openStepMenu(g.dataset.step, e.clientX, e.clientY);
   });
 
-  // Each step group only draws thin lines/text with no fill, so by default
-  // only those exact pixels receive clicks. Prepend a transparent full-width
-  // hit-area rect (behind the visible content) so the whole row is clickable,
-  // and add a native tooltip — both done once at load rather than 16x in markup.
-  document.querySelectorAll('#seqSvg .g[data-step]').forEach(g => {
-    const bbox = g.getBBox();
-    const pad = 8;
-    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    rect.setAttribute('x', FULL_VB[0] - 4);
-    rect.setAttribute('y', bbox.y - pad);
-    rect.setAttribute('width', FULL_VB[2] + 8);
-    rect.setAttribute('height', bbox.height + pad * 2);
-    rect.setAttribute('fill', 'transparent');
-    g.insertBefore(rect, g.firstChild);
+  // The exhaustive SVG starts collapsed. Add its generous click targets only
+  // after it becomes visible; hidden SVG groups do not have reliable bboxes.
+  function ensureSequenceHitAreas() {
+    if (!technicalSequenceEl.open) return;
+    document.querySelectorAll('#seqSvg .g[data-step]').forEach(g => {
+      if (g.dataset.hitReady) return;
+      const bbox = g.getBBox();
+      if (!bbox.height) return;
+      const pad = 8;
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('x', FULL_VB[0] - 4);
+      rect.setAttribute('y', bbox.y - pad);
+      rect.setAttribute('width', FULL_VB[2] + 8);
+      rect.setAttribute('height', bbox.height + pad * 2);
+      rect.setAttribute('fill', 'transparent');
+      g.insertBefore(rect, g.firstChild);
 
-    const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-    title.textContent = 'Click to show the explainer or view this step\'s trace in Jaeger';
-    g.appendChild(title);
+      const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+      title.textContent = 'Click to show the explainer or view this step\'s trace in Jaeger';
+      g.appendChild(title);
+      g.dataset.hitReady = 'true';
+    });
+  }
+  technicalSequenceEl.addEventListener('toggle', () => {
+    if (technicalSequenceEl.open) requestAnimationFrame(ensureSequenceHitAreas);
   });
 
   // ── Step cards ─────────────────────────────────────────────────────────────
@@ -1646,6 +2244,7 @@ POST /realms/org-b/protocol/openid-connect/token
     }).join('');
     updateDiagram();
     updateProgressBar();
+    updateJourney();
   }
 
   function updateButtons() {
@@ -1662,7 +2261,7 @@ POST /realms/org-b/protocol/openid-connect/token
     statusEl.innerHTML = spinning ? `<span class="status-spinner"></span>${esc(msg)}` : esc(msg);
   }
 
-  // A single /api/run call now runs the real opencode-agent lifecycle,
+  // A single /api/run call now runs the Security Autonomous Agent lifecycle,
   // including a genuine LLM call (opencode-plan) against a shared backend —
   // that can take a couple of minutes. Without live feedback the "Fetching…"
   // text just sits there and reads as a frozen page, so this ticks a
@@ -1687,7 +2286,7 @@ POST /realms/org-b/protocol/openid-connect/token
 
   // ── Live token stream for the opencode-plan step ───────────────────────────
   // opencode-server really streams the model's output (SSE) — this relays it
-  // hop by hop (webapp -> opencode-agent -> opencode-server's own /event) and
+  // hop by hop (webapp -> Security Autonomous Agent -> internal OpenCode /event) and
   // shows the actual remediation plan appearing live, not just a spinner, for
   // the couple of minutes a real LLM call can take. Not session-scoped (fine
   // for this demo's single-operator use): it shows whatever generation is in
@@ -1847,6 +2446,9 @@ POST /realms/org-b/protocol/openid-connect/token
     hideToast();
     resetZoom();
     updateProgressBar();
+    selectedJourneyPhase = 1;
+    showJourneyPhase(1);
+    updateJourney();
     showTraceLink(null);
     SVG_STEPS.forEach(id => {
       const g = document.querySelector(`[data-step="${id}"]`);
@@ -1865,6 +2467,67 @@ POST /realms/org-b/protocol/openid-connect/token
   loadVaultKeys();
   loadRegisteredAgents();
   updateButtons();
+</script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@12/dist/mermaid.esm.min.mjs';
+
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'strict',
+    theme: 'base',
+    themeVariables: {
+      background: '#0b0f14',
+      primaryColor: '#161b22',
+      primaryTextColor: '#e6edf3',
+      primaryBorderColor: '#30363d',
+      secondaryColor: '#21262d',
+      tertiaryColor: '#0d1117',
+      lineColor: '#8b949e',
+      textColor: '#e6edf3',
+      actorBkg: '#161b22',
+      actorBorder: '#30363d',
+      actorTextColor: '#e6edf3',
+      actorLineColor: '#30363d',
+      signalColor: '#8b949e',
+      signalTextColor: '#c9d1d9',
+      labelBoxBkgColor: '#21262d',
+      labelBoxBorderColor: '#30363d',
+      labelTextColor: '#e6edf3',
+      loopTextColor: '#e6edf3',
+      noteBkgColor: '#21262d',
+      noteBorderColor: '#bc8cff',
+      noteTextColor: '#e6edf3',
+      activationBkgColor: '#21262d',
+      activationBorderColor: '#2f81f7',
+      sequenceNumberColor: '#0d1117'
+    },
+    sequence: {
+      useMaxWidth: true,
+      wrap: true,
+      actorMargin: 40,
+      messageMargin: 28,
+      noteMargin: 10
+    }
+  });
+
+  let trustMermaidRendered = false;
+  async function renderTrustMermaid() {
+    if (trustMermaidRendered) return;
+    const node = document.getElementById('trustMermaid');
+    if (!node) return;
+    try {
+      await mermaid.run({ nodes: [node] });
+      trustMermaidRendered = true;
+    } catch (error) {
+      node.insertAdjacentHTML('afterend', '<div class="mermaid-error">The diagram could not be rendered; its Mermaid source remains available above.</div>');
+    }
+  }
+  window.renderTrustMermaid = renderTrustMermaid;
+
+  document.querySelector('[data-tab="how"]')?.addEventListener('click', () => {
+    requestAnimationFrame(renderTrustMermaid);
+  });
+  if (!document.getElementById('tab-how')?.hidden) renderTrustMermaid();
 </script>
 </body>
 </html>

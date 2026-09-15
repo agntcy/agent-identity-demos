@@ -3,7 +3,8 @@
 
 """Triage Agent (Org B) — remediation coordinator with AGNTCY identity lifecycle.
 
-Receives a cross-domain remediation ticket from OpenCode (Org A) and follows
+Receives a cross-domain remediation ticket from the Security Autonomous Agent
+(Org A) and follows
 the same lifecycle the Org A agent does: verify inbound credentials →
 register own identity → policy-scoped credential → work → delegate narrower.
 
@@ -14,7 +15,7 @@ Ticket lifecycle (POST /api/ticket):
   t2   Triage registers ITS OWN identity: CIMD generate/resolve
        AGNTCY-triage-agent at the Identity Node under the org-b trust
        authority (Vault-signed proof — org-b attests its own agents)
-  t3   Sub-badge scope check: present the inbound (Sarah-federated) access
+    t3   Sub-badge scope check: present the inbound autonomous-agent access
        token + requested narrowing to Envoy B + inline OPA
        (/api/subbadge-scope-check) → ALLOW + policy-approved scope/resource
   t4   Plan the remediation (mock string; real LLM plan is a later milestone)
@@ -23,7 +24,7 @@ Ticket lifecycle (POST /api/ticket):
        scope/resource are the policy-approved values from t3
   t6   Push a turn record to the AGNTCY Directory
   t6b  Discover the Sub-Agent in the Directory by name (same discovery step
-       OpenCode runs before delegating to Triage)
+       the Security Autonomous Agent runs before delegating to Triage)
   t7   Spawn the Sub-Agent with the narrowed sub-badge
 """
 
@@ -38,6 +39,7 @@ from fastapi import FastAPI, Header, HTTPException
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from agntcy_identity_client import VaultConfig
+from agntcy_identity_client import a2a
 from agntcy_identity_client import cimd as cimd_api
 from agntcy_identity_client import directory as dir_api
 from agntcy_identity_client import vc as vc_api
@@ -55,7 +57,12 @@ SUB_AGENT_CLIENT_ID = os.environ.get("SUB_AGENT_CLIENT_ID", "sub-agent")
 IDENTITY_NODE_URL = os.environ.get("IDENTITY_NODE_URL", "http://identity-node:4000").rstrip("/")
 DIR_APISERVER_URL = os.environ.get("DIR_APISERVER_URL", "")  # e.g. "dir-apiserver:8888"
 SUB_AGENT_URL = os.environ.get("SUB_AGENT_URL", "http://sub-agent:8300").rstrip("/")
+A2A_INTERFACE_URL = os.environ.get("A2A_INTERFACE_URL", "http://envoy-org-b:10000/a2a")
 SUBBADGE_PDP_URL = os.environ.get("SUBBADGE_PDP_URL", "http://envoy-org-b:10000").rstrip("/")
+SECURITY_AUTONOMOUS_AGENT_PRINCIPAL = os.environ.get(
+    "SECURITY_AUTONOMOUS_AGENT_PRINCIPAL",
+    "service-account-security-autonomous-agent",
+)
 
 SUBBADGE_SCOPE_REQUEST = "openid gitea:write gitea:pr"
 
@@ -165,7 +172,7 @@ def _verify_idjag_sync(token: str, body: TicketRequest) -> dict:
         options={"require": ["exp", "iat", "aud", "iss", "sub"]},
     )
     act = claims.get("act") or {}
-    if claims.get("sub") != "sarah@org-a.example":
+    if claims.get("sub") != SECURITY_AUTONOMOUS_AGENT_PRINCIPAL:
         raise ValueError(f"unexpected delegating subject: {claims.get('sub')}")
     if act.get("act_chain") != body.act_chain:
         raise ValueError("act_chain mismatch between ticket body and signed ID-JAG")
@@ -246,7 +253,9 @@ async def _dir_push_turn(cve: str, repo: str, ticket_id: str) -> dict:
             "domains": [
                 {"name": "technology/security", "id": 107},
             ],
-            "annotations": {"cve": cve, "repo": repo, "ticket": ticket_id, "turn": "triage"},
+            "annotations": {"cve": cve, "repo": repo, "ticket": ticket_id, "turn": "triage",
+                            "record_type": dir_api.AUDIT_RECORD_TYPE,
+                            "agent_id": "AGNTCY-triage-agent"},
         }
         cid = await asyncio.get_event_loop().run_in_executor(
             None, dir_api.push_record, DIR_APISERVER_URL, record_dict
@@ -341,7 +350,7 @@ async def receive_ticket(
 
         # ── t1c: resolve the SENDER's credential ──────────────────────────
         # The ID-JAG says what we were granted; the Identity Node says
-        # independently what OpenCode is permitted to grant. Require agreement.
+        # independently what the Security Autonomous Agent may grant. Require agreement.
         # Not proof of possession — CIMD holds no per-agent key — but it does
         # catch an assertion exceeding what its issuer may delegate.
         sender_id = f"AGNTCY-{body.act_chain[0]}" if body.act_chain else ""
@@ -353,11 +362,43 @@ async def receive_ticket(
         with step_span("verify-sender-badge"):
             try:
                 sender = None
+                directory_record = None
+                directory_candidates: list[dict] = []
+                if DIR_APISERVER_URL:
+                    directory_records = await asyncio.get_event_loop().run_in_executor(
+                        None, dir_api.search_agents_by_name, DIR_APISERVER_URL,
+                        body.act_chain[0] if body.act_chain else "",
+                    )
+                    directory_candidates = [
+                        record for record in directory_records
+                        if (record.get("annotations") or {}).get("identity_id") == sender_id
+                    ]
+                    if not directory_candidates:
+                        raise ValueError(f"Directory has no canonical agent record for {sender_id}")
                 for env in await vc_api.well_known_badges(client, IDENTITY_NODE_URL, sender_id):
-                    doc = _decode_jwt_payload_unverified(env.get("value", ""))
+                    jws = env.get("value", "")
+                    doc = _decode_jwt_payload_unverified(jws)
                     subj = doc.get("credentialSubject") or {}
                     if subj.get("id") == sender_id and subj.get("delegatable"):
+                        verified = await vc_api.verify_badge(client, IDENTITY_NODE_URL, jws)
+                        if not verified.get("status"):
+                            continue
+                        # Identity Node normalizes credentialSubject to
+                        # document.content.  Its status is the authoritative
+                        # signature decision; relationship checks use the
+                        # original claims from that verified envelope.
                         sender = doc
+                        if directory_candidates:
+                            signed_badge = sender.get("credentialSubject", {}).get("badge")
+                            signed_digest = (sender.get("credentialSubject", {}).get("relatedResource") or [{}])[0].get("digest")
+                            directory_record = next(
+                                (record for record in directory_candidates if record == signed_badge),
+                                None,
+                            )
+                            if directory_record is None:
+                                raise ValueError("Agent Badge OASF description differs from Directory record")
+                            if signed_digest != dir_api.oasf_digest(directory_record):
+                                raise ValueError("Agent Badge OASF digest differs from Directory record")
                         break
                 if sender is None:
                     raise ValueError(
@@ -378,7 +419,9 @@ async def receive_ticket(
                     "credential_issuer": sender.get("issuer"),
                     "credential_caps": sorted(subj.get("caps") or []),
                     "credential_delegatable": sorted(may_delegate),
-                    "note": "credential agrees with the assertion; not proof of possession",
+                    "directory_record_verified": directory_record is not None,
+                    "oasf_digest": dir_api.oasf_digest(directory_record) if directory_record else "",
+                    "note": "signed badge agrees with Directory description and assertion; not proof of possession",
                 })
             except Exception as exc:  # noqa: BLE001
                 s.update(status="error", error=str(exc))
@@ -445,7 +488,7 @@ async def receive_ticket(
         # Every registered identity should resolve to a credential saying what
         # it may do — otherwise .well-known answers "who" but never "what".
         # Signed with ORG-B's Vault key: Org B attests its own agents, exactly
-        # as Org A attests OpenCode.
+        # as Org A attests the Security Autonomous Agent.
         s = {
             "id": "resolve-badge",
             "title": "t3b. Publish Triage's agent badge VC — org-b Vault-signed, describes what Triage HOLDS",
@@ -467,9 +510,14 @@ async def receive_ticket(
                     # What Triage may grant onward — the narrowing Org B's
                     # policy just approved at t3, not what Triage itself uses.
                     delegatable=[c for c in scoped_scope.split(" ") if c],
-                    delegating_user="sarah@org-a.example",
+                    delegating_user=claims.get("sub", SECURITY_AUTONOMOUS_AGENT_PRINCIPAL),
                     intent=body.intent,
                     act_chain=parent_chain + [TRIAGE_CLIENT_ID],
+                    agent_definition=dir_api.build_agent_record(
+                        TRIAGE_CLIENT_ID,
+                        IDENTITY_NODE_URL,
+                        identity_id=triage_cimd_id,
+                    ),
                 )
                 s.update(status="ok" if issued["verified"] else "error", result={
                     "credential_id": issued["credential_id"],
@@ -503,9 +551,9 @@ async def receive_ticket(
             })
 
         # ── t5: mint narrowed sub-badge NATIVELY at Keycloak B ────────────
-        # subject_token is the inbound Sarah-federated access token — the SPI
+        # subject_token is the inbound autonomous-agent access token — the SPI
         # verifies its signature for real. Scope/resource come from t3's
-        # policy decision, act-chain extends Sarah → OpenCode → Triage.
+        # policy decision, act-chain extends Security Autonomous Agent → Triage.
         sub_chain = parent_chain + [TRIAGE_CLIENT_ID]
         s = {
             "id": "mint-sub-badge",
@@ -556,7 +604,8 @@ async def receive_ticket(
             steps.append(await _dir_push_turn(body.cve, body.repo, ticket_id))
 
         # ── t6b: discover the Sub-Agent in the Directory ──────────────────
-        # Same discovery step OpenCode does before delegating to Triage: look
+        # Same discovery step the Security Autonomous Agent performs before
+        # delegating to Triage: look
         # the delegate up by name rather than assuming a hardcoded endpoint.
         s = {
             "id": "dir-search",
@@ -569,13 +618,17 @@ async def receive_ticket(
             else:
                 try:
                     records = await asyncio.get_event_loop().run_in_executor(
-                        None, dir_api.search_by_name, DIR_APISERVER_URL, SUB_AGENT_CLIENT_ID
+                        None, dir_api.search_agents_by_name, DIR_APISERVER_URL, SUB_AGENT_CLIENT_ID
                     )
                     found = records[0] if records else {}
                     s.update(status="ok", result={
                         "matches": len(records),
                         "record_name": found.get("name", ""),
                         "skills": [sk.get("name", "") for sk in (found.get("skills") or [])],
+                        "identity_id": (found.get("annotations") or {}).get("identity_id", ""),
+                        "badge_url": (found.get("annotations") or {}).get("badge_url", ""),
+                        "oasf_digest": dir_api.oasf_digest(found) if found else "",
+                        "record_type": (found.get("annotations") or {}).get("record_type", ""),
                         "note": "delegate discovered by name, not by hardcoded endpoint",
                     })
                 except Exception as exc:  # noqa: BLE001
@@ -585,26 +638,31 @@ async def receive_ticket(
         # ── t7: spawn Sub-Agent with the narrowed sub-badge ───────────────
         s = {
             "id": "spawn-sub-agent",
-            "title": "t7. Spawn sub-agent with narrowed sub-badge + intent → Sub-Agent /api/run",
-            "detail": f"POST {SUB_AGENT_URL}/api/run  sub_badge=…  repo={body.repo}",
+            "title": "t7. A2A SendMessage spawns Sub-Agent with narrowed ID-JAG + intent",
+            "detail": f"POST {SUB_AGENT_URL}/a2a  method=SendMessage  repo={body.repo}",
         }
         with step_span("spawn-sub-agent"):
             try:
-                r = await client.post(
-                    f"{SUB_AGENT_URL}/api/run",
-                    json={
-                        "sub_badge": sub_badge,
+                sub_data, sub_task = await a2a.send_message(
+                    client,
+                    f"{SUB_AGENT_URL}/a2a",
+                    {
                         "repo": body.repo,
                         "intent": body.intent,
                         "act_chain": sub_chain + [SUB_AGENT_CLIENT_ID],
                         "ticket_id": ticket_id,
                     },
+                    headers={"Authorization": f"Bearer {sub_badge}"},
                     timeout=60,
                 )
-                if r.status_code in (200, 201):
-                    s.update(status="ok", result=r.json())
-                else:
-                    s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
+                s.update(
+                    status="ok" if sub_data.get("ok") else "error",
+                    result={
+                        **sub_data,
+                        "a2a_task_id": sub_task.get("id"),
+                        "a2a_state": (sub_task.get("status") or {}).get("state"),
+                    },
+                )
             except Exception as exc:  # noqa: BLE001
                 s.update(status="error", error=str(exc))
         steps.append(s)
@@ -615,3 +673,39 @@ async def receive_ticket(
         "ticket_id": ticket_id,
         "steps": steps,
     })
+
+
+async def _a2a_ticket(payload: dict, headers) -> dict:
+    response = await receive_ticket(
+        TicketRequest(**payload),
+        authorization=headers.get("authorization"),
+        actor_token_header=headers.get("x-agntcy-actor-token"),
+        policy_decision=headers.get("x-agntcy-policy-decision"),
+        policy_rule=headers.get("x-agntcy-policy-rule"),
+        policy_enforcer=headers.get("x-agntcy-policy-enforcer"),
+        delegation_depth=headers.get("x-agntcy-delegation-depth"),
+    )
+    return a2a.response_data(response)
+
+
+_a2a_security, _a2a_requirements = a2a.bearer_security(["triage:create"])
+_a2a_server = a2a.A2AServer(
+    a2a.agent_card(
+        name="Triage Agent",
+        description="Org B remediation coordinator that plans work and delegates to a bounded sub-agent.",
+        interface_url=A2A_INTERFACE_URL,
+        organization="Org B",
+        version="1.0.0",
+        skills=[{
+            "id": "cross-domain-remediation-triage",
+            "name": "Cross-domain remediation triage",
+            "description": "Validate a remediation request, create a ticket, and delegate a narrowed task.",
+            "tags": ["security", "triage", "delegation"],
+            "examples": ["Create and execute a remediation ticket for CWE-89"],
+        }],
+        security_schemes=_a2a_security,
+        security_requirements=_a2a_requirements,
+    ),
+    _a2a_ticket,
+)
+_a2a_server.install(app)

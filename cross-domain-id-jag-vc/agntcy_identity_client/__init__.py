@@ -3,7 +3,7 @@
 
 """Shared AGNTCY identity client — Vault-backed CIMD attestation + Directory.
 
-Extracted from webapp/app.py so every Org A service (webapp, opencode-agent
+Extracted from webapp/app.py so every Org A service (webapp, Security Autonomous Agent
 orchestrator, future agents) uses one implementation of:
 
   - Vault Transit signing + DER→JWK public key extraction  (vault.py)

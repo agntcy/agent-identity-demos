@@ -5,6 +5,8 @@ package envoy.authz
 
 import rego.v1
 
+autonomous_subject := "service-account-security-autonomous-agent"
+
 # Envoy verifies both JWTs before this policy runs. The Keycloak access token
 # proves the local capability; the original signed sub-badge proves who
 # delegated, the intended action, and the exact repository.
@@ -55,8 +57,8 @@ allow := {
 	access.azp == "sub-agent"
 	actor.azp == "sub-agent"
 	actor.client_id == "sub-agent"
-	sprintf("%s@org-a.example", [access.preferred_username]) == actor.sub
-	actor.sub == "sarah@org-a.example"
+	access.preferred_username == actor.sub
+	actor.sub == autonomous_subject
 
 	scope_contains(access.scope, required)
 	scope_contains(actor.scope, required)
@@ -64,7 +66,7 @@ allow := {
 	not scope_contains(actor.scope, "triage:create")
 
 	actor.act.sub == "triage-agent"
-	actor.act.act_chain == ["opencode-agent", "triage-agent"]
+	actor.act.act_chain == ["security-autonomous-agent", "triage-agent"]
 	input.body.act_chain == array.concat(actor.act.act_chain, [actor.azp])
 	count(actor.act.act_chain) == 2
 
@@ -79,8 +81,8 @@ allow := {
 }
 
 # ── Source read (Org A's own agent, one hop) ─────────────────────────────────
-# A different delegation shape from the sub-agent's writes above: OpenCode reads
-# under its own narrow, read-scoped assertion, so the chain is one hop and the
+# A different delegation shape from the sub-agent's writes above: the Security
+# Autonomous Agent reads under its own narrow assertion, so the chain is one hop and the
 # token must NOT carry write, PR, or triage:create authority. Reading Org B's
 # source is a delegated act in its own right, checked here rather than trusted.
 allow := {
@@ -101,10 +103,10 @@ allow := {
 	access := verified_payload("x-verified-access-token-payload")
 	actor := verified_payload("x-verified-actor-token-payload")
 
-	access.azp == "opencode-agent"
-	actor.azp == "opencode-agent"
-	actor.client_id == "opencode-agent"
-	actor.sub == "sarah@org-a.example"
+	access.azp == "security-autonomous-agent"
+	actor.azp == "security-autonomous-agent"
+	actor.client_id == "security-autonomous-agent"
+	actor.sub == autonomous_subject
 
 	# Read and nothing else — no write, no PR, no onward delegation authority.
 	scope_contains(access.scope, "gitea:read")
@@ -116,8 +118,9 @@ allow := {
 	not scope_contains(actor.scope, "gitea:pr")
 	not scope_contains(actor.scope, "triage:create")
 
-	# One hop: Org A's agent acting for Sarah, with nobody delegated onward.
-	actor.act.act_chain == ["opencode-agent"]
+	# One hop: the Security Autonomous Agent is the acting agent, with nobody
+	# delegated onward.
+	actor.act.act_chain == ["security-autonomous-agent"]
 	count(actor.act.act_chain) == 1
 
 	actor.intent == ["scan-source"]

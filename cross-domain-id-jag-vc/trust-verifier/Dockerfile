@@ -6,9 +6,6 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y protobuf-compiler && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-# Shared build contexts (compose build.additional_contexts):
-#   dir_proto  → ../proto (Directory OASF/gRPC proto tree)
-#   shared_lib → ../agntcy_identity_client (canonical OASF catalog)
 COPY --from=dir_proto . proto/
 RUN python -m grpc_tools.protoc \
     -I proto \
@@ -18,5 +15,7 @@ RUN python -m grpc_tools.protoc \
     proto/agntcy/dir/store/v1/store_service.proto \
     proto/agntcy/dir/search/v1/search_service.proto
 COPY --from=shared_lib . agntcy_identity_client/
-COPY init.py .
-CMD ["python", "init.py"]
+COPY app.py .
+ENV PYTHONUNBUFFERED=1
+EXPOSE 8600
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8600"]

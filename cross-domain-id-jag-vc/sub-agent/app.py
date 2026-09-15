@@ -4,7 +4,7 @@
 """Sub-Agent (Org B) — bounded-privilege agent with its own identity lifecycle.
 
 Spawned by Triage with a narrowed sub-badge, and follows the same lifecycle
-OpenCode (Org A) and Triage (Org B) do: verify inbound credentials → register
+the Security Autonomous Agent (Org A) and Triage (Org B) do: verify inbound credentials → register
 own identity → work under the credential policy allows → record the turn.
 
 Run lifecycle (POST /api/run):
@@ -22,9 +22,9 @@ Run lifecycle (POST /api/run):
   s5   The work: push the fix, open the PR, and demonstrate that policy beats
        scope on a deny-listed repo — all through Envoy + inline OPA
   s6   Push its own turn record to the AGNTCY Directory → CID
-  s7   PR created ✓ — causal audit: Sarah → OpenCode → Triage → Sub-Agent
+  s7   PR created ✓ — causal audit: Security Autonomous Agent → Triage → Sub-Agent
 
-The sub-badge carries a nested act-chain: Sarah → OpenCode → Triage → Sub-Agent.
+The sub-badge carries a nested act-chain: Security Autonomous Agent → Triage → Sub-Agent.
 Any hop deeper than the parent's delegation depth is refused by the policy layer.
 """
 
@@ -40,6 +40,7 @@ from fastapi import FastAPI
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from agntcy_identity_client import VaultConfig
+from agntcy_identity_client import a2a
 from agntcy_identity_client import cimd as cimd_api
 from agntcy_identity_client import directory as dir_api
 from agntcy_identity_client import vc as vc_api
@@ -57,6 +58,10 @@ GITEA_GATEWAY_URL = os.environ.get(
     "GITEA_GATEWAY_URL", "http://envoy-org-b:10001"
 ).rstrip("/")
 GITEA_ADMIN_USER = os.environ.get("GITEA_ADMIN_USER", "demo-admin")
+SECURITY_AUTONOMOUS_AGENT_PRINCIPAL = os.environ.get(
+    "SECURITY_AUTONOMOUS_AGENT_PRINCIPAL",
+    "service-account-security-autonomous-agent",
+)
 
 # The only scopes this agent may ever hold. The sub-badge is refused if it
 # grants anything outside this set — a narrowing bug upstream (or a forged
@@ -65,6 +70,7 @@ ALLOWED_SCOPES = {"openid", "gitea:write", "gitea:pr"}
 ID_JAG_TYP = "oauth-id-jag+jwt"
 
 VAULT_CFG = VaultConfig.from_env()  # org-b trust authority (ORG_COMMON_NAME=org-b)
+A2A_INTERFACE_URL = os.environ.get("A2A_INTERFACE_URL", "http://sub-agent:8300/a2a")
 
 KC_B_ISSUER = f"{KC_B_URL}/realms/{KC_B_REALM}"
 KC_B_TOKEN_EP = f"{KC_B_ISSUER}/protocol/openid-connect/token"
@@ -140,8 +146,9 @@ def _verify_subbadge_sync(token: str, body: RunRequest) -> dict:
     urllib) — call via executor.
 
     Note on `sub`: Keycloak B mints the sub-badge from the inbound
-    Sarah-federated access token, so `sub` is a KC-B user id rather than
-    sarah@org-a.example. It must be present, but its exact value isn't pinned.
+    Security Autonomous Agent-federated access token, so `sub` is a KC-B user
+    id rather than the Org A workload principal. It must be present, but its
+    exact value isn't pinned.
     """
     header = pyjwt.get_unverified_header(token)
     if header.get("typ") != ID_JAG_TYP:
@@ -266,6 +273,8 @@ async def _dir_push_turn(body: RunRequest, branch: str, pr_url: str) -> dict:
                 "pull_request": pr_url,
                 "act_chain": " → ".join(body.act_chain),
                 "turn": "sub-agent",
+                "record_type": dir_api.AUDIT_RECORD_TYPE,
+                "agent_id": "AGNTCY-sub-agent",
             },
         }
         cid = await asyncio.get_event_loop().run_in_executor(
@@ -357,9 +366,14 @@ async def run(body: RunRequest):
                     # The leaf of the chain: it delegates to nobody, and the
                     # credential states that rather than leaving it implied.
                     delegatable=[],
-                    delegating_user="sarah@org-a.example",
+                    delegating_user=SECURITY_AUTONOMOUS_AGENT_PRINCIPAL,
                     intent=body.intent,
                     act_chain=body.act_chain,
+                    agent_definition=dir_api.build_agent_record(
+                        SUB_AGENT_CLIENT_ID,
+                        IDENTITY_NODE_URL,
+                        identity_id=sub_cimd_id,
+                    ),
                 )
                 s.update(status="ok" if issued["verified"] else "error", result={
                     "credential_id": issued["credential_id"],
@@ -396,11 +410,42 @@ async def run(body: RunRequest):
         with step_span("verify-sender-badge"):
             try:
                 sender_vcs = await vc_api.well_known_badges(client, IDENTITY_NODE_URL, parent_id)
+                directory_record = None
+                directory_candidates: list[dict] = []
+                if DIR_APISERVER_URL:
+                    directory_records = await asyncio.get_event_loop().run_in_executor(
+                        None, dir_api.search_agents_by_name, DIR_APISERVER_URL,
+                        body.act_chain[-2] if len(body.act_chain) >= 2 else "",
+                    )
+                    directory_candidates = [
+                        record for record in directory_records
+                        if (record.get("annotations") or {}).get("identity_id") == parent_id
+                    ]
+                    if not directory_candidates:
+                        raise ValueError(f"Directory has no canonical agent record for {parent_id}")
                 sender = None
                 for enveloped in sender_vcs:
-                    doc = _decode_jwt_payload_unverified(enveloped.get("value", ""))
+                    jws = enveloped.get("value", "")
+                    doc = _decode_jwt_payload_unverified(jws)
                     if doc.get("credentialSubject", {}).get("id") == parent_id:
+                        verified = await vc_api.verify_badge(client, IDENTITY_NODE_URL, jws)
+                        if not verified.get("status"):
+                            continue
+                        # VerificationResult.document normalizes the subject to
+                        # document.content.  Preserve the original claims from
+                        # the envelope that the Identity Node just verified.
                         sender = doc
+                        if directory_candidates:
+                            signed_badge = sender.get("credentialSubject", {}).get("badge")
+                            signed_digest = (sender.get("credentialSubject", {}).get("relatedResource") or [{}])[0].get("digest")
+                            directory_record = next(
+                                (record for record in directory_candidates if record == signed_badge),
+                                None,
+                            )
+                            if directory_record is None:
+                                raise ValueError("Agent Badge OASF description differs from Directory record")
+                            if signed_digest != dir_api.oasf_digest(directory_record):
+                                raise ValueError("Agent Badge OASF digest differs from Directory record")
                         break
                 if sender is None:
                     raise ValueError(f"{parent_id} has no resolvable credential")
@@ -431,6 +476,8 @@ async def run(body: RunRequest):
                     "credential_caps": sorted(sender_subject.get("caps") or []),
                     "credential_delegatable": sorted(may_delegate),
                     "credential_act_chain": sender_chain,
+                    "directory_record_verified": directory_record is not None,
+                    "oasf_digest": dir_api.oasf_digest(directory_record) if directory_record else "",
                     "note": "the credential agrees with the assertion; this is not proof of "
                             "possession — CIMD registers no per-agent key",
                 })
@@ -624,7 +671,7 @@ async def run(body: RunRequest):
 
     # ── s6: this agent's own Directory turn record ──────────────────────────
     # The leaf of the delegation chain gets an audit entry too, alongside
-    # OpenCode's (Org A) and Triage's (Org B).
+    # the Security Autonomous Agent's (Org A) and Triage's (Org B).
     with step_span("dir-push"):
         steps.append(await _dir_push_turn(body, branch, pr_url))
 
@@ -632,7 +679,7 @@ async def run(body: RunRequest):
     with step_span("pr-created"):
         steps.append({
             "id": "pr-created",
-            "title": "s7. PR created ✓ — causal audit: Sarah → OpenCode → Triage → Sub-Agent",
+            "title": "s7. PR created ✓ — causal audit: Security Autonomous Agent → Triage → Sub-Agent",
             "status": "ok" if pr_step.get("status") == "ok" else "error",
             "result": {
                 "pr_url": pr_url,
@@ -646,3 +693,37 @@ async def run(body: RunRequest):
         "ok": all(_expected_outcome(step) for step in steps),
         "steps": steps,
     })
+
+
+async def _a2a_run(payload: dict, headers) -> dict:
+    authorization = headers.get("authorization", "")
+    if not authorization.lower().startswith("bearer "):
+        raise ValueError("A2A Sub-Agent request requires a bearer ID-JAG")
+    response = await run(RunRequest(
+        sub_badge=authorization.split(" ", 1)[1],
+        **payload,
+    ))
+    return a2a.response_data(response)
+
+
+_a2a_security, _a2a_requirements = a2a.bearer_security(["gitea:write", "gitea:pr"])
+_a2a_server = a2a.A2AServer(
+    a2a.agent_card(
+        name="Sub-Agent",
+        description="Bounded Org B implementation agent that applies a fix and opens a pull request.",
+        interface_url=A2A_INTERFACE_URL,
+        organization="Org B",
+        version="1.0.0",
+        skills=[{
+            "id": "bounded-pull-request-remediation",
+            "name": "Bounded pull-request remediation",
+            "description": "Apply an authorized fix to one repository and open a pull request.",
+            "tags": ["git", "pull-request", "least-privilege"],
+            "examples": ["Apply the approved fix and open a PR"],
+        }],
+        security_schemes=_a2a_security,
+        security_requirements=_a2a_requirements,
+    ),
+    _a2a_run,
+)
+_a2a_server.install(app)

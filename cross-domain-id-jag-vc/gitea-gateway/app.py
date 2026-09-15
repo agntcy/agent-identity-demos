@@ -52,7 +52,7 @@ RESOURCE_POLICY_RULE = "org-b-resource-delegation"
 RESOURCE_POLICY_ACTIONS = frozenset({"push-file", "open-pr"})
 # Source reads are a different delegation shape from the sub-agent's writes:
 # Org A's agent reads directly under a read-scoped assertion, so the chain is
-# one hop (opencode-agent) rather than three, and the rule is distinct.
+# one hop (security-autonomous-agent) rather than three, and the rule is distinct.
 SOURCE_READ_POLICY_RULE = "org-b-source-read"
 SOURCE_READ_ACTIONS = frozenset({"read-source"})
 
@@ -217,7 +217,7 @@ def require_policy_context(
     if (
         context is None
         or context.intent != "create-pr-fix"
-        or context.act_chain != ["opencode-agent", "triage-agent", "sub-agent"]
+        or context.act_chain != ["security-autonomous-agent", "triage-agent", "sub-agent"]
         or not context.ticket_id.startswith("TRIAGE-")
     ):
         raise HTTPException(

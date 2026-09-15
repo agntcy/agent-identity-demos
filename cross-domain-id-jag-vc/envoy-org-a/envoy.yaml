@@ -184,7 +184,7 @@ static_resources:
   clusters:
     # Shared by both jwt_authn providers: the ID-JAG is now minted natively
     # by Keycloak A (keycloak-idjag-spi), and the badge-scope route verifies
-    # Sarah's KC-A access token — one JWKS endpoint serves both.
+    # Security Autonomous Agent's KC-A access token — one JWKS endpoint serves both.
     - name: keycloak_a_jwks
       type: STRICT_DNS
       connect_timeout: 5s

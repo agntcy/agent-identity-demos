@@ -1,20 +1,22 @@
 # Copyright 2026 AGNTCY Contributors (https://github.com/agntcy)
 # SPDX-License-Identifier: Apache-2.0
 
-"""OpenCode Agent (Org A) — real OpenCode + AGNTCY identity harness.
+"""Security Autonomous Agent (Org A) — A2A agent using OpenCode internally.
 
 The agent's LLM work comes from a real OpenCode (opencode.ai) instance
-running headless in the opencode-server container; this service is the
-agent's identity harness, executing the task lifecycle Sarah delegates:
+running headless in the opencode-server container. OpenCode is an internal
+planning and code-analysis engine; it is not a separate A2A agent, OAuth
+principal, CIMD identity, or delegation hop.
 authenticate → register identity → policy-scoped badge → work → delegate.
 
 Task lifecycle (POST /api/run):
-  1    Sarah OIDC password grant → Keycloak A → delegated access token
-  2    OpenCode registers ITS OWN identity: CIMD generate id
-       AGNTCY-opencode-agent at the Identity Node (Vault-signed proof,
+  1    Security Autonomous Agent client-credentials grant → Keycloak A
+       → autonomous-agent access token
+  2    Security Autonomous Agent registers its identity: CIMD generate id
+       AGNTCY-security-autonomous-agent at the Identity Node (Vault-signed proof,
        org-a trust authority)
   3    resolve id → ResolverMetadata + JWK
-  4    badge request with Sarah's access token → Envoy A + inline OPA
+  4    badge request with the autonomous agent's access token → Envoy A + inline OPA
        (/api/badge-scope-check) → ALLOW + scoped-down intent for THIS task
   5    Task-scoped agent badge: a W3C Verifiable Credential built here,
        signed with org-a's Vault trust-authority key, published to the
@@ -28,13 +30,15 @@ Task lifecycle (POST /api/run):
        (non-fatal: status=skipped when Ollama/API key is unavailable)
   7    Directory: push turn record (OASF) → CID
   8    Directory: discover triage-agent
-  9    RFC 8693 exchange (subject=Sarah, actor_token=badge) → Keycloak A
+  9    RFC 8693 exchange (subject=Security Autonomous Agent, actor_token=badge)
+       → Keycloak A
        (Keycloak's standard exchange; it does not process actor_token)
   10   Mint ID-JAG natively at Keycloak A (keycloak-idjag-spi,
-       requested_token_type=id-jag, act_chain=[opencode],
+       requested_token_type=id-jag, act_chain=[security-autonomous-agent],
        scope=triage:create). The badge rides along as actor_token here too —
        this is where authority is created, and the SPI verifies the badge
-       against the org issuer's published JWKS and binds it to Sarah before
+       against the org issuer's published JWKS and binds it to the autonomous
+       agent before
        signing.
   10b  Org A egress PDP check on the ID-JAG (Envoy A + OPA) before it
        leaves the org
@@ -50,14 +54,16 @@ import os
 import re
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Header
 from fastapi.responses import JSONResponse, StreamingResponse
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from pydantic import BaseModel
 
 from agntcy_identity_client import VaultConfig
+from agntcy_identity_client import a2a
 from agntcy_identity_client import cimd as cimd_api
 from agntcy_identity_client import directory as dir_api
+from agntcy_identity_client import trust_bundle
 from agntcy_identity_client import vc as vc_api
 from tracing import current_trace_id, setup_tracing
 
@@ -65,17 +71,35 @@ KC_A_URL = os.environ.get("KC_A_URL", "http://keycloak-a:8080").rstrip("/")
 KC_A_REALM = os.environ.get("KC_A_REALM", "org-a")
 KC_B_URL = os.environ.get("KC_B_URL", "http://keycloak-b:8080").rstrip("/")
 KC_B_REALM = os.environ.get("KC_B_REALM", "org-b")
-OPENCODE_CLIENT_ID = os.environ.get("OPENCODE_CLIENT_ID", "opencode-agent")
-OPENCODE_CLIENT_SECRET = os.environ.get("OPENCODE_CLIENT_SECRET", "")
 TRIAGE_CLIENT_ID = os.environ.get("TRIAGE_CLIENT_ID", "triage-agent")
 TRIAGE_CLIENT_SECRET = os.environ.get("TRIAGE_CLIENT_SECRET", "")
-SARAH_USER = os.environ.get("SARAH_USER", "sarah")
-SARAH_PASSWORD = os.environ.get("SARAH_PASSWORD", "")
-SARAH_EMAIL = os.environ.get("SARAH_EMAIL", "sarah@org-a.example")
+SECURITY_AUTONOMOUS_AGENT_CLIENT_ID = os.environ.get(
+    "SECURITY_AUTONOMOUS_AGENT_CLIENT_ID", "security-autonomous-agent"
+)
+SECURITY_AUTONOMOUS_AGENT_CLIENT_SECRET = os.environ.get(
+    "SECURITY_AUTONOMOUS_AGENT_CLIENT_SECRET", ""
+)
+SECURITY_AUTONOMOUS_AGENT_PRINCIPAL = os.environ.get(
+    "SECURITY_AUTONOMOUS_AGENT_PRINCIPAL",
+    "service-account-security-autonomous-agent",
+)
 IDENTITY_NODE_URL = os.environ.get("IDENTITY_NODE_URL", "http://identity-node:4000").rstrip("/")
 EGRESS_PDP_URL = os.environ.get("EGRESS_PDP_URL", "http://envoy-org-a:12000").rstrip("/")
 TRIAGE_AGENT_URL = os.environ.get("TRIAGE_AGENT_URL", "http://envoy-org-b:10000").rstrip("/")
 DIR_APISERVER_URL = os.environ.get("DIR_APISERVER_URL", "")  # e.g. "dir-apiserver:8888"
+SECONDARY_VC_ISSUER_URL = os.environ.get(
+    "SECONDARY_VC_ISSUER_URL", "http://secondary-vc-issuer:8500"
+).rstrip("/")
+TRUST_VERIFIER_URL = os.environ.get(
+    "TRUST_VERIFIER_URL", "http://trust-verifier:8600"
+).rstrip("/")
+OPERATING_ORGANIZATION_URI = os.environ.get(
+    "OPERATING_ORGANIZATION_URI", "urn:agntcy:organization:org-a"
+)
+TRUST_DOMAIN = os.environ.get(
+    "TRUST_DOMAIN", "urn:agntcy:verifier:cross-domain-demo"
+)
+A2A_INTERFACE_URL = os.environ.get("A2A_INTERFACE_URL", "http://security-autonomous-agent:8100/a2a")
 SCAN_REPO = os.environ.get("SCAN_REPO", "demo-admin/payments-service")
 # Org B's resource boundary (Envoy B listener 10001), through which the source
 # is fetched under a read-scoped assertion — never Gitea directly.
@@ -105,9 +129,9 @@ KC_A_TOKEN_EP = f"{KC_A_URL}/realms/{KC_A_REALM}/protocol/openid-connect/token"
 KC_B_TOKEN_EP = f"{KC_B_URL}/realms/{KC_B_REALM}/protocol/openid-connect/token"
 KC_B_ISSUER = f"{KC_B_URL}/realms/{KC_B_REALM}"
 
-app = FastAPI(title="OpenCode Agent (Org A) — real OpenCode + identity harness",
+app = FastAPI(title="Security Autonomous Agent (Org A) — OpenCode-powered",
               version="0.2.0")
-setup_tracing("opencode-agent")
+setup_tracing("security-autonomous-agent")
 FastAPIInstrumentor.instrument_app(app)
 
 
@@ -184,7 +208,7 @@ async def config():
     return {
         "kc_a": KC_A_URL, "kc_a_realm": KC_A_REALM,
         "kc_b": KC_B_URL, "kc_b_realm": KC_B_REALM,
-        "opencode_client": OPENCODE_CLIENT_ID,
+        "security_autonomous_agent_client": SECURITY_AUTONOMOUS_AGENT_CLIENT_ID,
         "triage_client": TRIAGE_CLIENT_ID,
         "identity_node": IDENTITY_NODE_URL,
         "egress_pdp": EGRESS_PDP_URL,
@@ -203,7 +227,7 @@ async def config():
 
 async def _cimd_generate(client: httpx.AsyncClient, sub: str) -> dict:
     s = _s("cimd-generate-id",
-           f"2. OpenCode registers its identity — generate id for {sub} "
+           f"2. Security Autonomous Agent registers its identity — generate id for {sub} "
            f"(Vault-signed proof, {VAULT_CFG.common_name} trust authority) → Identity Node",
            f"POST {IDENTITY_NODE_URL}/v1alpha1/id/generate  iss={VAULT_CFG.issuer}  sub={sub}")
     try:
@@ -513,7 +537,7 @@ async def plan_stream():
 # ── Steps 7-8: AGNTCY Directory ───────────────────────────────────────────────
 
 async def _dir_push(cve: str, repo: str) -> dict:
-    s = _s("dir-push", "7. Directory: push OpenCode turn record (OASF) → CID",
+    s = _s("dir-push", "7. Directory: push Security Autonomous Agent turn record (OASF) → CID",
            f"gRPC Push({DIR_APISERVER_URL})  cve={cve}  repo={repo}")
     if not DIR_APISERVER_URL:
         s.update(status="ok", result={"cid": "", "note": "directory not configured"})
@@ -521,10 +545,10 @@ async def _dir_push(cve: str, repo: str) -> dict:
     try:
         from datetime import datetime, timezone
         record_dict = {
-            "name": "opencode-agent",
+            "name": SECURITY_AUTONOMOUS_AGENT_CLIENT_ID,
             "version": "0.2.0",
             "schema_version": dir_api.OASF_SCHEMA_VERSION,
-            "description": f"OpenCode agent turn: {cve} in {repo}",
+            "description": f"Security Autonomous Agent turn: {cve} in {repo}",
             "authors": ["cross-domain-demo"],
             "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "skills": [
@@ -534,7 +558,9 @@ async def _dir_push(cve: str, repo: str) -> dict:
             "domains": [
                 {"name": "technology/security", "id": 107},
             ],
-            "annotations": {"cve": cve, "repo": repo, "turn": "remediation"},
+            "annotations": {"cve": cve, "repo": repo, "turn": "remediation",
+                            "record_type": dir_api.AUDIT_RECORD_TYPE,
+                            "agent_id": f"AGNTCY-{SECURITY_AUTONOMOUS_AGENT_CLIENT_ID}"},
         }
         cid = await asyncio.get_event_loop().run_in_executor(
             None, dir_api.push_record, DIR_APISERVER_URL, record_dict
@@ -542,7 +568,7 @@ async def _dir_push(cve: str, repo: str) -> dict:
         s.update(status="ok", result={
             "cid": cid,
             "schema_version": dir_api.OASF_SCHEMA_VERSION,
-            "agent": "opencode-agent",
+            "agent": SECURITY_AUTONOMOUS_AGENT_CLIENT_ID,
         })
     except Exception as exc:  # noqa: BLE001
         s.update(status="error", error=str(exc))
@@ -557,13 +583,17 @@ async def _dir_search(agent_name: str = "triage-agent") -> dict:
         return s
     try:
         records = await asyncio.get_event_loop().run_in_executor(
-            None, dir_api.search_by_name, DIR_APISERVER_URL, agent_name
+            None, dir_api.search_agents_by_name, DIR_APISERVER_URL, agent_name
         )
         found = len(records) > 0
         s.update(status="ok", result={
             "found": found,
             "record_name": records[0].get("name", "") if found else "",
             "count": len(records),
+            "identity_id": (records[0].get("annotations") or {}).get("identity_id", "") if found else "",
+            "badge_url": (records[0].get("annotations") or {}).get("badge_url", "") if found else "",
+            "oasf_digest": dir_api.oasf_digest(records[0]) if found else "",
+            "record_type": (records[0].get("annotations") or {}).get("record_type", "") if found else "",
         })
     except Exception as exc:  # noqa: BLE001
         s.update(status="error", error=str(exc))
@@ -573,8 +603,11 @@ async def _dir_search(agent_name: str = "triage-agent") -> dict:
 # ── Full task lifecycle ───────────────────────────────────────────────────────
 
 @app.post("/api/run")
-async def run(body: RunRequest | None = None):
-    """Execute the task Sarah delegated: authenticate → register identity →
+async def run(
+    body: RunRequest | None = None,
+    authorization: str | None = Header(default=None),
+):
+    """Execute the task initiated by the Security Autonomous Agent: authenticate → register identity →
     policy-scoped badge → work → delegate cross-domain (steps 1-12)."""
     repo = (body.repo if body else "") or SCAN_REPO
     cve = (body.cve_override if body else "") or "CVE-2024-XXXX"
@@ -586,58 +619,82 @@ async def run(body: RunRequest | None = None):
 
     async with httpx.AsyncClient(timeout=20) as client:
 
-        # ── Step 1: Sarah signs in (OIDC password grant → Keycloak A) ──────
-        s = _s("sarah-login",
-               "1. Sarah signs in — OIDC password grant → Keycloak A (org-a)",
-               f"POST {KC_A_TOKEN_EP}  client={OPENCODE_CLIENT_ID}  user={SARAH_USER}")
+        # ── Step 1: Security Autonomous Agent authenticates ────────────────
+        # This is a workload identity, not a human login. The harness obtains
+        # a token for the autonomous initiator using client credentials, then
+        # OpenCode executes the task under that principal's delegation.
+        supplied_by_a2a = bool(authorization and authorization.lower().startswith("bearer "))
+        s = _s(
+            "security-agent-login",
+            (
+                "1. Security Autonomous Agent presents its client-credentials token over A2A"
+                if supplied_by_a2a
+                else "1. Security Autonomous Agent authenticates — client credentials → Keycloak A (org-a)"
+            ),
+            (
+                "A2A Authorization: Bearer <Security Autonomous Agent token>"
+                if supplied_by_a2a
+                else f"POST {KC_A_TOKEN_EP}  client={SECURITY_AUTONOMOUS_AGENT_CLIENT_ID}"
+            ),
+        )
         try:
-            r = await client.post(KC_A_TOKEN_EP, data={
-                "grant_type": "password",
-                "client_id": OPENCODE_CLIENT_ID,
-                "client_secret": OPENCODE_CLIENT_SECRET,
-                "username": SARAH_USER,
-                "password": SARAH_PASSWORD,
-                "scope": "openid profile email",
-            })
-            if r.status_code == 200:
-                sarah_token = r.json()["access_token"]
-                s.update(status="ok", token_preview=sarah_token[:48] + "…",
-                         result={"token": sarah_token,
-                                 "claims": _decode_jwt_payload_unverified(sarah_token)})
+            if supplied_by_a2a:
+                security_agent_token = authorization.split(" ", 1)[1]
             else:
-                s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
-                steps.append(s)
-                return _fail()
+                r = await client.post(KC_A_TOKEN_EP, data={
+                    "grant_type": "client_credentials",
+                    "client_id": SECURITY_AUTONOMOUS_AGENT_CLIENT_ID,
+                    "client_secret": SECURITY_AUTONOMOUS_AGENT_CLIENT_SECRET,
+                })
+                if r.status_code != 200:
+                    s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
+                    steps.append(s)
+                    return _fail()
+                security_agent_token = r.json()["access_token"]
+            token_claims = _decode_jwt_payload_unverified(security_agent_token)
+            autonomous_principal = token_claims.get("preferred_username") or token_claims.get("sub")
+            if autonomous_principal != SECURITY_AUTONOMOUS_AGENT_PRINCIPAL:
+                raise ValueError(
+                    "Keycloak returned an unexpected autonomous-agent principal: "
+                    f"{autonomous_principal!r} (expected {SECURITY_AUTONOMOUS_AGENT_PRINCIPAL!r})"
+                )
+            s.update(status="ok", token_preview=security_agent_token[:48] + "…",
+                     result={"token": security_agent_token,
+                             "claims": token_claims,
+                             "principal": autonomous_principal,
+                             "transport": "A2A 1.0" if supplied_by_a2a else "direct REST fallback"})
         except Exception as exc:  # noqa: BLE001
             s.update(status="error", error=str(exc))
             steps.append(s)
             return _fail()
         steps.append(s)
 
-        # ── Steps 2-3: OpenCode registers ITS OWN identity ──────────────────
-        generate_step = await _cimd_generate(client, OPENCODE_CLIENT_ID)
+        # ── Steps 2-3: the autonomous agent registers its identity ──────────
+        generate_step = await _cimd_generate(client, SECURITY_AUTONOMOUS_AGENT_CLIENT_ID)
         steps.append(generate_step)
         if generate_step.get("status") != "ok":
             return _fail()
-        cimd_id = (generate_step.get("result") or {}).get("id", f"AGNTCY-{OPENCODE_CLIENT_ID}")
+        cimd_id = (generate_step.get("result") or {}).get(
+            "id", f"AGNTCY-{SECURITY_AUTONOMOUS_AGENT_CLIENT_ID}"
+        )
         resolve_step = await _cimd_resolve(client, cimd_id)
         steps.append(resolve_step)
         if resolve_step.get("status") != "ok":
             return _fail()
 
         # ── Step 4: badge request → Envoy A + OPA → scoped-down intent ─────
-        # The agent presents Sarah's delegated access token plus the task it
+        # The agent presents the Security Autonomous Agent's access token plus the task it
         # wants a badge for; Org A's PDP verifies the token (KC-A JWKS) and
         # inline OPA decides whether — and how narrowly — to allow it.
         requested_intent = f"{REQUESTED_ACTION}:{repo}"
         s = _s("badge-scope-check",
-               "4. Badge request — Sarah's OAuth token → Envoy A + OPA → scoped-down intent",
+               "4. Badge request — Security Autonomous Agent token → Envoy A + OPA → scoped-down intent",
                f"POST {EGRESS_PDP_URL}/api/badge-scope-check  action={REQUESTED_ACTION}  repo={repo}")
         try:
             r = await client.post(
                 f"{EGRESS_PDP_URL}/api/badge-scope-check",
                 headers={
-                    "Authorization": f"Bearer {sarah_token}",
+                    "Authorization": f"Bearer {security_agent_token}",
                     "x-agntcy-requested-action": REQUESTED_ACTION,
                     "x-agntcy-requested-repo": repo,
                 },
@@ -678,14 +735,19 @@ async def run(body: RunRequest | None = None):
         try:
             issued = await vc_api.issue_badge(
                 client, IDENTITY_NODE_URL, VAULT_CFG,
-                subject_id=cimd_id or f"AGNTCY-{OPENCODE_CLIENT_ID}",
+                subject_id=cimd_id or f"AGNTCY-{SECURITY_AUTONOMOUS_AGENT_CLIENT_ID}",
                 caps=["scan", "remediate", "delegate", "gitea:read"],
-                # What OpenCode may grant onward — the scope Keycloak A permits
-                # it to assert for Triage. Distinct from what it does itself.
+                # What the autonomous agent may grant onward — the scope
+                # Keycloak A permits it to assert for Triage.
                 delegatable=["openid", "triage:create"],
-                delegating_user=SARAH_EMAIL,
+                delegating_user=autonomous_principal,
                 intent=scoped_intent,
-                act_chain=[OPENCODE_CLIENT_ID],
+                act_chain=[SECURITY_AUTONOMOUS_AGENT_CLIENT_ID],
+                agent_definition=dir_api.build_agent_record(
+                    SECURITY_AUTONOMOUS_AGENT_CLIENT_ID,
+                    IDENTITY_NODE_URL,
+                    identity_id=cimd_id or f"AGNTCY-{SECURITY_AUTONOMOUS_AGENT_CLIENT_ID}",
+                ),
             )
             if not issued["verified"]:
                 s.update(status="error", error="identity-node reported the published badge as invalid")
@@ -706,9 +768,102 @@ async def run(body: RunRequest | None = None):
                 "superseded_credentials": issued.get("superseded", []),
                 "verified_by": "identity-node /v1alpha1/vc/verify",
                 "well_known": f"{IDENTITY_NODE_URL}/v1alpha1/vc/"
-                              f"{cimd_id or 'AGNTCY-' + OPENCODE_CLIENT_ID}/.well-known/vcs.json",
+                              f"{cimd_id or 'AGNTCY-' + SECURITY_AUTONOMOUS_AGENT_CLIENT_ID}/.well-known/vcs.json",
                 "claims": issued["document"],
+                "oasf_digest": dir_api.oasf_digest(
+                    dir_api.build_agent_record(
+                        SECURITY_AUTONOMOUS_AGENT_CLIENT_ID,
+                        IDENTITY_NODE_URL,
+                        identity_id=cimd_id or f"AGNTCY-{SECURITY_AUTONOMOUS_AGENT_CLIENT_ID}",
+                    )
+                ),
             })
+        except Exception as exc:  # noqa: BLE001
+            s.update(status="error", error=str(exc))
+            steps.append(s)
+            return _fail()
+        steps.append(s)
+
+        # ── Steps 5a-5c: two independently issued VCs → holder-signed VP ─
+        # This is the cross-enterprise trust bundle from db_seq_diagram.png.
+        # The secondary issuer attests the operating organization; Org A's
+        # Identity Service attests the agent. The VP is evidence, not itself
+        # a trust anchor, and the verifier consumes its own nonce.
+        organization_vc = ""
+        s = _s(
+            "secondary-organization-vc",
+            "5a. Secondary issuer verifies Org A and issues Organization VC",
+            f"POST {SECONDARY_VC_ISSUER_URL}/api/vc/organization",
+        )
+        try:
+            r = await client.post(
+                f"{SECONDARY_VC_ISSUER_URL}/api/vc/organization",
+                json={"organization_uri": OPERATING_ORGANIZATION_URI},
+            )
+            r.raise_for_status()
+            organization_data = r.json()
+            organization_vc = organization_data["credential"]
+            s.update(status="ok", token_preview=organization_vc[:48] + "…", result={
+                "token": organization_vc,
+                "issuer": organization_data.get("issuer"),
+                "claims": organization_data.get("document"),
+                "note": "independent enterprise attestation; no D-U-N-S-specific claims",
+            })
+        except Exception as exc:  # noqa: BLE001
+            s.update(status="error", error=str(exc))
+            steps.append(s)
+            return _fail()
+        steps.append(s)
+
+        presentation = ""
+        s = _s(
+            "assemble-two-vc-vp",
+            "5b. Security Autonomous Agent assembles both VCs and signs the VP with its CIMD key",
+            f"GET {TRUST_VERIFIER_URL}/api/challenge  →  holder={cimd_id}",
+        )
+        try:
+            challenge_response = await client.get(
+                f"{TRUST_VERIFIER_URL}/api/challenge", params={"domain": TRUST_DOMAIN}
+            )
+            challenge_response.raise_for_status()
+            challenge_data = challenge_response.json()
+            presentation, vp_claims = await trust_bundle.create_verifiable_presentation(
+                client,
+                VAULT_CFG,
+                holder=cimd_id,
+                agent_badge_vc=badge,
+                organization_vc=organization_vc,
+                challenge=challenge_data["challenge"],
+                domain=challenge_data["domain"],
+            )
+            s.update(status="ok", token_preview=presentation[:48] + "…", result={
+                "presentation": presentation,
+                "claims": vp_claims,
+                "credential_count": 2,
+                "holder": cimd_id,
+                "challenge": challenge_data["challenge"],
+                "domain": challenge_data["domain"],
+            })
+        except Exception as exc:  # noqa: BLE001
+            s.update(status="error", error=str(exc))
+            steps.append(s)
+            return _fail()
+        steps.append(s)
+
+        s = _s(
+            "verify-two-vc-vp",
+            "5c. Verifier validates VP, both issuer signatures, operatedBy, CIMD, and Directory binding",
+            f"POST {TRUST_VERIFIER_URL}/api/verify",
+        )
+        try:
+            r = await client.post(
+                f"{TRUST_VERIFIER_URL}/api/verify",
+                json={"presentation": presentation},
+            )
+            verification = r.json()
+            if r.status_code != 200 or not verification.get("accepted"):
+                raise ValueError(verification.get("error") or f"HTTP {r.status_code}")
+            s.update(status="ok", result=verification)
         except Exception as exc:  # noqa: BLE001
             s.update(status="error", error=str(exc))
             steps.append(s)
@@ -727,9 +882,9 @@ async def run(body: RunRequest | None = None):
         try:
             r = await client.post(KC_A_TOKEN_EP, data={
                 "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
-                "client_id": OPENCODE_CLIENT_ID,
-                "client_secret": OPENCODE_CLIENT_SECRET,
-                "subject_token": sarah_token,
+                "client_id": SECURITY_AUTONOMOUS_AGENT_CLIENT_ID,
+                "client_secret": SECURITY_AUTONOMOUS_AGENT_CLIENT_SECRET,
+                "subject_token": security_agent_token,
                 "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
                 # Same badge gate as the remediation mint (see keycloak-idjag-spi).
                 "actor_token": badge,
@@ -737,8 +892,8 @@ async def run(body: RunRequest | None = None):
                 "requested_token_type": "urn:ietf:params:oauth:token-type:id-jag",
                 "audience": KC_B_ISSUER,
                 "scope": "openid gitea:read",
-                "target_client_id": OPENCODE_CLIENT_ID,
-                "act_chain": OPENCODE_CLIENT_ID,
+                "target_client_id": SECURITY_AUTONOMOUS_AGENT_CLIENT_ID,
+                "act_chain": SECURITY_AUTONOMOUS_AGENT_CLIENT_ID,
                 "intent": "scan-source",
                 "resource": repo,
             })
@@ -759,7 +914,7 @@ async def run(body: RunRequest | None = None):
         steps.append(s)
 
         s = _s("read-egress-check",
-               "5c. Org A egress PDP on the READ assertion — may Sarah delegate a read to Org B?",
+               "5c. Org A egress PDP on the READ assertion — may Security Autonomous Agent delegate a read to Org B?",
                f"POST {EGRESS_PDP_URL}/api/egress-check  Bearer=<read assertion>")
         try:
             r = await client.post(f"{EGRESS_PDP_URL}/api/egress-check",
@@ -783,13 +938,13 @@ async def run(body: RunRequest | None = None):
         read_token = ""
         s = _s("kc-b-read-exchange",
                "5d. Redeem the READ assertion at Keycloak B → access token carrying gitea:read only",
-               f"POST {KC_B_TOKEN_EP}  grant_type=jwt-bearer  client={OPENCODE_CLIENT_ID}")
+               f"POST {KC_B_TOKEN_EP}  grant_type=jwt-bearer  client={SECURITY_AUTONOMOUS_AGENT_CLIENT_ID}")
         try:
             r = await client.post(KC_B_TOKEN_EP, data={
                 "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
                 "assertion": read_assertion,
-                "client_id": OPENCODE_CLIENT_ID,
-                "client_secret": OPENCODE_CLIENT_SECRET,
+                "client_id": SECURITY_AUTONOMOUS_AGENT_CLIENT_ID,
+                "client_secret": SECURITY_AUTONOMOUS_AGENT_CLIENT_SECRET,
                 "scope": "openid gitea:read",
             })
             if r.status_code == 200:
@@ -862,14 +1017,14 @@ async def run(body: RunRequest | None = None):
         # the Identity Node in step 5; delegation semantics are carried via the
         # ID-JAG's act_chain claim.
         s = _s("kc-a-exchange",
-               "9. RFC 8693 exchange (subject=Sarah, actor_token=badge) → Keycloak A",
+               "9. RFC 8693 exchange (subject=Security Autonomous Agent, actor_token=badge) → Keycloak A",
                f"POST {KC_A_TOKEN_EP}  grant_type=token-exchange")
         try:
             r = await client.post(KC_A_TOKEN_EP, data={
                 "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
-                "client_id": OPENCODE_CLIENT_ID,
-                "client_secret": OPENCODE_CLIENT_SECRET,
-                "subject_token": sarah_token,
+                "client_id": SECURITY_AUTONOMOUS_AGENT_CLIENT_ID,
+                "client_secret": SECURITY_AUTONOMOUS_AGENT_CLIENT_SECRET,
+                "subject_token": security_agent_token,
                 "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
                 "actor_token": badge,
                 "actor_token_type": "urn:ietf:params:oauth:token-type:jwt",
@@ -879,8 +1034,8 @@ async def run(body: RunRequest | None = None):
                 s.update(status="ok", token_preview=exchanged_token[:48] + "…", result={
                     "token": exchanged_token,
                     "claims": _decode_jwt_payload_unverified(exchanged_token),
-                    "subject": SARAH_EMAIL,
-                    "actor": OPENCODE_CLIENT_ID,
+                    "subject": autonomous_principal,
+                    "actor": SECURITY_AUTONOMOUS_AGENT_CLIENT_ID,
                     "note": (
                         "Keycloak validated subject_token and issued this token for "
                         "real; it does not itself process actor_token into an act "
@@ -907,13 +1062,13 @@ async def run(body: RunRequest | None = None):
         # supplied free-text email — Keycloak verifies its signature for
         # real (session.tokens().decode(...)).
         s = _s("mint-idjag",
-               "10. Mint ID-JAG natively at Keycloak A (keycloak-idjag-spi, act_chain=[opencode], aud=KC-B, scope=triage:create)",
+               "10. Mint ID-JAG at Keycloak A (act_chain=[security-autonomous-agent], aud=KC-B, scope=triage:create)",
                f"POST {KC_A_TOKEN_EP}  grant_type=token-exchange  requested_token_type=id-jag  aud={KC_B_ISSUER}  scope=triage:create")
         try:
             r = await client.post(KC_A_TOKEN_EP, data={
                 "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
-                "client_id": OPENCODE_CLIENT_ID,
-                "client_secret": OPENCODE_CLIENT_SECRET,
+                "client_id": SECURITY_AUTONOMOUS_AGENT_CLIENT_ID,
+                "client_secret": SECURITY_AUTONOMOUS_AGENT_CLIENT_SECRET,
                 "subject_token": exchanged_token,
                 "subject_token_type": "urn:ietf:params:oauth:token-type:access_token",
                 # The badge travels with the request that MINTS authority, not
@@ -926,7 +1081,7 @@ async def run(body: RunRequest | None = None):
                 "audience": KC_B_ISSUER,
                 "scope": "openid triage:create",
                 "target_client_id": TRIAGE_CLIENT_ID,
-                "act_chain": OPENCODE_CLIENT_ID,
+                "act_chain": SECURITY_AUTONOMOUS_AGENT_CLIENT_ID,
                 "intent": "create-pr-fix",
             })
             if r.status_code == 200:
@@ -946,12 +1101,12 @@ async def run(body: RunRequest | None = None):
         steps.append(s)
 
         # ── Step 10b: Org A egress PDP check (Envoy A + inline OPA) ─────────
-        # May Sarah delegate this scope to Org B? Envoy verifies the ID-JAG's
+        # May the Security Autonomous Agent delegate this scope to Org B? Envoy verifies the ID-JAG's
         # signature against Keycloak A's JWKS (it is minted natively by the
         # keycloak-idjag-spi now); OPA checks scope, intent, and
         # delegation-chain depth before the assertion ever leaves Org A.
         s = _s("egress-check",
-               "10b. Egress PDP check — may Sarah delegate this scope to Org B? → Envoy A + OPA",
+               "10b. Egress PDP check — may Security Autonomous Agent delegate this scope to Org B? → Envoy A + OPA",
                f"POST {EGRESS_PDP_URL}/api/egress-check  Bearer=<id-jag>")
         try:
             r = await client.post(
@@ -978,7 +1133,7 @@ async def run(body: RunRequest | None = None):
 
         # ── Step 11: Redeem ID-JAG at Keycloak B ───────────────────────────
         s = _s("kc-b-exchange",
-               "11. jwt-bearer grant at Keycloak B → scoped access token (triage:create, Sarah propagated)",
+               "11. jwt-bearer grant at Keycloak B → scoped access token (triage:create, autonomous principal propagated)",
                f"POST {KC_B_TOKEN_EP}  grant_type=jwt-bearer  client={TRIAGE_CLIENT_ID}")
         try:
             r = await client.post(KC_B_TOKEN_EP, data={
@@ -1005,42 +1160,39 @@ async def run(body: RunRequest | None = None):
 
         # ── Step 12: Create ticket at Triage agent (via Org B Envoy) ────────
         s = _s("create-ticket",
-               "12. POST /api/ticket → Org B (access token + ID-JAG actor token, intent=create-pr-fix)",
-               f"POST {TRIAGE_AGENT_URL}/api/ticket  Bearer=triage_token")
+               "12. A2A SendMessage → Org B Triage (access token + ID-JAG actor token)",
+               f"POST {TRIAGE_AGENT_URL}/a2a  method=SendMessage")
         try:
-            r = await client.post(
-                f"{TRIAGE_AGENT_URL}/api/ticket",
-                headers={
-                    "Authorization": f"Bearer {triage_token}",
-                    "X-AGNTCY-Actor-Token": f"Bearer {assertion}",
-                    "Content-Type": "application/json",
-                },
-                json={
+            triage_data, triage_task = await a2a.send_message(
+                client,
+                f"{TRIAGE_AGENT_URL}/a2a",
+                {
                     "cve": cve,
                     "severity": "HIGH",
                     "repo": repo,
                     "intent": "create-pr-fix",
-                    "delegating_agent": OPENCODE_CLIENT_ID,
-                    "act_chain": [OPENCODE_CLIENT_ID],
+                    "delegating_agent": SECURITY_AUTONOMOUS_AGENT_CLIENT_ID,
+                    "act_chain": [SECURITY_AUTONOMOUS_AGENT_CLIENT_ID],
                     "plan": plan_text,
+                },
+                headers={
+                    "Authorization": f"Bearer {triage_token}",
+                    "X-AGNTCY-Actor-Token": f"Bearer {assertion}",
                 },
                 timeout=90,
             )
-            if r.status_code in (200, 201):
-                triage_data = r.json()
-                s.update(status="ok" if triage_data.get("ok") else "error",
-                         result={"ticket_id": triage_data.get("ticket_id", ""),
-                                 "ok": triage_data.get("ok")})
-                steps.append(s)
-                # Flatten the Org B steps (triage + nested sub-agent) so the
-                # full cross-domain run reads as one sequence.
-                for ts in triage_data.get("steps", []):
-                    steps.append(ts)
-                    if ts.get("id") == "spawn-sub-agent" and isinstance(ts.get("result"), dict):
-                        steps.extend(ts["result"].get("steps", []))
-            else:
-                s.update(status="error", error=f"HTTP {r.status_code}: {r.text[:300]}")
-                steps.append(s)
+            s.update(status="ok" if triage_data.get("ok") else "error",
+                     result={"ticket_id": triage_data.get("ticket_id", ""),
+                             "ok": triage_data.get("ok"),
+                             "a2a_task_id": triage_task.get("id"),
+                             "a2a_state": (triage_task.get("status") or {}).get("state")})
+            steps.append(s)
+            # Flatten the Org B steps (triage + nested sub-agent) so the
+            # full cross-domain run reads as one sequence.
+            for ts in triage_data.get("steps", []):
+                steps.append(ts)
+                if ts.get("id") == "spawn-sub-agent" and isinstance(ts.get("result"), dict):
+                    steps.extend(ts["result"].get("steps", []))
         except Exception as exc:  # noqa: BLE001
             s.update(status="error", error=str(exc))
             steps.append(s)
@@ -1050,3 +1202,38 @@ async def run(body: RunRequest | None = None):
         "steps": steps,
         "trace_id": current_trace_id(),
     })
+
+
+async def _a2a_run(payload: dict, headers) -> dict:
+    response = await run(
+        RunRequest(
+            repo=payload.get("repo", ""),
+            cve_override=payload.get("cve_override", payload.get("cve", "")),
+            use_real_opencode=bool(payload.get("use_real_opencode", True)),
+        ),
+        authorization=headers.get("authorization"),
+    )
+    return a2a.response_data(response)
+
+
+_a2a_security, _a2a_requirements = a2a.bearer_security([])
+_a2a_server = a2a.A2AServer(
+    a2a.agent_card(
+        name="Security Autonomous Agent",
+        description="Org A autonomous agent that scans source with OpenCode and delegates remediation across domains.",
+        interface_url=A2A_INTERFACE_URL,
+        organization="Org A",
+        version="1.0.0",
+        skills=[{
+            "id": "secure-code-remediation",
+            "name": "Secure code remediation",
+            "description": "Analyze vulnerable source and coordinate a least-privilege remediation.",
+            "tags": ["security", "code", "remediation"],
+            "examples": ["Scan demo-admin/payments-service and remediate the finding"],
+        }],
+        security_schemes=_a2a_security,
+        security_requirements=_a2a_requirements,
+    ),
+    _a2a_run,
+)
+_a2a_server.install(app)

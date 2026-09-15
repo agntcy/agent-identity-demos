@@ -13,7 +13,7 @@ That draft describes best practices for agent-to-agent auth by applying WIMSE, O
 | Delegated authorization for a specific request | ID-JAG (`typ=oauth-id-jag+jwt`) minted by Keycloak via RFC 8693 token exchange (`keycloak-idjag-spi`) |
 | Cross-domain trust | Org A mints; Org B redeems (`jwt-bearer`); Envoy + OPA at both org boundaries |
 | Least privilege / narrowed onward grant | Triage mints a sub-assertion whose scope is a subset of the inbound ID-JAG; Sub-Agent cannot exceed it |
-| User as the subject of delegation | Sarah's Keycloak token is the `subject_token`; `act_chain` carries Sarah → OpenCode → Triage → Sub-Agent |
+| Workload as the subject of delegation | The Security Autonomous Agent's Keycloak token is the `subject_token`; `act_chain` carries Security Autonomous Agent → OpenCode → Triage → Sub-Agent |
 
 ## What this demo does not implement
 

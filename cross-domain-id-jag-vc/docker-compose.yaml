@@ -8,19 +8,17 @@ name: cross-domain-stack
 #   (egress + ingress + resource) → sub-agent spawn → Gitea PR audit
 #
 # Actors from the diagram:
-#   Sarah          → demo user (Org A), signs in via Keycloak A
-#   OpenCode       → Org A AI agent: REAL OpenCode (opencode-server, headless)
-#                    + identity harness (opencode-agent), task lifecycle:
-#                    OAuth → identity → policy-scoped badge → work → delegate
+#   Security Autonomous Agent → autonomous Org A initiator (client credentials)
+#   OpenCode       → internal planning engine used by the Security Autonomous Agent
 #   AGNTCY         → identity node (CIMD ids + agent-badge VCs); ID-JAG
 #                    assertions are minted natively by Keycloak A and B
 #                    (keycloak-idjag-spi baked into both images)
-#   Keycloak A     → Org A IdP (org-a realm), authenticates Sarah
-#   Envoy+OPA A    → egress inline policy (may Sarah delegate this scope to Org B?)
+#   Keycloak A     → Org A IdP (org-a realm), authenticates the autonomous agent
+#   Envoy+OPA A    → egress inline policy (may the autonomous agent delegate?)
 #   Keycloak B     → Org B IdP (org-b realm), receives cross-domain ID-JAG assertion
 #   Envoy+OPA B    → ticket-ingress + resource-access inline policies
-#   Triage         → Org B remediation agent (mock), steps 13-19
-#   Sub-Agent      → Org B sub-agent (mock, bounded privilege), steps 20-25
+#   Triage         → Org B A2A remediation/coordination agent
+#   Sub-Agent      → Org B A2A remediation agent (bounded privilege)
 #   Gitea          → resource (repository for PRs)
 #
 # Ports (non-conflicting with single-org-id-jag-app-access defaults):
@@ -31,7 +29,9 @@ name: cross-domain-stack
 #   envoy-org-a     → host:12000 (egress)  admin:127.0.0.1:9902
 #   envoy-org-b     → host:10000 (ticket ingress) / 10001 (resource access)
 #                     admin:127.0.0.1:9901
-#   opencode-agent  → host:8100  (Org A identity harness for real OpenCode)
+#   autonomous      → host:8100  (Security Autonomous Agent A2A endpoint)
+#   secondary VC   → host:8500  (independent Organization VC issuer)
+#   trust verifier → host:8600  (two-VC VP verifier)
 #   opencode-server → internal :4096 (real OpenCode, headless)
 #   triage-agent    → internal only (behind Envoy)
 #   sub-agent       → host:8300  (Org B sub-agent)
@@ -78,9 +78,9 @@ services:
 
   # ---------------------------------------------------------------------------
   # Keycloak A — Org A IdP (realm: org-a)
-  #   - Authenticates Sarah (password grant → opencode-agent client)
+  #   - Authenticates the Security Autonomous Agent (client credentials grant)
   #   - Mints ID-JAG assertions natively (keycloak-idjag-spi)
-  #   - standard.token.exchange enabled on opencode-agent (RFC 8693, step 7)
+  #   - standard.token.exchange enabled on security-autonomous-agent
   # ---------------------------------------------------------------------------
   keycloak-a:
     # Keycloak 26.7 + the keycloak-idjag-spi provider baked in (native
@@ -115,7 +115,7 @@ services:
       retries: 30
       start_period: 20s
 
-  # One-shot: register triage:create optional scope on opencode-agent in org-a
+  # One-shot: register triage:create on the Security Autonomous Agent
   kc-a-init:
     image: quay.io/keycloak/keycloak:26.7
     container_name: cd-kc-a-init
@@ -128,7 +128,7 @@ services:
       KC_REALM: org-a
       KC_ADMIN: ${KC_A_ADMIN:-admin}
       KC_ADMIN_PASSWORD: ${KC_A_ADMIN_PASSWORD:?set KC_A_ADMIN_PASSWORD in .env}
-      REQUESTER_CLIENT: opencode-agent
+      REQUESTER_CLIENT: security-autonomous-agent
     volumes:
       - ./keycloak-a/bootstrap-scopes.sh:/bootstrap-scopes.sh:ro
     networks:
@@ -137,9 +137,9 @@ services:
 
   # ---------------------------------------------------------------------------
   # Keycloak B — Org B IdP (realm: org-b)
-  #   - Receives cross-domain ID-JAG assertions from OpenCode (jwt-bearer grant)
+  #   - Receives cross-domain ID-JAG assertions from the Security Autonomous Agent
   #   - Issues scoped access tokens to triage-agent (triage:create) and sub-agent (gitea:*)
-  #   - Sarah's identity propagated via federated ID link (id-jag IdP)
+  #   - The autonomous agent's identity propagated via federated ID link (id-jag IdP)
   # ---------------------------------------------------------------------------
   keycloak-b:
     # Built with keycloak-idjag-spi baked in (see keycloak-b/Dockerfile) —
@@ -258,7 +258,7 @@ services:
       SECRETS_CRYPTO_KEY: ${SECRETS_CRYPTO_KEY:?set SECRETS_CRYPTO_KEY in .env}
       # Keycloak A is the OIDC issuer for Org A agents registering badges
       IAM_ISSUER: ${KC_A_INTERNAL_URL:-http://keycloak-a:8080}/realms/org-a
-      IAM_USER_CID: opencode-agent
+      IAM_USER_CID: security-autonomous-agent
       IAM_USER_CID_CLAIM_NAME: azp
     networks:
       - cd-net
@@ -361,7 +361,7 @@ services:
 
   # ---------------------------------------------------------------------------
   # Org A gateway — Envoy + Built On Envoy inline OPA dynamic module
-  #   - Listener 12000 enforces the egress PDP: may Sarah delegate this scope
+  #   - Listener 12000 enforces the egress PDP: may Security Autonomous Agent delegate this scope
   #     to Org B? Verifies the freshly-minted ID-JAG against Keycloak A's own
   #     JWKS, then checks scope/intent/delegation-chain in Rego before
   #     OpenCode redeems it at Keycloak B.
@@ -376,7 +376,7 @@ services:
     image: cd-envoy-boe-a:${ENVOY_A_IMAGE_TAG:-milestone4}
     container_name: cd-envoy-org-a
     depends_on:
-      # badge-scope route verifies Sarah's KC-A access token via KC-A JWKS
+      # badge-scope route verifies the Security Autonomous Agent's KC-A access token via KC-A JWKS
       keycloak-a:
         condition: service_healthy
     ports:
@@ -434,7 +434,7 @@ services:
   #   - Model provider: host Ollama by default (OPENCODE_MODEL=ollama/...,
   #     via host.docker.internal) or Anthropic (ANTHROPIC_API_KEY passthrough)
   #   - Read-only for the demo: `plan` agent + permission edit/bash deny
-  #   - Internal-only on cd-net; driven by opencode-agent (identity harness)
+  #   - Internal-only on cd-net; used by the Security Autonomous Agent
   # ---------------------------------------------------------------------------
   opencode-server:
     build:
@@ -461,10 +461,10 @@ services:
       start_period: 15s
 
   # ---------------------------------------------------------------------------
-  # OpenCode Agent — Org A identity harness for the real OpenCode agent
-  #   Task lifecycle (per delegated task from Sarah):
-  #     1     Sarah OIDC → Keycloak A → delegated access token
-  #     2-3   OpenCode registers its own identity (CIMD @ identity-node)
+  # Security Autonomous Agent — A2A server/client using OpenCode internally
+  #   Task lifecycle:
+  #     1     Autonomous agent client credentials → Keycloak A → access token
+  #     2-3   Agent registers its CIMD identity
   #     4     badge request → Envoy A + OPA → scoped-down intent
   #     5     agent badge VC: Vault-signed, published to identity-node
   #     5b-5e read Org B source under a read-scoped assertion
@@ -474,14 +474,14 @@ services:
   #
   # Trigger: POST http://localhost:8100/api/run
   # ---------------------------------------------------------------------------
-  opencode-agent:
+  security-autonomous-agent:
     build:
       context: ./opencode-agent
       additional_contexts:
         dir_proto: ./proto
         shared_lib: ./agntcy_identity_client
-    image: cd-opencode-agent
-    container_name: cd-opencode-agent
+    image: cd-security-autonomous-agent
+    container_name: cd-security-autonomous-agent
     depends_on:
       keycloak-a:
         condition: service_healthy
@@ -499,21 +499,23 @@ services:
         condition: service_healthy
       identity-node-init:
         condition: service_completed_successfully
+      secondary-vc-issuer:
+        condition: service_healthy
+      trust-verifier:
+        condition: service_healthy
       dir-apiserver:
         condition: service_started
       jaeger:
         condition: service_healthy
     ports:
-      - "${OPENCODE_PORT:-8100}:8100"
+      - "${SECURITY_AUTONOMOUS_AGENT_PORT:-8100}:8100"
     environment:
-      # Org A IdP — Sarah's login
+      # Org A IdP — Security Autonomous Agent workload credentials
       KC_A_URL: ${KC_A_INTERNAL_URL:-http://keycloak-a:8080}
       KC_A_REALM: org-a
-      OPENCODE_CLIENT_ID: opencode-agent
-      OPENCODE_CLIENT_SECRET: ${OPENCODE_CLIENT_SECRET:-demo-opencode-secret-change-me}
-      SARAH_USER: ${SARAH_USER:-sarah}
-      SARAH_PASSWORD: ${SARAH_PASSWORD:?set SARAH_PASSWORD in .env}
-      SARAH_EMAIL: ${SARAH_EMAIL:-sarah@org-a.example}
+      SECURITY_AUTONOMOUS_AGENT_CLIENT_ID: ${SECURITY_AUTONOMOUS_AGENT_CLIENT_ID:-security-autonomous-agent}
+      SECURITY_AUTONOMOUS_AGENT_CLIENT_SECRET: ${SECURITY_AUTONOMOUS_AGENT_CLIENT_SECRET:-demo-security-autonomous-secret-change-me}
+      SECURITY_AUTONOMOUS_AGENT_PRINCIPAL: ${SECURITY_AUTONOMOUS_AGENT_PRINCIPAL:-service-account-security-autonomous-agent}
       # Org B IdP — receives cross-domain assertion
       KC_B_URL: ${KC_B_INTERNAL_URL:-http://keycloak-b:8080}
       KC_B_REALM: org-b
@@ -522,6 +524,11 @@ services:
       # AGNTCY services
       IDENTITY_NODE_URL: http://identity-node:4000
       DIR_APISERVER_URL: dir-apiserver:8888
+      SECONDARY_VC_ISSUER_URL: http://secondary-vc-issuer:8500
+      TRUST_VERIFIER_URL: http://trust-verifier:8600
+      OPERATING_ORGANIZATION_URI: urn:agntcy:organization:org-a
+      TRUST_DOMAIN: urn:agntcy:verifier:cross-domain-demo
+      A2A_INTERFACE_URL: http://security-autonomous-agent:8100/a2a
       # CIMD proof signing — org-a trust authority key in Vault Transit
       VAULT_ADDR: http://identity-vault:8200
       VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:?set VAULT_DEV_ROOT_TOKEN in .env}
@@ -598,6 +605,7 @@ services:
       TRIAGE_CLIENT_ID: triage-agent
       TRIAGE_CLIENT_SECRET: ${TRIAGE_CLIENT_SECRET:-demo-triage-secret-change-me}
       SUB_AGENT_CLIENT_ID: sub-agent
+      SECURITY_AUTONOMOUS_AGENT_PRINCIPAL: ${SECURITY_AUTONOMOUS_AGENT_PRINCIPAL:-service-account-security-autonomous-agent}
       IDENTITY_NODE_URL: http://identity-node:4000
       DIR_APISERVER_URL: dir-apiserver:8888
       # CIMD proof signing — org-b trust authority key in Vault Transit
@@ -608,6 +616,7 @@ services:
       # Org B PDP — sub-badge narrowing decided by Envoy B + inline OPA
       SUBBADGE_PDP_URL: http://envoy-org-b:10000
       SUB_AGENT_URL: http://sub-agent:8300
+      A2A_INTERFACE_URL: http://envoy-org-b:10000/a2a
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     networks:
       - cd-net
@@ -626,7 +635,7 @@ services:
   #
   # Spawned by Triage with a narrowed sub-badge carrying:
   #   - caps ⊆ parent (gitea:write gitea:pr only, no triage:create)
-  #   - nested act-chain: Sarah → OpenCode → Triage → Sub-Agent
+  #   - nested act-chain: Security Autonomous Agent → Triage → Sub-Agent
   #   - signed intent=create-pr-fix and resource=the exact target repository
   # ---------------------------------------------------------------------------
   sub-agent:
@@ -661,6 +670,7 @@ services:
       KC_B_REALM: org-b
       SUB_AGENT_CLIENT_ID: sub-agent
       SUB_AGENT_CLIENT_SECRET: ${SUB_AGENT_CLIENT_SECRET:-demo-subagent-secret-change-me}
+      SECURITY_AUTONOMOUS_AGENT_PRINCIPAL: ${SECURITY_AUTONOMOUS_AGENT_PRINCIPAL:-service-account-security-autonomous-agent}
       IDENTITY_NODE_URL: http://identity-node:4000
       DIR_APISERVER_URL: dir-apiserver:8888
       # CIMD proof signing — org-b trust authority key in Vault Transit
@@ -671,6 +681,7 @@ services:
       # Org B resource boundary; direct Gitea Gateway access is not exposed.
       GITEA_GATEWAY_URL: http://envoy-org-b:10001
       GITEA_ADMIN_USER: ${GITEA_ADMIN_USER:-demo-admin}
+      A2A_INTERFACE_URL: http://sub-agent:8300/a2a
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     networks:
       - cd-net
@@ -683,7 +694,7 @@ services:
 
   # ---------------------------------------------------------------------------
   # AGNTCY Directory Node — content-addressed agent VC registry
-  #   - Stores OASF agent records (opencode-agent, triage-agent, sub-agent)
+  #   - Stores OASF records (security-autonomous-agent, triage-agent, sub-agent)
   #   - Per-turn record push from webapp (step 3: dir-push)
   #   - Agent discovery by name (step 4: dir-search)
   # ---------------------------------------------------------------------------
@@ -758,6 +769,7 @@ services:
       context: ./agent-dir-init
       additional_contexts:
         dir_proto: ./proto
+        shared_lib: ./agntcy_identity_client
     image: cd-agent-dir-init
     container_name: cd-agent-dir-init
     depends_on:
@@ -765,6 +777,7 @@ services:
         condition: service_started
     environment:
       DIR_APISERVER_URL: dir-apiserver:8888
+      IDENTITY_NODE_URL: http://identity-node:4000
     networks:
       - cd-net
     restart: "no"
@@ -787,12 +800,91 @@ services:
       VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:?set VAULT_DEV_ROOT_TOKEN in .env}
       # Each org gets its own Vault Transit key and registers as its own
       # trust authority — org-a attests Org A agents, org-b Org B agents.
-      ISSUERS: org-a-issuer:org-a,org-b-issuer:org-b
+      ISSUERS: org-a-issuer:org-a,org-b-issuer:org-b,secondary-vc-issuer:secondary-vc-issuer
     volumes:
       - ./identity-node-init.py:/init.py:ro
     networks:
       - cd-net
     restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Secondary VC issuer — independent enterprise attestation authority
+  #   - Signs a generic Organization VC with its own Vault Transit key
+  #   - Deliberately separate from the Org A Identity Service / Agent Badge key
+  # ---------------------------------------------------------------------------
+  secondary-vc-issuer:
+    build:
+      context: ./secondary-vc-issuer
+      additional_contexts:
+        shared_lib: ./agntcy_identity_client
+    image: cd-secondary-vc-issuer
+    container_name: cd-secondary-vc-issuer
+    depends_on:
+      identity-vault:
+        condition: service_healthy
+      identity-node-init:
+        condition: service_completed_successfully
+    environment:
+      VAULT_ADDR: http://identity-vault:8200
+      VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:?set VAULT_DEV_ROOT_TOKEN in .env}
+      VAULT_KEY_NAME: secondary-vc-issuer
+      ORG_COMMON_NAME: secondary-vc-issuer
+      DEFAULT_ORGANIZATION_URI: urn:agntcy:organization:org-a
+      DEFAULT_ORGANIZATION_ID: org-a-enterprise-001
+      DEFAULT_LEGAL_NAME: Org A Security Engineering
+    ports:
+      - "${SECONDARY_VC_ISSUER_PORT:-8500}:8500"
+    networks:
+      - cd-net
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8500/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # ---------------------------------------------------------------------------
+  # Trust verifier — validates the holder-signed two-VC presentation
+  #   - Resolves the holder key through AGNTCY CIMD
+  #   - Verifies Agent Badge via Identity Node and Organization VC via issuer JWKS
+  #   - Enforces operatedBy plus Directory OASF/digest binding
+  # ---------------------------------------------------------------------------
+  trust-verifier:
+    build:
+      context: ./trust-verifier
+      additional_contexts:
+        dir_proto: ./proto
+        shared_lib: ./agntcy_identity_client
+    image: cd-trust-verifier
+    container_name: cd-trust-verifier
+    depends_on:
+      identity-node:
+        condition: service_healthy
+      identity-node-init:
+        condition: service_completed_successfully
+      secondary-vc-issuer:
+        condition: service_healthy
+      dir-apiserver:
+        condition: service_started
+    environment:
+      IDENTITY_NODE_URL: http://identity-node:4000
+      DIR_APISERVER_URL: dir-apiserver:8888
+      SECONDARY_ISSUER_URL: http://secondary-vc-issuer:8500
+      TRUSTED_BADGE_ISSUER: agntcy:org-a
+      TRUSTED_ORGANIZATION_ISSUER: agntcy:secondary-vc-issuer
+      TRUSTED_ORGANIZATION: urn:agntcy:organization:org-a
+      TRUSTED_AGENT_CLIENT_ID: security-autonomous-agent
+      VERIFIER_DOMAIN: urn:agntcy:verifier:cross-domain-demo
+    ports:
+      - "${TRUST_VERIFIER_PORT:-8600}:8600"
+    networks:
+      - cd-net
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8600/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
   # ---------------------------------------------------------------------------
   # Demo webapp — animated sequence diagram UI
@@ -822,7 +914,9 @@ services:
         condition: service_healthy
       envoy-org-a:
         condition: service_healthy
-      opencode-agent:
+      security-autonomous-agent:
+        condition: service_healthy
+      trust-verifier:
         condition: service_healthy
       jaeger:
         condition: service_healthy
@@ -833,16 +927,17 @@ services:
       KC_A_REALM: org-a
       KC_B_URL: ${KC_B_INTERNAL_URL:-http://keycloak-b:8080}
       KC_B_REALM: org-b
-      OPENCODE_CLIENT_ID: opencode-agent
       TRIAGE_CLIENT_ID: triage-agent
-      SARAH_USER: ${SARAH_USER:-sarah}
-      SARAH_EMAIL: ${SARAH_EMAIL:-sarah@org-a.example}
+      SECURITY_AUTONOMOUS_AGENT_CLIENT_ID: ${SECURITY_AUTONOMOUS_AGENT_CLIENT_ID:-security-autonomous-agent}
+      SECURITY_AUTONOMOUS_AGENT_PRINCIPAL: ${SECURITY_AUTONOMOUS_AGENT_PRINCIPAL:-service-account-security-autonomous-agent}
       IDENTITY_NODE_URL: http://identity-node:4000
       EGRESS_PDP_URL: http://envoy-org-a:12000
       TRIAGE_AGENT_URL: http://envoy-org-b:10000
       DIR_APISERVER_URL: dir-apiserver:8888
-      # The real task lifecycle — /api/run just proxies to this.
-      OPENCODE_AGENT_URL: http://opencode-agent:8100
+      SECONDARY_VC_ISSUER_URL: http://secondary-vc-issuer:8500
+      TRUST_VERIFIER_URL: http://trust-verifier:8600
+      # The merged agent owns A2A; OpenCode is its internal planning runtime.
+      SECURITY_AUTONOMOUS_AGENT_URL: http://security-autonomous-agent:8100
       OPENCODE_MODEL: ${OPENCODE_MODEL:-ollama/qwen2.5-coder:7b}
       OPENCODE_TIMEOUT: ${OPENCODE_TIMEOUT:-240}
       VAULT_ADDR: http://identity-vault:8200

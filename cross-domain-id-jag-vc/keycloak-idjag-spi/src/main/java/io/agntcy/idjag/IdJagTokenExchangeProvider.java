@@ -74,7 +74,16 @@ public class IdJagTokenExchangeProvider implements TokenExchangeProvider {
             return oauthError(Response.Status.BAD_REQUEST, "invalid_grant", "subject_token is expired");
         }
 
-        String sub = subjectToken.getEmail() != null ? subjectToken.getEmail() : subjectToken.getSubject();
+        // Client-credentials tokens identify a service account through
+        // preferred_username (service-account-<client-id>). Prefer that stable
+        // workload identity over an email or opaque service-account UUID so it
+        // can be federated across the Org A → Org B boundary. Keep email as
+        // the fallback for ordinary human access tokens.
+        String preferredUsername = subjectToken.getPreferredUsername();
+        String sub = preferredUsername != null && preferredUsername.startsWith("service-account-")
+                ? preferredUsername
+                : subjectToken.getEmail() != null ? subjectToken.getEmail()
+                : preferredUsername != null ? preferredUsername : subjectToken.getSubject();
 
         String scope = params.getScope();
         List<String> audienceParams = params.getAudience();
@@ -105,7 +114,7 @@ public class IdJagTokenExchangeProvider implements TokenExchangeProvider {
         List<String> resource = commaDelimited(context.getFormParams().getFirst("resource"));
         // client_id/azp on an ID-JAG identify the *target* client the
         // assertion is for (e.g. "triage-agent"), not the caller minting it
-        // (e.g. "opencode-agent") — matching idjag-issuer's original
+        // (e.g. "security-autonomous-agent") — matching idjag-issuer's original
         // client_id request field. Falls back to the calling client's own
         // ID if the caller doesn't specify one.
         String targetClientId = context.getFormParams().getFirst("target_client_id");

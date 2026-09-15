@@ -14,10 +14,10 @@ This wiki is the navigable overview. Operational detail (commands, reviewer chec
 
 ### Cross-domain ID-JAG + VC
 
-The most complete demo. **Sarah** (Org A engineer) asks her AI agent **OpenCode** to fix a security weakness in a repo owned by **Org B**.
+The most complete demo. The **Security Autonomous Agent** (Org A workload) asks **OpenCode** to fix a security weakness in a repo owned by **Org B**.
 
 - OpenCode reads the real source through the delegation chain, under its own read-scoped assertion, before analyzing it
-- OpenCode can't act in Org B directly — it asserts Sarah's delegation cross-domain using a natively-minted ID-JAG
+- OpenCode can't act in Org B directly — it asserts the Security Autonomous Agent's delegation cross-domain using a natively-minted ID-JAG
 - Org B's **Triage** agent narrows the privilege further and spawns a bounded **Sub-Agent** to open the PR
 - Every agent publishes a real W3C Verifiable Credential, and each side of a handoff resolves and checks the other's before trusting it
 

@@ -5,10 +5,12 @@ package envoy.authz
 
 import rego.v1
 
+autonomous_subject := "service-account-security-autonomous-agent"
+
 # Envoy's jwt_authn filter verifies the ID-JAG's signature, issuer, and
 # audience before this policy runs, forwarding only the verified payload in
-# an internal header. This policy answers the egress question: may Sarah's
-# delegation actually leave Org A with the scope/intent it claims?
+# an internal header. This policy answers the egress question: may the Security
+# Autonomous Agent's delegation actually leave Org A with the scope/intent it claims?
 
 default allow := {
 	"allowed": false,
@@ -47,7 +49,7 @@ allow := {
 
 	actor := verified_payload("x-verified-actor-token-payload")
 
-	actor.sub == "sarah@org-a.example"
+actor.sub == autonomous_subject
 	actor.azp == "triage-agent"
 	actor.client_id == "triage-agent"
 
@@ -56,15 +58,16 @@ allow := {
 
 	count(actor.act.act_chain) > 0
 	count(actor.act.act_chain) <= 2
-	actor.act.act_chain[0] == "opencode-agent"
-	actor.act.sub == "opencode-agent"
+	actor.act.act_chain[0] == "security-autonomous-agent"
+	actor.act.sub == "security-autonomous-agent"
 }
 
 # ── Egress: the READ assertion ───────────────────────────────────────────────
 # Scanning Org B's source is a cross-domain read, so it leaves Org A under its
 # own assertion — narrower than the remediation one above and checked
-# separately rather than by loosening that rule. May Sarah delegate a *read*
-# of this repository to Org B? Answered here, before the assertion leaves.
+# separately rather than by loosening that rule. May the Security Autonomous
+# Agent delegate a *read* of this repository to Org B? Answered here, before
+# the assertion leaves.
 allow := {
 	"allowed": true,
 	"headers": {
@@ -79,9 +82,9 @@ allow := {
 
 	actor := verified_payload("x-verified-actor-token-payload")
 
-	actor.sub == "sarah@org-a.example"
-	actor.azp == "opencode-agent"
-	actor.client_id == "opencode-agent"
+actor.sub == autonomous_subject
+actor.azp == "security-autonomous-agent"
+	actor.client_id == "security-autonomous-agent"
 
 	# Read and nothing else: this assertion must not double as write authority.
 	scope_contains(actor.scope, "gitea:read")
@@ -92,8 +95,8 @@ allow := {
 	"scan-source" in actor.intent
 
 	# One hop — Org A's own agent, delegating onward to nobody.
-	actor.act.act_chain == ["opencode-agent"]
-	actor.act.sub == "opencode-agent"
+	actor.act.act_chain == ["security-autonomous-agent"]
+	actor.act.sub == "security-autonomous-agent"
 
 	# Bound to a repository Org A permits delegated work on.
 	count(actor.resource) == 1
@@ -101,9 +104,9 @@ allow := {
 }
 
 # ── Badge-scope PDP ──────────────────────────────────────────────────────────
-# Before any task work runs, the agent presents Sarah's verified Keycloak A
+# Before any task work runs, the agent presents the Security Autonomous Agent's verified Keycloak A
 # access token (jwt_authn, kc_a_access_token provider) plus the task it wants
-# a badge for. This policy decides whether Sarah may delegate that task to
+# a badge for. This policy decides whether the Security Autonomous Agent may delegate that task to
 # the agent at all — and answers with the narrowed, task-scoped intent the
 # VC badge must be minted with (least privilege, decided by policy, not by
 # the agent).
@@ -129,9 +132,8 @@ allow := {
 
 	user := verified_payload("x-verified-user-token-payload")
 
-	user.email == "sarah@org-a.example"
-	user.azp == "opencode-agent"
-	scope_contains(user.scope, "openid")
+user.azp == "security-autonomous-agent"
+user.preferred_username == autonomous_subject
 
 	requested_action := input.attributes.request.http.headers["x-agntcy-requested-action"]
 	requested_repo := input.attributes.request.http.headers["x-agntcy-requested-repo"]
