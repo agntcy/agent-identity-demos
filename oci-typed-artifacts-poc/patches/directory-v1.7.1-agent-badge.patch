@@ -1,0 +1,107 @@
+diff --git a/api/core/v1/referrer_types.go b/api/core/v1/referrer_types.go
+index e6986d1..46af15b 100644
+--- a/api/core/v1/referrer_types.go
++++ b/api/core/v1/referrer_types.go
+@@ -14,6 +14,9 @@ const (
+ 
+ 	// ScanReportReferrerType is the type for ScanReport referrers.
+ 	ScanReportReferrerType = "agntcy.dir.security.v1.ScanReport"
++
++	// AgentBadgeReferrerType is an AGNTCY Identity Agent Badge VC attachment.
++	AgentBadgeReferrerType = "agntcy.identity.v1.AgentBadge"
+ )
+ 
+ // Annotation keys written on referrer manifests by the storage layer.
+diff --git a/proto/agntcy/dir/core/v1/rules.proto b/proto/agntcy/dir/core/v1/rules.proto
+index 37fafc3..a650ad8 100644
+--- a/proto/agntcy/dir/core/v1/rules.proto
++++ b/proto/agntcy/dir/core/v1/rules.proto
+@@ -8,7 +8,7 @@ extend buf.validate.StringRules {
+   optional bool is_referrer_type = 50000 [(buf.validate.predefined).cel = {
+     id: "string.is_referrer_type"
+     message: "value must be a valid referrer type"
+-    expression: "this in ['agntcy.dir.sign.v1.PublicKey', 'agntcy.dir.sign.v1.Signature', 'agntcy.dir.security.v1.ScanReport']"
++    expression: "this in ['agntcy.dir.sign.v1.PublicKey', 'agntcy.dir.sign.v1.Signature', 'agntcy.dir.security.v1.ScanReport', 'agntcy.identity.v1.AgentBadge']"
+   }];
+   optional bool is_cid = 50001 [(buf.validate.predefined).cel = {
+     id: "string.is_cid"
+diff --git a/server/routing/autosync/autosync.go b/server/routing/autosync/autosync.go
+index 85bcced..111f696 100644
+--- a/server/routing/autosync/autosync.go
++++ b/server/routing/autosync/autosync.go
+@@ -69,4 +69,5 @@ var allowedReferrerTypes = map[string]struct{}{
+ 	corev1.SignatureReferrerType:  {},
+ 	corev1.PublicKeyReferrerType:  {},
+ 	corev1.ScanReportReferrerType: {},
++	corev1.AgentBadgeReferrerType:  {},
+ }
+diff --git a/server/store/oci/types.go b/server/store/oci/types.go
+index ab76cc1..90db6cb 100644
+--- a/server/store/oci/types.go
++++ b/server/store/oci/types.go
+@@ -17,6 +17,9 @@ const (
+ 	// SignatureArtifactType defines the internal OCI media type for signature layers.
+ 	SignatureArtifactType = "application/vnd.agntcy.dir.sign.signature.v1+json"
+ 
++	// AgentBadgeArtifactMediaType preserves the typed Agent Badge attachment in OCI.
++	AgentBadgeArtifactMediaType = "application/vnd.agntcy.identity.agent-badge.v1+json"
++
+ 	// DefaultReferrerArtifactMediaType defines the default internal OCI media type for referrer blobs.
+ 	DefaultReferrerArtifactMediaType = "application/vnd.agntcy.dir.referrer.v1+json"
+ )
+@@ -28,6 +31,8 @@ func apiToOCIType(apiType string) string {
+ 		return SignatureArtifactType
+ 	case corev1.PublicKeyReferrerType:
+ 		return PublicKeyArtifactMediaType
++	case corev1.AgentBadgeReferrerType:
++		return AgentBadgeArtifactMediaType
+ 	default:
+ 		return DefaultReferrerArtifactMediaType
+ 	}
+@@ -40,6 +45,8 @@ func ociToAPIType(ociType string) string {
+ 		return corev1.SignatureReferrerType
+ 	case PublicKeyArtifactMediaType:
+ 		return corev1.PublicKeyReferrerType
++	case AgentBadgeArtifactMediaType:
++		return corev1.AgentBadgeReferrerType
+ 	default:
+ 		return ociType // Return the original OCI type if not found
+ 	}
+diff --git a/server/store/oci/referrers.go b/server/store/oci/referrers.go
+index da68593..6c27fe1 100644
+--- a/server/store/oci/referrers.go
++++ b/server/store/oci/referrers.go
+@@ -113,7 +113,7 @@ func (s *store) pushReferrer(ctx context.Context, recordCID string, referrer *cor
+ 	}
+ 
+ 	// Create the referrer manifest with proper OCI subject field
+-	manifestDesc, err := oras.PackManifest(ctx, s.repo, oras.PackManifestVersion1_1, ocispec.MediaTypeImageManifest,
++	manifestDesc, err := oras.PackManifest(ctx, s.repo, oras.PackManifestVersion1_1, ociArtifactType,
+ 		oras.PackManifestOptions{
+ 			Subject:             &recordManifestDesc,
+ 			ManifestAnnotations: annotations,
+diff --git a/server/store/oci/types_agent_badge_test.go b/server/store/oci/types_agent_badge_test.go
+new file mode 100644
+index 0000000..025034e
+--- /dev/null
++++ b/server/store/oci/types_agent_badge_test.go
+@@ -0,0 +1,18 @@
++// Copyright AGNTCY Contributors (https://github.com/agntcy)
++// SPDX-License-Identifier: Apache-2.0
++
++package oci
++
++import (
++	"testing"
++
++	corev1 "github.com/agntcy/dir/api/core/v1"
++)
++
++func TestAgentBadgeTypeMapping(t *testing.T) {
++	if got := apiToOCIType(corev1.AgentBadgeReferrerType); got != AgentBadgeArtifactMediaType {
++		t.Fatalf("apiToOCIType() = %q, want %q", got, AgentBadgeArtifactMediaType)
++	}
++	if got := ociToAPIType(AgentBadgeArtifactMediaType); got != corev1.AgentBadgeReferrerType {
++		t.Fatalf("ociToAPIType() = %q, want %q", got, corev1.AgentBadgeReferrerType)
++	}
++}
