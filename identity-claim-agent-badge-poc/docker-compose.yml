@@ -1,0 +1,162 @@
+name: agntcy-identity-claim-badge-poc
+
+services:
+  directory:
+    image: agntcy-dir-identity-claim-badge-poc:pr2125
+    depends_on:
+      directory-postgres:
+        condition: service_healthy
+      zot:
+        condition: service_started
+      identity-node:
+        condition: service_started
+    environment:
+      DIRECTORY_SERVER_LISTEN_ADDRESS: 0.0.0.0:8888
+      DIRECTORY_SERVER_OASF_API_VALIDATION_SCHEMA_URL: https://schema.oasf.outshift.com
+      DIRECTORY_SERVER_AUTHN_ENABLED: "false"
+      DIRECTORY_SERVER_AUTHZ_ENABLED: "false"
+      DIRECTORY_SERVER_STORE_PROVIDER: oci
+      DIRECTORY_SERVER_STORE_OCI_REGISTRY_ADDRESS: zot:5000
+      DIRECTORY_SERVER_STORE_OCI_REPOSITORY_NAME: patched
+      DIRECTORY_SERVER_STORE_OCI_AUTH_CONFIG_INSECURE: "true"
+      DIRECTORY_SERVER_DATABASE_TYPE: postgres
+      DIRECTORY_SERVER_DATABASE_POSTGRES_HOST: directory-postgres
+      DIRECTORY_SERVER_DATABASE_POSTGRES_PORT: "5432"
+      DIRECTORY_SERVER_DATABASE_POSTGRES_DATABASE: directory
+      DIRECTORY_SERVER_DATABASE_POSTGRES_USERNAME: postgres
+      DIRECTORY_SERVER_DATABASE_POSTGRES_PASSWORD: ${POC_DB_PASSWORD:?run scripts/run.sh}
+      DIRECTORY_SERVER_DATABASE_POSTGRES_SSL_MODE: disable
+      DIRECTORY_SERVER_IDENTITY_AGNTCY_IDENTITY_NODE_URL: http://identity-node:4000
+      DIRECTORY_SERVER_ROUTING_LISTEN_ADDRESS: /ip4/0.0.0.0/tcp/8999
+      DIRECTORY_SERVER_ROUTING_GOSSIPSUB_ENABLED: "false"
+      DIRECTORY_SERVER_METRICS_ENABLED: "false"
+      DIRECTORY_SERVER_RATELIMIT_ENABLED: "false"
+      DIRECTORY_LOGGER_LOG_LEVEL: INFO
+      DIRECTORY_LOGGER_LOG_FORMAT: text
+    ports:
+      - "127.0.0.1:8910:8888"
+    healthcheck:
+      test: ["CMD", "/bin/grpc-health-probe", "-addr=127.0.0.1:8888"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  directory-stock-pr2125:
+    image: agntcy-dir-identity-claim-stock:pr2125
+    depends_on:
+      stock-postgres:
+        condition: service_healthy
+      zot:
+        condition: service_started
+    environment:
+      DIRECTORY_SERVER_LISTEN_ADDRESS: 0.0.0.0:8888
+      DIRECTORY_SERVER_OASF_API_VALIDATION_SCHEMA_URL: https://schema.oasf.outshift.com
+      DIRECTORY_SERVER_AUTHN_ENABLED: "false"
+      DIRECTORY_SERVER_AUTHZ_ENABLED: "false"
+      DIRECTORY_SERVER_STORE_PROVIDER: oci
+      DIRECTORY_SERVER_STORE_OCI_REGISTRY_ADDRESS: zot:5000
+      DIRECTORY_SERVER_STORE_OCI_REPOSITORY_NAME: stock
+      DIRECTORY_SERVER_STORE_OCI_AUTH_CONFIG_INSECURE: "true"
+      DIRECTORY_SERVER_DATABASE_TYPE: postgres
+      DIRECTORY_SERVER_DATABASE_POSTGRES_HOST: stock-postgres
+      DIRECTORY_SERVER_DATABASE_POSTGRES_PORT: "5432"
+      DIRECTORY_SERVER_DATABASE_POSTGRES_DATABASE: directory
+      DIRECTORY_SERVER_DATABASE_POSTGRES_USERNAME: postgres
+      DIRECTORY_SERVER_DATABASE_POSTGRES_PASSWORD: ${POC_DB_PASSWORD:?run scripts/run.sh}
+      DIRECTORY_SERVER_DATABASE_POSTGRES_SSL_MODE: disable
+      DIRECTORY_SERVER_ROUTING_LISTEN_ADDRESS: /ip4/0.0.0.0/tcp/8999
+      DIRECTORY_SERVER_ROUTING_GOSSIPSUB_ENABLED: "false"
+      DIRECTORY_SERVER_METRICS_ENABLED: "false"
+      DIRECTORY_SERVER_RATELIMIT_ENABLED: "false"
+      DIRECTORY_LOGGER_LOG_LEVEL: INFO
+      DIRECTORY_LOGGER_LOG_FORMAT: text
+    ports:
+      - "127.0.0.1:8911:8888"
+    healthcheck:
+      test: ["CMD", "/bin/grpc-health-probe", "-addr=127.0.0.1:8888"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  directory-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POC_DB_PASSWORD:?run scripts/run.sh}
+      POSTGRES_DB: directory
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d directory"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  stock-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POC_DB_PASSWORD:?run scripts/run.sh}
+      POSTGRES_DB: directory
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d directory"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  zot:
+    image: ghcr.io/project-zot/zot:v2.1.21
+    ports:
+      - "127.0.0.1:5570:5000"
+
+  identity-node:
+    image: ghcr.io/agntcy/identity/node:0.0.26
+    depends_on:
+      identity-postgres:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+    environment:
+      DB_HOST: identity-postgres
+      DB_PORT: "5432"
+      DB_USERNAME: postgres
+      DB_PASSWORD: ${POC_DB_PASSWORD:?run scripts/run.sh}
+      POSTGRES_PASSWORD: ${POC_DB_PASSWORD:?run scripts/run.sh}
+      POSTGRES_DB: identity
+      VAULT_HOST: vault
+      VAULT_DEV_ROOT_TOKEN: ${POC_VAULT_TOKEN:?run scripts/run.sh}
+      GO_ENV: development
+      LOG_LEVEL: InfoLevel
+      IAM_ORGANIZATION: identity-claim-badge-poc
+      SECRETS_CRYPTO_KEY: ${POC_SECRETS_CRYPTO_KEY:?run scripts/run.sh}
+      IAM_ISSUER: https://issuer.invalid/realms/poc
+      IAM_USER_CID: security-autonomous-agent
+      IAM_USER_CID_CLAIM_NAME: azp
+    ports:
+      - "127.0.0.1:4030:4000"
+      - "127.0.0.1:4031:4001"
+
+  identity-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POC_DB_PASSWORD:?run scripts/run.sh}
+      POSTGRES_DB: identity
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d identity"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  vault:
+    image: hashicorp/vault:1.17
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${POC_VAULT_TOKEN:?run scripts/run.sh}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    ports:
+      - "127.0.0.1:8230:8200"
+    healthcheck:
+      test: ["CMD-SHELL", "vault status -address=http://127.0.0.1:8200 >/dev/null || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 30

@@ -1,0 +1,586 @@
+diff --git a/api/core/v1/record.go b/api/core/v1/record.go
+index b23a9ea..483052d 100644
+--- a/api/core/v1/record.go
++++ b/api/core/v1/record.go
+@@ -128 +128 @@ func (r *Record) GetOwnerType() string {
+-// Returns "did", "spiffe", "https", or "dns" (the fallback for bare domains
++// Returns "agntcy", "did", "spiffe", "https", or "dns" (the fallback for bare domains
+@@ -131,0 +132,2 @@ func InferIdentityType(uri string) string {
++	case strings.HasPrefix(uri, "agntcy:"):
++		return "agntcy"
+diff --git a/api/core/v1/record_identity_test.go b/api/core/v1/record_identity_test.go
+index f301de5..996e802 100644
+--- a/api/core/v1/record_identity_test.go
++++ b/api/core/v1/record_identity_test.go
+@@ -51,0 +52 @@ func TestRecord_GetIdentityType_InferredFromScheme(t *testing.T) {
++		{name: "agntcy", identity: "agntcy:AGNTCY-finance-agent", want: "agntcy"},
+diff --git a/reconciler/config/config.go b/reconciler/config/config.go
+index f8d748a..d0d513f 100644
+--- a/reconciler/config/config.go
++++ b/reconciler/config/config.go
+@@ -107,0 +108,2 @@ func LoadConfig() (*Config, error) {
++	_ = v.BindEnv("identity.agntcy_identity_node_url")
++
+diff --git a/reconciler/service/service.go b/reconciler/service/service.go
+index 2adf5f7..ee68051 100644
+--- a/reconciler/service/service.go
++++ b/reconciler/service/service.go
+@@ -22,0 +23 @@ import (
++	identityagntcy "github.com/agntcy/dir/server/identity/agntcy"
+@@ -107 +108 @@ func (s *Service) registerTasks(cfg *config.Config, db servertypes.DatabaseAPI,
+-			registry := serveridentity.NewRegistry(
++			resolvers := []serveridentity.Resolver{
+@@ -111 +112,5 @@ func (s *Service) registerTasks(cfg *config.Config, db servertypes.DatabaseAPI,
+-			)
++			}
++			if cfg.Identity.AGNTCYIdentityNodeURL != "" {
++				resolvers = append(resolvers, identityagntcy.New(cfg.Identity.AGNTCYIdentityNodeURL, nil))
++			}
++			registry := serveridentity.NewRegistry(resolvers...)
+diff --git a/reconciler/tasks/identity/config.go b/reconciler/tasks/identity/config.go
+index ead26e5..3badecb 100644
+--- a/reconciler/tasks/identity/config.go
++++ b/reconciler/tasks/identity/config.go
+@@ -21,0 +22,4 @@ type Config struct {
++	// AGNTCYIdentityNodeURL is the trusted Identity Node used to resolve
++	// agntcy: subjects and validate their Agent Badge credentials.
++	AGNTCYIdentityNodeURL string `json:"agntcy_identity_node_url,omitempty" mapstructure:"agntcy_identity_node_url"`
++
+diff --git a/server/config/config.go b/server/config/config.go
+index 5688574..63a9bbd 100644
+--- a/server/config/config.go
++++ b/server/config/config.go
+@@ -440,0 +441,3 @@ func LoadConfig(opts ...ConfigOption) (*Config, error) {
++
++	// Identity resolver configuration.
++	_ = v.BindEnv("identity.agntcy_identity_node_url")
+diff --git a/server/identity/agntcy/resolver.go b/server/identity/agntcy/resolver.go
+new file mode 100644
+index 0000000..58f0757
+--- /dev/null
++++ b/server/identity/agntcy/resolver.go
+@@ -0,0 +1,308 @@
++// Copyright AGNTCY Contributors (https://github.com/agntcy)
++// SPDX-License-Identifier: Apache-2.0
++
++// Package agntcy verifies an agntcy: identity claim by resolving the agent's
++// public key and Agent Badge from a configured AGNTCY Identity Node.
++package agntcy
++
++import (
++	"bytes"
++	"context"
++	"encoding/base64"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"io"
++	"net/http"
++	"net/url"
++	"strings"
++	"time"
++
++	corev1 "github.com/agntcy/dir/api/core/v1"
++	identityv1 "github.com/agntcy/dir/api/identity/v1"
++	"github.com/lestrrat-go/jwx/v2/jwk"
++	"google.golang.org/protobuf/types/known/structpb"
++)
++
++const (
++	defaultTimeout = 10 * time.Second
++	maxBodyBytes   = 4 << 20
++)
++
++// Resolver verifies proof of control and badge-backed identity for agntcy: subjects.
++type Resolver struct {
++	baseURL string
++	client  *http.Client
++}
++
++// New creates an AGNTCY Identity resolver. baseURL is administrator-controlled
++// configuration, not a URL supplied by the record publisher.
++func New(baseURL string, client *http.Client) *Resolver {
++	if client == nil {
++		client = &http.Client{Timeout: defaultTimeout}
++	}
++
++	return &Resolver{baseURL: strings.TrimRight(baseURL, "/"), client: client}
++}
++
++// Scheme implements identity.Resolver.
++func (*Resolver) Scheme() string { return "agntcy" }
++
++// Verify resolves the agent key, verifies the CID-bound IdentityClaim, then
++// requires a valid Agent Badge whose subject is the same Agent ID and whose
++// embedded OASF definition hashes to the claimed Directory CID.
++func (r *Resolver) Verify(ctx context.Context, subject string, signature, payload []byte) (bool, error) {
++	agentID, err := agentIDFromSubject(subject)
++	if err != nil {
++		return false, err
++	}
++
++	if r.baseURL == "" {
++		return false, errors.New("AGNTCY Identity Node URL is not configured")
++	}
++
++	keys, err := r.resolveKeys(ctx, agentID)
++	if err != nil {
++		return false, err
++	}
++
++	controlVerified := false
++	for _, key := range keys {
++		if identityv1.VerifyJWS(string(signature), key, payload) == nil {
++			controlVerified = true
++
++			break
++		}
++	}
++	if !controlVerified {
++		return false, nil
++	}
++
++	recordCID, err := recordCIDFromClaimPayload(payload)
++	if err != nil {
++		return false, err
++	}
++
++	return r.verifyMatchingAgentBadge(ctx, agentID, recordCID)
++}
++
++func agentIDFromSubject(subject string) (string, error) {
++	agentID := strings.TrimPrefix(subject, "agntcy:")
++	if agentID == "" || agentID == subject {
++		return "", fmt.Errorf("invalid AGNTCY subject %q", subject)
++	}
++
++	return agentID, nil
++}
++
++func recordCIDFromClaimPayload(payload []byte) (string, error) {
++	parts := strings.Split(string(payload), "|")
++	if len(parts) != 3 || parts[0] == "" {
++		return "", errors.New("invalid IdentityClaim canonical payload")
++	}
++
++	return parts[0], nil
++}
++
++type resolveResponse struct {
++	ResolverMetadata struct {
++		ID                 string `json:"id"`
++		VerificationMethod []struct {
++			PublicKeyJWK json.RawMessage `json:"publicKeyJwk"`
++		} `json:"verificationMethod"`
++	} `json:"resolverMetadata"`
++}
++
++func (r *Resolver) resolveKeys(ctx context.Context, agentID string) ([]any, error) {
++	var response resolveResponse
++	if err := r.requestJSON(ctx, http.MethodPost, "/v1alpha1/id/resolve", map[string]string{"id": agentID}, &response); err != nil {
++		return nil, fmt.Errorf("resolve AGNTCY Agent ID %q: %w", agentID, err)
++	}
++
++	if response.ResolverMetadata.ID != agentID {
++		return nil, fmt.Errorf("Identity Node returned Agent ID %q for %q", response.ResolverMetadata.ID, agentID)
++	}
++
++	keys := make([]any, 0, len(response.ResolverMetadata.VerificationMethod))
++	for _, method := range response.ResolverMetadata.VerificationMethod {
++		publicJWK, err := sanitizePublicJWK(method.PublicKeyJWK)
++		if err != nil {
++			continue
++		}
++
++		key, err := jwk.ParseKey(publicJWK)
++		if err != nil {
++			continue
++		}
++
++		var raw any
++		if err := key.Raw(&raw); err == nil {
++			keys = append(keys, raw)
++		}
++	}
++	if len(keys) == 0 {
++		return nil, fmt.Errorf("Identity Node returned no usable verification keys for %q", agentID)
++	}
++
++	return keys, nil
++}
++
++// sanitizePublicJWK removes private-key members. Identity Node v0.0.26 emits
++// its publicKeyJwk shape with empty RSA private fields, which some JWK parsers
++// interpret as a malformed private key instead of a public key.
++func sanitizePublicJWK(input json.RawMessage) ([]byte, error) {
++	var fields map[string]any
++	if err := json.Unmarshal(input, &fields); err != nil {
++		return nil, fmt.Errorf("parse public JWK: %w", err)
++	}
++
++	for _, name := range []string{"d", "p", "q", "dp", "dq", "qi", "oth", "priv", "seed"} {
++		delete(fields, name)
++	}
++
++	output, err := json.Marshal(fields)
++	if err != nil {
++		return nil, fmt.Errorf("encode public JWK: %w", err)
++	}
++
++	return output, nil
++}
++
++type credentialEnvelope struct {
++	EnvelopeType string `json:"envelopeType"`
++	Value        string `json:"value"`
++}
++
++type wellKnownResponse struct {
++	VCs []credentialEnvelope `json:"vcs"`
++}
++
++type verifyResponse struct {
++	Status bool `json:"status"`
++}
++
++func (r *Resolver) verifyMatchingAgentBadge(ctx context.Context, agentID, recordCID string) (bool, error) {
++	path := "/v1alpha1/vc/" + url.PathEscape(agentID) + "/.well-known/vcs.json"
++
++	var credentials wellKnownResponse
++	if err := r.requestJSON(ctx, http.MethodGet, path, nil, &credentials); err != nil {
++		return false, fmt.Errorf("fetch Agent Badge for %q: %w", agentID, err)
++	}
++
++	for _, credential := range credentials.VCs {
++		if credential.Value == "" || credential.EnvelopeType != "CREDENTIAL_ENVELOPE_TYPE_JOSE" {
++			continue
++		}
++
++		var verified verifyResponse
++		request := map[string]any{"vc": map[string]string{
++			"envelopeType": credential.EnvelopeType,
++			"value":        credential.Value,
++		}}
++		if err := r.requestJSON(ctx, http.MethodPost, "/v1alpha1/vc/verify", request, &verified); err != nil || !verified.Status {
++			continue
++		}
++
++		matches, err := badgeMatches(credential.Value, agentID, recordCID)
++		if err == nil && matches {
++			return true, nil
++		}
++	}
++
++	return false, fmt.Errorf("no valid Agent Badge binds %q to Directory record %q", agentID, recordCID)
++}
++
++func badgeMatches(compactJOSE, agentID, recordCID string) (bool, error) {
++	parts := strings.Split(compactJOSE, ".")
++	if len(parts) != 3 {
++		return false, errors.New("Agent Badge is not compact JOSE")
++	}
++
++	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
++	if err != nil {
++		return false, fmt.Errorf("decode Agent Badge payload: %w", err)
++	}
++
++	var credential map[string]any
++	if err := json.Unmarshal(payload, &credential); err != nil {
++		return false, fmt.Errorf("parse Agent Badge payload: %w", err)
++	}
++	if !hasCredentialType(credential["type"], "AgentBadge") {
++		return false, nil
++	}
++
++	subject, ok := credential["credentialSubject"].(map[string]any)
++	if !ok || subject["id"] != agentID {
++		return false, nil
++	}
++
++	badge, ok := subject["badge"].(map[string]any)
++	if !ok {
++		return false, nil
++	}
++
++	badgeStruct, err := structpb.NewStruct(badge)
++	if err != nil {
++		return false, fmt.Errorf("convert embedded OASF definition: %w", err)
++	}
++
++	return (&corev1.Record{Data: badgeStruct}).GetCid() == recordCID, nil
++}
++
++func hasCredentialType(value any, expected string) bool {
++	switch types := value.(type) {
++	case string:
++		return types == expected
++	case []any:
++		for _, item := range types {
++			if item == expected {
++				return true
++			}
++		}
++	}
++
++	return false
++}
++
++func (r *Resolver) requestJSON(ctx context.Context, method, path string, input, output any) error {
++	var body io.Reader
++	if input != nil {
++		encoded, err := json.Marshal(input)
++		if err != nil {
++			return fmt.Errorf("encode request: %w", err)
++		}
++		body = bytes.NewReader(encoded)
++	}
++
++	req, err := http.NewRequestWithContext(ctx, method, r.baseURL+path, body)
++	if err != nil {
++		return fmt.Errorf("build request: %w", err)
++	}
++	if input != nil {
++		req.Header.Set("Content-Type", "application/json")
++	}
++
++	resp, err := r.client.Do(req)
++	if err != nil {
++		return fmt.Errorf("perform request: %w", err)
++	}
++	defer resp.Body.Close() //nolint:errcheck
++
++	if resp.StatusCode != http.StatusOK {
++		return fmt.Errorf("Identity Node returned HTTP %d", resp.StatusCode)
++	}
++
++	limited := io.LimitReader(resp.Body, maxBodyBytes+1)
++	data, err := io.ReadAll(limited)
++	if err != nil {
++		return fmt.Errorf("read response: %w", err)
++	}
++	if len(data) > maxBodyBytes {
++		return fmt.Errorf("Identity Node response exceeds %d bytes", maxBodyBytes)
++	}
++	if err := json.Unmarshal(data, output); err != nil {
++		return fmt.Errorf("decode response: %w", err)
++	}
++
++	return nil
++}
+diff --git a/server/identity/agntcy/resolver_test.go b/server/identity/agntcy/resolver_test.go
+new file mode 100644
+index 0000000..bb3f0c8
+--- /dev/null
++++ b/server/identity/agntcy/resolver_test.go
+@@ -0,0 +1,172 @@
++// Copyright AGNTCY Contributors (https://github.com/agntcy)
++// SPDX-License-Identifier: Apache-2.0
++
++package agntcy_test
++
++import (
++	"crypto/rand"
++	"crypto/rsa"
++	"crypto/x509"
++	"encoding/base64"
++	"encoding/json"
++	"encoding/pem"
++	"net/http"
++	"net/http/httptest"
++	"testing"
++
++	corev1 "github.com/agntcy/dir/api/core/v1"
++	identityv1 "github.com/agntcy/dir/api/identity/v1"
++	identityagntcy "github.com/agntcy/dir/server/identity/agntcy"
++	"github.com/lestrrat-go/jwx/v2/jwk"
++	"github.com/stretchr/testify/assert"
++	"github.com/stretchr/testify/require"
++	"google.golang.org/protobuf/types/known/structpb"
++)
++
++func TestResolver_VerifiesControlAndMatchingAgentBadge(t *testing.T) {
++	fixture := newFixture(t)
++
++	ok, err := fixture.resolver.Verify(t.Context(), fixture.subject, []byte(fixture.claim.GetSignature()), identityv1.CanonicalBytes(fixture.recordCID, fixture.subject, fixture.claim.GetSignedAt()))
++	require.NoError(t, err)
++	assert.True(t, ok)
++}
++
++func TestResolver_RejectsBadgeForDifferentRecord(t *testing.T) {
++	fixture := newFixture(t)
++	fixture.server.Config.Handler = fixture.handler(t, map[string]any{
++		"name":           "different-agent-definition",
++		"schema_version": "1.1.0",
++		"version":        "1.0.0",
++	}, fixture.agentID, true)
++
++	ok, err := fixture.resolver.Verify(t.Context(), fixture.subject, []byte(fixture.claim.GetSignature()), identityv1.CanonicalBytes(fixture.recordCID, fixture.subject, fixture.claim.GetSignedAt()))
++	require.Error(t, err)
++	assert.False(t, ok)
++	assert.Contains(t, err.Error(), "no valid Agent Badge binds")
++}
++
++func TestResolver_RejectsBadgeForDifferentAgent(t *testing.T) {
++	fixture := newFixture(t)
++	fixture.server.Config.Handler = fixture.handler(t, fixture.record, "AGNTCY-other-agent", true)
++
++	ok, err := fixture.resolver.Verify(t.Context(), fixture.subject, []byte(fixture.claim.GetSignature()), identityv1.CanonicalBytes(fixture.recordCID, fixture.subject, fixture.claim.GetSignedAt()))
++	require.Error(t, err)
++	assert.False(t, ok)
++}
++
++func TestResolver_RejectsBadgeThatIdentityNodeDoesNotVerify(t *testing.T) {
++	fixture := newFixture(t)
++	fixture.server.Config.Handler = fixture.handler(t, fixture.record, fixture.agentID, false)
++
++	ok, err := fixture.resolver.Verify(t.Context(), fixture.subject, []byte(fixture.claim.GetSignature()), identityv1.CanonicalBytes(fixture.recordCID, fixture.subject, fixture.claim.GetSignedAt()))
++	require.Error(t, err)
++	assert.False(t, ok)
++}
++
++func TestResolver_RejectsClaimSignedByDifferentKey(t *testing.T) {
++	fixture := newFixture(t)
++	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
++	require.NoError(t, err)
++	otherSigner, err := identityv1.NewKeySigner(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(otherKey)}))
++	require.NoError(t, err)
++	otherClaim := identityv1.NewIdentityClaim(fixture.subject)
++	require.NoError(t, identityv1.SignIdentityClaim(otherClaim, fixture.recordCID, otherSigner))
++
++	ok, err := fixture.resolver.Verify(t.Context(), fixture.subject, []byte(otherClaim.GetSignature()), identityv1.CanonicalBytes(fixture.recordCID, fixture.subject, otherClaim.GetSignedAt()))
++	require.NoError(t, err)
++	assert.False(t, ok)
++}
++
++type fixture struct {
++	agentID   string
++	subject   string
++	record    map[string]any
++	recordCID string
++	claim     *identityv1.IdentityClaim
++	publicJWK json.RawMessage
++	server    *httptest.Server
++	resolver  *identityagntcy.Resolver
++}
++
++func newFixture(t *testing.T) *fixture {
++	t.Helper()
++
++	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
++	require.NoError(t, err)
++	key, err := jwk.FromRaw(&privateKey.PublicKey)
++	require.NoError(t, err)
++	publicJWK, err := json.Marshal(key)
++	require.NoError(t, err)
++	var identityNodeJWK map[string]any
++	require.NoError(t, json.Unmarshal(publicJWK, &identityNodeJWK))
++	for _, field := range []string{"d", "p", "q", "dp", "dq", "qi", "priv", "seed"} {
++		identityNodeJWK[field] = ""
++	}
++	publicJWK, err = json.Marshal(identityNodeJWK)
++	require.NoError(t, err)
++
++	agentID := "AGNTCY-security-autonomous-agent"
++	subject := "agntcy:" + agentID
++	record := map[string]any{
++		"name":           "security_autonomous_agent",
++		"schema_version": "1.1.0",
++		"version":        "1.0.0",
++		"annotations": map[string]any{
++			corev1.AnnotationKeyIdentity: subject,
++		},
++	}
++	recordStruct, err := structpb.NewStruct(record)
++	require.NoError(t, err)
++	recordCID := (&corev1.Record{Data: recordStruct}).GetCid()
++	require.NotEmpty(t, recordCID)
++
++	signer, err := identityv1.NewKeySigner(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)}))
++	require.NoError(t, err)
++	claim := identityv1.NewIdentityClaim(subject)
++	require.NoError(t, identityv1.SignIdentityClaim(claim, recordCID, signer))
++
++	f := &fixture{
++		agentID:   agentID,
++		subject:   subject,
++		record:    record,
++		recordCID: recordCID,
++		claim:     claim,
++		publicJWK: publicJWK,
++	}
++	f.server = httptest.NewServer(f.handler(t, record, agentID, true))
++	t.Cleanup(f.server.Close)
++	f.resolver = identityagntcy.New(f.server.URL, f.server.Client())
++
++	return f
++}
++
++func (f *fixture) handler(t *testing.T, record map[string]any, badgeSubject string, badgeValid bool) http.Handler {
++	t.Helper()
++
++	badgePayload, err := json.Marshal(map[string]any{
++		"type": []string{"VerifiableCredential", "AgentBadge"},
++		"credentialSubject": map[string]any{
++			"id":    badgeSubject,
++			"badge": record,
++		},
++	})
++	require.NoError(t, err)
++	compactBadge := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256"}`)) + "." + base64.RawURLEncoding.EncodeToString(badgePayload) + ".test-signature"
++
++	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		w.Header().Set("Content-Type", "application/json")
++		switch r.URL.Path {
++		case "/v1alpha1/id/resolve":
++			_, _ = w.Write([]byte(`{"resolverMetadata":{"id":"` + f.agentID + `","verificationMethod":[{"publicKeyJwk":` + string(f.publicJWK) + `}]}}`))
++		case "/v1alpha1/vc/" + f.agentID + "/.well-known/vcs.json":
++			_ = json.NewEncoder(w).Encode(map[string]any{"vcs": []any{map[string]any{
++				"envelopeType": "CREDENTIAL_ENVELOPE_TYPE_JOSE",
++				"value":        compactBadge,
++			}}})
++		case "/v1alpha1/vc/verify":
++			_ = json.NewEncoder(w).Encode(map[string]bool{"status": badgeValid})
++		default:
++			http.NotFound(w, r)
++		}
++	})
++}
+diff --git a/server/identity/config/config.go b/server/identity/config/config.go
+index ae61b68..645c380 100644
+--- a/server/identity/config/config.go
++++ b/server/identity/config/config.go
+@@ -9,0 +10,4 @@ type Config struct {
++	// AGNTCYIdentityNodeURL is the trusted Identity Node used to resolve
++	// agntcy: subjects and validate their Agent Badge credentials.
++	AGNTCYIdentityNodeURL string `json:"agntcy_identity_node_url,omitempty" mapstructure:"agntcy_identity_node_url"`
++
+diff --git a/server/routing/autosync/autosync.go b/server/routing/autosync/autosync.go
+index fbd7e23..a6adaf4 100644
+--- a/server/routing/autosync/autosync.go
++++ b/server/routing/autosync/autosync.go
+@@ -69,3 +69,5 @@ var allowedReferrerTypes = map[string]struct{}{
+-	corev1.SignatureReferrerType:  {},
+-	corev1.PublicKeyReferrerType:  {},
+-	corev1.ScanReportReferrerType: {},
++	corev1.SignatureReferrerType:      {},
++	corev1.PublicKeyReferrerType:      {},
++	corev1.ScanReportReferrerType:     {},
++	corev1.IdentityClaimReferrerType:  {},
++	corev1.OwnershipClaimReferrerType: {},
+diff --git a/server/server.go b/server/server.go
+index ef70e9c..890833e 100644
+--- a/server/server.go
++++ b/server/server.go
+@@ -32,0 +33 @@ import (
++	identityagntcy "github.com/agntcy/dir/server/identity/agntcy"
+@@ -309 +310 @@ func New(ctx context.Context, cfg *config.Config, opts ...ServerOption) (*Server
+-	identityRegistry := identity.NewRegistry(
++	identityResolvers := []identity.Resolver{
+@@ -313 +314,5 @@ func New(ctx context.Context, cfg *config.Config, opts ...ServerOption) (*Server
+-	)
++	}
++	if cfg.Identity.AGNTCYIdentityNodeURL != "" {
++		identityResolvers = append(identityResolvers, identityagntcy.New(cfg.Identity.AGNTCYIdentityNodeURL, nil))
++	}
++	identityRegistry := identity.NewRegistry(identityResolvers...)

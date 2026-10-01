@@ -1,0 +1,4 @@
+.work/
+validation-report.json
+__pycache__/
+*.pyc
