@@ -15,6 +15,10 @@ export POC_SECRETS_CRYPTO_KEY="${POC_SECRETS_CRYPTO_KEY:-$(openssl rand -hex 32)
 
 "${SCRIPT_DIR}/build-directory.sh"
 
+# This is an ephemeral validation environment. Secrets are regenerated on each
+# run, so stale project volumes would retain database/Vault state encrypted with
+# credentials from an earlier run.
+docker compose -f "${POC_DIR}/docker-compose.yml" down -v --remove-orphans
 docker compose -f "${POC_DIR}/docker-compose.yml" up -d --wait
 
 POC_VAULT_TOKEN="${POC_VAULT_TOKEN}" \

@@ -32,4 +32,4 @@ docker run --rm \
 git -C "${SOURCE_DIR}" diff --check
 docker build --target production -t "${IMAGE_NAME}" -f "${SOURCE_DIR}/server/Dockerfile" "${SOURCE_DIR}"
 
-echo "Built ${IMAGE_NAME} from AGNTCY Directory v1.7.1 with the minimal Agent Badge referrer patch."
+echo "Built ${IMAGE_NAME} from AGNTCY Directory v1.7.1 with the minimal typed trust-evidence patch."
