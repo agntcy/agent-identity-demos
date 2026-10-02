@@ -1,6 +1,6 @@
-# Discussion draft: AGNTCY Identity and legal-entity evidence in Directory
+# AGNTCY Identity and legal-entity evidence in Directory
 
-> Status: draft for technical discussion. This has not been posted to GitHub.
+This discussion follows from [agntcy/dir#2233](https://github.com/agntcy/dir/issues/2233) and its maintainer feedback. It records two working PoCs and frames the remaining architecture questions for Directory, AGNTCY Identity, and legal-entity evidence providers.
 
 ## Context and question for the working group
 
@@ -19,9 +19,9 @@ To make this concrete, I implemented and validated two independent PoCs. PoC 1 s
 | PoC | Branch | Directory baseline | Primary question |
 |---|---|---|---|
 | Typed OCI referrers | [`feature/oci-typed-artifact-validation`](https://github.com/agntcy/agent-identity-demos/tree/feature/oci-typed-artifact-validation/oci-typed-artifacts-poc), validated in [`091f454`](https://github.com/agntcy/agent-identity-demos/commit/091f4546b35389bf0bfec0c33ffd15a7c7386e13) | Directory `v1.7.1` | Can Directory attach and retrieve an Agent Badge and legal-entity credential without changing OASF? |
-| Agent Badge-backed `IdentityClaim` | [`feature/identity-claim-agent-badge-poc`](https://github.com/agntcy/agent-identity-demos/tree/feature/identity-claim-agent-badge-poc/identity-claim-agent-badge-poc), commit [`44f90bc`](https://github.com/agntcy/agent-identity-demos/commit/44f90bc586586b7e3c4ffd827510fa4dd53aa179) | Proposed PR #2125, pinned at `08c86a4b39c554a0f2eacb7391684fff6f0bd002` | Can an AGNTCY Agent ID become a native Directory identity with proof of key control? |
+| Agent Badge-backed `IdentityClaim` | [`feature/identity-claim-agent-badge-poc`](https://github.com/agntcy/agent-identity-demos/tree/feature/identity-claim-agent-badge-poc/identity-claim-agent-badge-poc), commit [`2c89148`](https://github.com/agntcy/agent-identity-demos/commit/2c891480a8afe7fdba2e22955e1c9f4d3fcd69ed) | Proposed PR #2125, pinned at `08c86a4b39c554a0f2eacb7391684fff6f0bd002` | Can an AGNTCY Agent ID become a native Directory identity with proof of key control while AGNTCY-specific verification remains outside Directory? |
 
-Both environments use AGNTCY Identity Node `v0.0.26`, Zot, PostgreSQL, and HashiCorp Vault `1.17` Transit. The scripts generate ephemeral service secrets at runtime. Signing operations occur through Vault Transit, and private key material is never exported to the client, Directory, or the repository.
+Both environments use AGNTCY Identity Node `v0.0.26`, Zot, PostgreSQL, and HashiCorp Vault `1.17` Transit. The scripts generate ephemeral service secrets at runtime. Agent and credential signing operations occur through Vault Transit, and that private key material is never exported to the client, Directory, or repository. PoC 2 separately generates an ephemeral verifier-result signing key at runtime and exposes only its public key to Directory; production deployments should protect that key with a KMS, HSM, or workload-bound signing service.
 
 ## PoC 1: typed OCI referrers
 
@@ -289,118 +289,85 @@ The OASF record declares:
 agntcy.dir/identity = agntcy:AGNTCY-security-autonomous-agent
 ```
 
-The agent signs Directory's canonical `IdentityClaim` payload for the exact record CID using its Vault Transit key. To test the semantics with PR #2125, the patch adds an in-process `agntcy:` adapter to Directory's resolver registry. That adapter:
+The agent signs Directory's canonical `IdentityClaim` payload for the exact record CID using its Vault Transit key. The implementation now keeps AGNTCY-specific verification outside Directory:
 
-1. resolves the Agent ID through a configured AGNTCY Identity Node;
-2. obtains the agent public key from `ResolverMetadata`;
-3. verifies the detached JWS over the CID-bound `IdentityClaim`;
-4. retrieves and verifies the Agent Badge through AGNTCY Identity;
-5. requires the badge subject to equal the declared Agent ID; and
-6. recomputes the CID of `credentialSubject.badge` and requires it to equal the Directory record CID.
+1. Directory's thin `agntcy:` adapter sends the subject, detached claim JWS, and canonical CID-bound payload to a separately deployed AGNTCY Identity Verifier.
+2. The external verifier resolves the Agent ID through the configured AGNTCY Identity Node and obtains the public key from `ResolverMetadata`.
+3. The verifier checks the detached JWS over the exact `IdentityClaim` payload.
+4. The verifier retrieves and verifies the Agent Badge through AGNTCY Identity.
+5. The verifier requires the badge subject to equal the Agent ID and recomputes the CID of `credentialSubject.badge`.
+6. The verifier returns a short-lived signed result bound to the complete request, subject, Directory CID, profile, checked-at time, and expiry.
+7. Directory verifies that result using an administrator-pinned verifier public key before persisting `identity_verified=true`.
 
-The Agent Badge is resolver evidence; it does not replace proof of possession. The `IdentityClaim` proves that the agent-controlled key approved this exact CID.
+The Agent Badge is resolver evidence; it does not replace proof of possession. The `IdentityClaim` proves that the agent-controlled key approved this exact CID. The signed verifier result lets Directory rely on that external evaluation without implementing AGNTCY key resolution or Agent Badge semantics itself.
 
-### Who verifies proof of control in the current PoC?
-
-In the implemented PoC, **Directory performs the final proof-of-control verification**. More precisely:
-
-1. the adapter running inside Directory calls the external Identity Node's `POST /v1alpha1/id/resolve` endpoint;
-2. the Identity Node returns `ResolverMetadata` containing the agent's public key;
-3. Directory calls `identityv1.VerifyJWS` locally over the canonical `IdentityClaim` payload;
-4. Directory calls the Identity Node to retrieve and verify the Agent Badge; and
-5. Directory locally checks the badge subject and recomputes the CID of its embedded OASF definition.
-
-Therefore, the PoC did **not** implement a standalone external AGNTCY Identity Resolver or Trust Verifier. It uses an external Identity Node for key resolution and VC verification, while scheme-specific orchestration, proof-of-control verification, and badge-to-record binding remain inside the Directory process.
-
-That placement was useful for testing PR #2125's extension interface, but it is not the recommended production trust boundary if Directory is intended to remain a discovery and status service rather than an identity resolver.
+### Implemented verification boundary
 
 ```mermaid
 sequenceDiagram
     participant A as Agent
     participant V as Vault Transit
     participant D as Directory identity.v1
-    participant I as AGNTCY Identity Node
-
-    A->>D: Push OASF record with agntcy: Agent ID
-    D-->>A: Return record CID
-    A->>V: Sign CID-bound IdentityClaim
-    A->>D: Push IdentityClaim
-    D->>I: Resolve Agent ID and public key
-    I-->>D: ResolverMetadata with public key
-    D->>D: PoC adapter verifies IdentityClaim JWS
-    D->>I: Retrieve and verify Agent Badge
-    I-->>D: Badge verification result
-    D->>D: PoC adapter matches Agent ID and OASF CID
-    D-->>A: identity_verified=true
-```
-
-### Recommended external-verifier boundary
-
-In the target architecture, Directory should construct the CID-bound verification request and delegate scheme-specific resolution and cryptographic verification to a separately operated AGNTCY Identity Verifier:
-
-```mermaid
-sequenceDiagram
-    participant A as Agent
-    participant D as Directory
     participant X as External AGNTCY Identity Verifier
     participant I as AGNTCY Identity Node
 
-    A->>D: OASF record + CID-bound IdentityClaim
-    D->>X: Verify {subject, CID, signedAt, signature}
+    A->>D: Push OASF record with agntcy: Agent ID
+    D-->>A: Return immutable record CID
+    A->>V: Sign CID-bound IdentityClaim
+    A->>D: Push IdentityClaim
+    D->>X: Verify subject + canonical payload + claim JWS
     X->>I: Resolve Agent ID and retrieve Agent Badge
     I-->>X: ResolverMetadata + credential material
-    X->>X: Verify proof of control, badge, bindings and policy
-    X-->>D: Signed, CID-bound verification result
-    D->>D: Validate verifier signature and result binding
+    X->>X: Verify proof of control, badge, subject and CID binding
+    X-->>D: Signed, short-lived, request-bound result
+    D->>D: Verify pinned signature, request digest, profile and freshness
     D->>D: Persist status and schedule re-verification
+    D-->>A: identity_verified=true
 ```
-
-The external result should bind at least the Directory CID, claim subject, claim digest, resolver/verifier identity, assurance profile and version, result, checked-at time, and expiry or next-check time. Directory should accept results only from explicitly configured verifier keys.
 
 Under this separation:
 
 - **Directory** owns the record, canonical CID-bound request, trusted-verifier configuration, result-signature validation, status persistence, search filters, and reconciliation scheduling.
-- **The external AGNTCY verifier** owns Agent ID resolution, proof-of-control cryptography, Agent Badge semantics, issuer and status policy, key rotation handling, and evidence-specific error details.
-- **The Identity Node** remains the source of ResolverMetadata and credentials; it is not automatically trusted merely because it is reachable.
+- **The external AGNTCY verifier** owns Agent ID resolution, proof-of-control cryptography, Agent Badge semantics, issuer and status policy, key-rotation handling, and evidence-specific error details.
+- **The Identity Node** remains the source of `ResolverMetadata` and credentials; it is not automatically trusted merely because it is reachable.
+
+The PoC's verification-result contract is `agntcy.identity-verification.v1` with profile `agntcy-agent-badge.v1`. These are experimental identifiers used to validate the boundary, not adopted AGNTCY standards.
 
 ### What was validated
 
-- The stock PR #2125 server accepts the `IdentityClaim` type but cannot resolve an `agntcy:` subject.
-- The patched server's in-process adapter calls the external Identity Node, verifies the claim and badge bindings, and reports `identity_verified=true`.
-- Native identity-subject and verified-identity searches return the expected records.
+- The stock PR #2125 server accepts the `IdentityClaim` type but cannot verify an `agntcy:` subject.
+- The patched Directory is configured only with the external verifier URL and pinned result-signing public key; it has no Identity Node URL.
+- Only the external verifier resolves the Agent ID, verifies the claim JWS, retrieves and verifies the Agent Badge, and checks the embedded OASF CID.
+- Directory validates the verifier's signed result and requires it to match the complete request digest, subject, record CID, profile, and validity window.
+- Native identity-subject and `identity_verified=true` searches return the expected records.
 - Replaying the same claim against a different record CID fails.
-- The resolver is registered for ingest and periodic reconciliation.
+- The same external-verifier adapter is registered for ingest and periodic reconciliation.
 - The agent's RSA private key remains inside Vault Transit.
+
+The implementation and reproducible validation are in [`feature/identity-claim-agent-badge-poc`](https://github.com/agntcy/agent-identity-demos/tree/feature/identity-claim-agent-badge-poc/identity-claim-agent-badge-poc) at commit [`2c89148`](https://github.com/agntcy/agent-identity-demos/commit/2c891480a8afe7fdba2e22955e1c9f4d3fcd69ed).
 
 ### Missing for production integration
 
-- PR #2125 is proposed code, not a released Directory API.
-- Replace the PoC's in-process AGNTCY verification logic with a narrow client for an external, independently deployable AGNTCY Identity Verifier.
-- Define a signed verification-result contract so Directory can verify who performed the check and ensure the result is bound to the exact claim and record CID.
-- The `agntcy:` syntax, resolver contract, timeout behavior, egress controls, error taxonomy, and assurance profile need normative definitions.
-- Directory operators need policy for accepted Identity Nodes; successful resolution must not make every Identity Node globally trusted.
+- PR #2125 remains proposed code rather than a released Directory API.
+- The verifier request/result protocol, `agntcy:` subject syntax, assurance profile, timeout behavior, error taxonomy, and reconciliation semantics require normative definitions.
+- Production deployments need authenticated and encrypted Directory-to-verifier transport, verifier authorization, replay controls, availability policy, and bounded request sizes.
+- Directory operators need explicit policy and key-rotation procedures for accepted external verifiers. The PoC pins an ephemeral verifier public key; production signing should use a KMS, HSM, or workload-bound signing service.
+- Verifier operators need policy for accepted Identity Nodes and Agent Badge issuers. Successful resolution must not make every reachable Identity Node globally trusted.
 - Identity Node `v0.0.26` verifies the tested badge with the credential subject's `ResolverMetadata` key. Independent badge issuers require issuer-key resolution, authorization, status/revocation, and trust policy in AGNTCY Identity.
-- Reconciliation must account for credential expiration, revocation, Identity Node availability, stale verification state, and key rotation.
+- Reconciliation must account for credential expiration, revocation, Identity Node and verifier availability, stale verification state, verifier-key rotation, and agent-key rotation.
 - The PoC does not compose a legal-entity credential into `identity_verified`. A legal-entity VC does not itself prove that the agent controls its Agent ID or that the organization approved the CID.
 
 A legal-entity credential could participate in native Directory ownership verification if the organization has a resolvable key and signs a CID-bound `OwnershipClaim`. The credential could then be resolver evidence for that organization subject. Otherwise it remains supplementary evidence under PoC 1.
 
-## Architectural questions
+## Questions for maintainer feedback
 
 1. Should PR #2125's `identity.v1` claim, status, search, and reconciliation model be the foundation for this integration, and what must be stabilized before another identity scheme depends on it?
 2. Should the resolver registry contain trusted clients for independently operated external verifiers, with AGNTCY-specific key resolution, credential semantics, and proof verification kept outside the Directory process?
 3. Should native `IdentityClaim` and `OwnershipClaim` status be limited to CID-bound proof of control, with `identity_verified` and `owner_verified` remaining distinct?
 4. Should supplementary legal-entity, enrollment, compliance, audit, and other assurance evidence use typed OCI referrers rather than native identity status?
-5. If Directory needs to expose verified supplementary assurance, should it introduce a generic verification-observation model containing the verifier, profile, result, provenance, checked-at time, and expiry while keeping evidence presence separate from a trust verdict?
-6. Is cross-record discovery by evidence type or profile required? If so, should Directory add attachment-aware indexing that treats every evidence item atomically so a query cannot combine fields from different credentials?
-7. Can the integration avoid a new OASF core field by using the proposed identity annotation for the stable identity subject and attaching supplementary evidence to the immutable CID?
-8. When an Agent Badge is already resolver evidence for `identity.v1`, is there a concrete retrieval requirement for also storing it as an OCI referrer, or should OCI referrers primarily carry supplementary evidence such as legal-entity credentials?
-9. Does this separation provide an appropriate common architecture for AGNTCY Identity and legal-entity providers without making Directory an identity resolver, universal credential issuer, or global trust authority?
-
-## Feedback requested
-
-- Should PR #2125's resolver registry contain in-process scheme implementations, or clients for independently operated, signed-result identity verifiers?
-- Should supplementary credential types be registered explicitly, or should Directory admit a generic signed-attestation media type with profile identifiers?
-- Does the working group require cross-record search by evidence type/profile, or is search-then-retrieve sufficient?
-- Should verified supplementary evidence be evaluated by Directory content policy, by an external verifier, or only by the relying client?
-- Would the maintainers accept a follow-up PoC that implements the AGNTCY resolver and a legal-entity ownership profile against the final `identity.v1` API?
+5. Should supplementary credential types be registered explicitly, or should Directory admit a generic signed-attestation media type with versioned profile identifiers?
+6. If Directory needs to expose verified supplementary assurance, should it introduce a generic verification-observation model containing the verifier, profile, result, provenance, checked-at time, and expiry while keeping evidence presence separate from a trust verdict?
+7. Is cross-record discovery by evidence type or profile required, or is search-then-retrieve sufficient? If an attachment index is required, should each evidence item be indexed atomically so a query cannot combine fields from different credentials?
+8. Can the integration avoid a new OASF core field by using the proposed identity annotation for the stable identity subject and attaching supplementary evidence to the immutable CID?
+9. When an Agent Badge is already resolver evidence for `identity.v1`, is there a concrete retrieval requirement for also storing it as an OCI referrer, or should OCI referrers primarily carry supplementary evidence such as legal-entity credentials?
+10. Does this separation provide an appropriate common architecture for AGNTCY Identity and legal-entity providers without making Directory an identity resolver, universal credential issuer, or global trust authority?
