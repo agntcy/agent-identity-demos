@@ -385,18 +385,17 @@ Under this separation:
 
 A legal-entity credential could participate in native Directory ownership verification if the organization has a resolvable key and signs a CID-bound `OwnershipClaim`. The credential could then be resolver evidence for that organization subject. Otherwise it remains supplementary evidence under PoC 1.
 
-## Final recommendation
+## Architectural questions
 
-1. Land and stabilize PR #2125's `identity.v1` claim, status, search, and reconciliation model.
-2. Treat the resolver registry as a registry of trusted external-verifier clients. Keep AGNTCY-specific key resolution, credential semantics, and proof verification outside the Directory process.
-3. Use native `IdentityClaim` and `OwnershipClaim` status only for CID-bound proof of control. Keep `identity_verified` and `owner_verified` distinct.
-4. Use typed OCI referrers for supplementary legal-entity, enrollment, compliance, audit, and other assurance evidence.
-5. Add a generic verification-observation model only if Directory must expose verified supplementary assurance. Record verifier, profile, result, provenance, checked-at time, and expiry; do not convert evidence presence into a trust verdict.
-6. Add attachment-aware indexing only if cross-record evidence discovery is required. Index each evidence item atomically so fields from different credentials cannot satisfy one query.
-7. Do not require a new OASF core field. The proposed identity annotation carries the stable identity subject, while supplementary evidence remains attached to the immutable CID.
-8. Avoid storing the same Agent Badge through both paths unless there is a concrete retrieval requirement. When the badge is resolver evidence for `identity.v1`, OCI referrers should primarily carry supplementary evidence such as legal-entity credentials.
-
-This gives Directory one external-verification integration architecture and one generic evidence-attachment architecture. AGNTCY Identity and legal-entity providers can integrate without assigning Directory the role of identity resolver, universal credential issuer, or global trust authority.
+1. Should PR #2125's `identity.v1` claim, status, search, and reconciliation model be the foundation for this integration, and what must be stabilized before another identity scheme depends on it?
+2. Should the resolver registry contain trusted clients for independently operated external verifiers, with AGNTCY-specific key resolution, credential semantics, and proof verification kept outside the Directory process?
+3. Should native `IdentityClaim` and `OwnershipClaim` status be limited to CID-bound proof of control, with `identity_verified` and `owner_verified` remaining distinct?
+4. Should supplementary legal-entity, enrollment, compliance, audit, and other assurance evidence use typed OCI referrers rather than native identity status?
+5. If Directory needs to expose verified supplementary assurance, should it introduce a generic verification-observation model containing the verifier, profile, result, provenance, checked-at time, and expiry while keeping evidence presence separate from a trust verdict?
+6. Is cross-record discovery by evidence type or profile required? If so, should Directory add attachment-aware indexing that treats every evidence item atomically so a query cannot combine fields from different credentials?
+7. Can the integration avoid a new OASF core field by using the proposed identity annotation for the stable identity subject and attaching supplementary evidence to the immutable CID?
+8. When an Agent Badge is already resolver evidence for `identity.v1`, is there a concrete retrieval requirement for also storing it as an OCI referrer, or should OCI referrers primarily carry supplementary evidence such as legal-entity credentials?
+9. Does this separation provide an appropriate common architecture for AGNTCY Identity and legal-entity providers without making Directory an identity resolver, universal credential issuer, or global trust authority?
 
 ## Feedback requested
 
