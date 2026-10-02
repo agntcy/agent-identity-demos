@@ -418,3 +418,48 @@ A legal-entity credential could participate in native Directory ownership verifi
 8. Can the integration avoid a new OASF core field by using the proposed identity annotation for the stable identity subject and attaching supplementary evidence to the immutable CID?
 9. When an Agent Badge is already resolver evidence for `identity.v1`, is there a concrete retrieval requirement for also storing it as an OCI referrer, or should OCI referrers primarily carry supplementary evidence such as legal-entity credentials?
 10. Does this separation provide an appropriate common architecture for AGNTCY Identity and legal-entity providers without making Directory an identity resolver, universal credential issuer, or global trust authority?
+
+## Addendum: `IdentityClaim` referrers and supplementary credential referrers
+
+Both PoCs use OCI referrers as the storage relationship, but they assign different contracts and processing semantics to those artifacts.
+
+| Aspect | PoC 2: `IdentityClaim` referrer | PoC 1: typed supplementary referrer |
+|---|---|---|
+| Primary question | Does the agent control the identity declared by this exact Directory record? | What additional evidence is associated with this record? |
+| Example type | `agntcy.dir.identity.v1.IdentityClaim` | `agntcy.identity.v1.AgentBadge`, `agntcy.trust.v1.LegalEntityCredential` |
+| Payload | Identity subject, timestamps, and a signature over the record CID | Original VC bytes plus profile, digest, subject, CID binding, and related metadata |
+| Directory behavior | Invokes the configured verification path and derives native identity status | Stores and returns the artifact without validating its credential semantics |
+| Search result | `identity`, `identity_verified`, `owner`, or `owner_verified` | Search OASF first, then retrieve a known referrer type by record CID |
+| Lifecycle | Identity reconciliation can re-evaluate derived status | No automatic VC status, revocation, or expiry reconciliation in PoC 1 |
+| Agent Badge role | Resolver evidence fetched and evaluated by the external AGNTCY verifier | A supplementary artifact directly retrievable from Directory |
+
+An `IdentityClaim` signs Directory's canonical binding:
+
+```text
+record CID | identity subject | signedAt
+```
+
+Its purpose is proof of control. A successful verification enters Directory's native identity-status pipeline. A PoC 1 referrer instead advertises or carries evidence for a relying party to evaluate. Its presence does not produce an identity or trust verdict.
+
+### Why PoC 1 stored the original VC
+
+Yes: PoC 1 stores the original compact JOSE Agent Badge or legal-entity VC as the payload of a supplementary OCI artifact attached to the OASF record. The experiment did this to validate that Directory could:
+
+- preserve the issuer's exact signed bytes without decoding and reserializing them;
+- attach those bytes immutably to one record version;
+- assign the credential artifact its own digest and referrer CID;
+- replicate or retrieve the evidence with the record; and
+- allow a relying party to verify the original proof independently.
+
+This can be useful for portable evidence bundles, offline or federated retrieval, reproducible audits, and protection against a mutable credential URL returning different bytes later. It does **not** mean that Directory issued, verified, endorsed, or currently trusts the credential. The tampering test demonstrated this boundary: Directory stored a modified VC, while AGNTCY Identity rejected its signature.
+
+Storing the complete VC is also not always the appropriate production choice. A credential may contain sensitive information, be too large, require access control, or have a lifecycle managed by an Identity Node or issuer. Immutable storage also means an expired or revoked credential remains retrievable even though it must no longer satisfy current policy.
+
+A production supplementary-evidence profile should therefore support a deliberate choice between:
+
+1. **Embedded evidence:** the referrer contains the original signed VC bytes and their digest. This favors portability and reproducibility.
+2. **Referenced evidence:** the referrer contains an authorized retrieval URI, expected digest when available, profile, subject, and CID-bound publisher approval, while the credential remains at the Identity Node or issuer. This favors privacy, access control, and issuer-managed lifecycle.
+
+In either mode, a consumer must validate the credential proof, issuer authority, subject and record bindings, validity period, status or revocation, and its own acceptance policy. Directory storage alone must not be interpreted as successful verification.
+
+For Agent Badges specifically, duplication should be driven by a concrete retrieval requirement. If PoC 2's external verifier can resolve and retrieve the authoritative badge from AGNTCY Identity, Directory does not need another copy merely to establish `identity_verified`. Storing the same badge as a supplementary referrer is justified only when consumers also require a portable, immutable, independently retrievable snapshot. Legal-entity, enrollment, compliance, and audit credentials remain clearer examples of PoC 1 supplementary evidence.
