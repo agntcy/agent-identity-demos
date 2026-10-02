@@ -168,26 +168,6 @@ sequenceDiagram
 
 A legal-entity credential could participate in native Directory ownership verification if the organization has a resolvable key and signs a CID-bound `OwnershipClaim`. The credential could then be resolver evidence for that organization subject. Otherwise it remains supplementary evidence under PoC 1.
 
-## Why the ANS resolver architecture can be extended
-
-The proposed ANS work in [#2138](https://github.com/agntcy/dir/issues/2138) uses the same architectural seam as PoC 2: an `ans://` subject, a CID-bound `IdentityClaim`, proof of possession with an X.509 identity-certificate key, and a scheme-specific resolver that validates DNS discovery, certificate binding, status tokens, SCITT receipts, and pinned transparency-log keys.
-
-There is no architectural reason to reserve this mechanism for ANS. The resolver registry should define a common invariant while allowing scheme-specific evidence:
-
-```text
-verified identity =
-    declared stable subject
-    + proof of control over the exact Directory CID
-    + authoritative key resolution
-    + subject/evidence binding
-    + accepted trust anchor
-    + current lifecycle status
-```
-
-An `agntcy:` resolver can satisfy that contract with `ResolverMetadata` and an Agent Badge. An `ans://` resolver can satisfy it with an identity certificate and transparency-log evidence. Other resolvers could use DID documents, PKI, or SPIFFE trust bundles.
-
-The extension point should not classify every attestation as identity. A legal-entity credential stating that an organization exists is assurance evidence, not proof that a key holder controls an agent identity or approved a CID. It becomes appropriate resolver evidence for an `OwnershipClaim` only when the organization subject has a resolvable key and proves possession over that claim.
-
 ## Final recommendation
 
 1. Land and stabilize PR #2125's `identity.v1` resolver registry and reconciliation model.
