@@ -135,13 +135,13 @@ Focused unit tests verify both mapping directions.
 In the recorded successful run, Directory returned this OASF record CID:
 
 ```text
-baeareidnijvv6lst2sw4v6lzfxdemd6cbo75hqtnxpwkvg2czqgs2dazma
+baearei…dazma  (masked record CID)
 ```
 
 Its OCI record-manifest digest was:
 
 ```text
-sha256:02db2d1df2b894ca5894dd009202709b9e386831a7b55a36611d3e63c9fb8304
+sha256:02db2d1d…c9fb8304  (masked record-manifest digest)
 ```
 
 Direct inspection of Zot's OCI manifests produced:
