@@ -221,6 +221,51 @@ returned the expected OASF record CID. However, the `RecordQueryType` API expose
 - a client cannot filter records by `legal-entity.v1`, credential issuer, or verification result; and
 - adding the two storage types does not create a cross-record evidence index.
 
+Adding the experimental types therefore produces this search-and-retrieval flow:
+
+```text
+1. SearchCIDs(name | skill | domain | other existing OASF predicate)
+                         │
+                         ▼
+                 matching record CID(s)
+                         │
+              ┌──────────┴──────────┐
+              ▼                     ▼
+2a. PullReferrer(             2b. PullReferrer(
+      record CID,                   record CID,
+      AgentBadge type)              LegalEntityCredential type)
+              │                     │
+              └──────────┬──────────┘
+                         ▼
+3. Verify the VCs, CID bindings, operatedBy relationship,
+   issuer policy, validity and status outside generic Directory storage
+```
+
+For example, after `SearchCIDs` returns a CID, the client performs these exact type-scoped lookups:
+
+```json
+{
+  "recordRef": {"cid": "<record CID>"},
+  "referrerType": "agntcy.identity.v1.AgentBadge"
+}
+```
+
+```json
+{
+  "recordRef": {"cid": "<record CID>"},
+  "referrerType": "agntcy.trust.v1.LegalEntityCredential"
+}
+```
+
+The `referrerType` value is a filter within the known record's referrer set; it is not a global search predicate. Directory does not automatically join the two referrers or evaluate their relationship.
+
+This model is sufficient when a consumer first discovers candidates by OASF capabilities and evaluates trust afterward. It is less efficient when the initial requirement is “find every agent with evidence profile X,” because the client must inspect referrers for every candidate CID. Supporting that query would require separate work:
+
+- a publisher-declared, searchable evidence marker in the immutable OASF record, which represents advertised—not verified—evidence and changes the record CID when updated; or
+- a Directory-maintained referrer index keyed by record CID and evidence item, with fields such as type, profile, issuer observation, verification result, verifier, checked-at time and expiry.
+
+The PoC implements neither option. It validates the existing search-then-retrieve path and identifies attachment-aware indexing as an independent feature.
+
 ### Missing for production integration
 
 - Directory needs registered referrer types, an extensible media-type mechanism, or a generic signed-attestation envelope with versioned profiles. Hard-coding every issuer or credential type will not scale.
