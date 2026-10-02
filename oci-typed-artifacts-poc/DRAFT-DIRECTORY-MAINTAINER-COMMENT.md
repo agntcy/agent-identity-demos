@@ -346,6 +346,53 @@ The PoC's verification-result contract is `agntcy.identity-verification.v1` with
 
 The implementation and reproducible validation are in [`feature/identity-claim-agent-badge-poc`](https://github.com/agntcy/agent-identity-demos/tree/feature/identity-claim-agent-badge-poc/identity-claim-agent-badge-poc) at commit [`2c89148`](https://github.com/agntcy/agent-identity-demos/commit/2c891480a8afe7fdba2e22955e1c9f4d3fcd69ed).
 
+### How search works in PoC 2
+
+PoC 2 does not scan `IdentityClaim` referrers or invoke the external verifier during every search. When a claim is ingested, Directory verifies it through the configured external-verifier adapter and persists the declared subject and verification status in its search index. Periodic reconciliation is responsible for refreshing that status as the underlying evidence changes.
+
+The successful PoC query combines an ordinary OASF predicate with native identity status:
+
+```json
+{
+  "queries": [
+    {
+      "type": "RECORD_QUERY_TYPE_NAME",
+      "value": "security_autonomous_agent"
+    },
+    {
+      "type": "RECORD_QUERY_TYPE_IDENTITY_VERIFIED",
+      "value": "true"
+    }
+  ]
+}
+```
+
+This returns the Security Autonomous Agent only after the `IdentityClaim`, proof of control, Agent Badge, subject binding, embedded OASF CID, and signed verifier result have passed the configured verification path.
+
+Directory can also search for the stable identity declared by the record:
+
+```json
+{
+  "queries": [{
+    "type": "RECORD_QUERY_TYPE_IDENTITY",
+    "value": "agntcy:AGNTCY-security-autonomous-agent"
+  }]
+}
+```
+
+That predicate searches the record's declared identity; it does not assert that a valid claim exists. The PoC demonstrates the distinction: identity-subject search returns both record versions that declare the Agent ID, including the replay-test record, while `RECORD_QUERY_TYPE_IDENTITY_VERIFIED=true` returns only the record whose CID-bound claim verifies.
+
+The identity-related predicates in the pinned PR #2125 implementation are:
+
+- `RECORD_QUERY_TYPE_IDENTITY`;
+- `RECORD_QUERY_TYPE_IDENTITY_VERIFIED`;
+- `RECORD_QUERY_TYPE_OWNER`; and
+- `RECORD_QUERY_TYPE_OWNER_VERIFIED`.
+
+There is no `RECORD_QUERY_TYPE_CLAIM_TYPE` or generic `RECORD_QUERY_TYPE_REFERRER_TYPE`. Directory therefore cannot currently ask for every record containing an `agntcy.dir.identity.v1.IdentityClaim` referrer, nor can it filter by verifier profile such as `agntcy-agent-badge.v1`, Identity Node, badge issuer, or detailed verification outcome. The current model exposes semantic results instead: a successfully verified `IdentityClaim` produces `identity_verified=true`, while a successfully verified `OwnershipClaim` produces `owner_verified=true`.
+
+For authorization and trust decisions, verified status is stronger than claim presence: the existence of a referrer says that a claim was attached, whereas verified status says that the configured verification path accepted it. If consumers also need to distinguish mechanisms, Directory would require a claim/referrer index or a new query predicate. A profile-aware design could index claim type, subject scheme, verifier profile, verifier identity, result, checked-at time, and expiry as one atomic observation so fields from different claims cannot satisfy a single query.
+
 ### Missing for production integration
 
 - PR #2125 remains proposed code rather than a released Directory API.
