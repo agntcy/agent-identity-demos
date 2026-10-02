@@ -24,6 +24,8 @@ from typing import Any
 PATCHED_DIRECTORY = os.environ.get("POC_DIRECTORY", "127.0.0.1:8910")
 STOCK_DIRECTORY = os.environ.get("POC_STOCK_DIRECTORY", "127.0.0.1:8911")
 IDENTITY = os.environ.get("POC_IDENTITY", "http://127.0.0.1:4030").rstrip("/")
+VERIFIER = os.environ.get("POC_VERIFIER", "http://127.0.0.1:4040").rstrip("/")
+VERIFIER_PUBLIC_KEY = os.environ["POC_VERIFIER_PUBLIC_KEY"]
 VAULT = os.environ.get("POC_VAULT", "http://127.0.0.1:8230").rstrip("/")
 VAULT_TOKEN = os.environ["POC_VAULT_TOKEN"]
 
@@ -188,6 +190,29 @@ def verify_rs256_detached(jws: str, payload: bytes, jwk: dict[str, str]) -> bool
         )
     except (ValueError, KeyError):
         return False
+
+
+def verify_rs256_embedded(jws: str, jwk: dict[str, str]) -> tuple[bool, dict[str, Any]]:
+    try:
+        protected, encoded_payload, signature = jws.split(".")
+        payload = base64.urlsafe_b64decode(encoded_payload + "=" * (-len(encoded_payload) % 4))
+        signing_input = f"{protected}.{encoded_payload}"
+        digest_info = bytes.fromhex("3031300d060960864801650304020105000420") + hashlib.sha256(
+            signing_input.encode()
+        ).digest()
+        sig_int = int.from_bytes(base64.urlsafe_b64decode(signature + "=" * (-len(signature) % 4)), "big")
+        modulus = int.from_bytes(base64.urlsafe_b64decode(jwk["n"] + "=" * (-len(jwk["n"]) % 4)), "big")
+        exponent = int.from_bytes(base64.urlsafe_b64decode(jwk["e"] + "=" * (-len(jwk["e"]) % 4)), "big")
+        encoded = pow(sig_int, exponent, modulus).to_bytes((modulus.bit_length() + 7) // 8, "big")
+        separator = encoded.index(b"\x00", 2)
+        valid = (
+            encoded.startswith(b"\x00\x01")
+            and set(encoded[2:separator]) == {0xFF}
+            and encoded[separator + 1 :] == digest_info
+        )
+        return valid, json.loads(payload)
+    except (ValueError, KeyError, json.JSONDecodeError):
+        return False, {}
 
 
 def proof_jwt(subject: str, issuer: str, jwk: dict[str, str], key_name: str) -> str:
@@ -404,6 +429,7 @@ def main() -> None:
         lambda: http("GET", f"{IDENTITY}/v1alpha1/issuer/__probe__/.well-known/jwks.json")[0]
         in (200, 400, 404),
     )
+    wait_for("external AGNTCY verifier", lambda: http("GET", f"{VERIFIER}/healthz")[0] == 200)
     wait_for(
         "patched Directory",
         lambda: grpcurl(PATCHED_DIRECTORY, "grpc.health.v1.Health/Check", {"service": ""}).returncode == 0,
@@ -445,6 +471,26 @@ def main() -> None:
     replay_cid = push_record(PATCHED_DIRECTORY, replay_record)
     push_claim(PATCHED_DIRECTORY, replay_cid, claim)
     replay_status = identity_status(PATCHED_DIRECTORY, replay_cid)
+
+    verifier_request = {
+        "subject": identity_subject,
+        "signature": claim["signature"],
+        "payload": b64url(claim_payload),
+    }
+    verifier_http_status, verifier_response = json_http(
+        "POST", f"{VERIFIER}/v1/verify", verifier_request
+    )
+    with open(VERIFIER_PUBLIC_KEY, encoding="utf-8") as verifier_public_key_file:
+        verifier_jwk = public_pem_to_jwk(
+            verifier_public_key_file.read(), "agntcy-identity-verifier-poc"
+        )
+    verifier_signature_valid, verifier_result = verify_rs256_embedded(
+        verifier_response.get("resultJws", ""), verifier_jwk
+    )
+    _, verifier_stats = json_http("GET", f"{VERIFIER}/v1/stats")
+    expected_request_digest = "sha256:" + hashlib.sha256(
+        json.dumps(verifier_request, separators=(",", ":")).encode()
+    ).hexdigest()
 
     verified_matches = search_cids(
         PATCHED_DIRECTORY,
@@ -489,6 +535,13 @@ def main() -> None:
         "stockPR2125CouldNotVerifyAgntcyIdentity": stock_status.get("identity", {}).get("verified") is not True,
         "patchedDirectoryAcceptedIdentityClaimType": patched_referrer.get("success") is True,
         "patchedDirectoryVerifiedIdentityClaim": patched_status.get("identity", {}).get("verified") is True,
+        "directoryUsedExternalVerifier": verifier_stats.get("verificationRequests", 0) >= 3,
+        "externalVerifierReturnedSignedResult": verifier_http_status == 200
+        and verifier_signature_valid,
+        "signedResultBoundToCompleteRequest": verifier_result.get("requestDigest")
+        == expected_request_digest,
+        "signedResultBoundToSubjectAndRecordCID": verifier_result.get("subject") == identity_subject
+        and verifier_result.get("recordCid") == patched_cid,
         "patchedStatusReturnsAgentID": patched_status.get("identity", {}).get("subject") == identity_subject,
         "verifiedIdentitySearchFoundExactRecord": verified_matches == [patched_cid],
         "declaredIdentitySearchFoundBothVersions": set(declared_matches) == {patched_cid, replay_cid},
@@ -507,6 +560,7 @@ def main() -> None:
             "recordCID": patched_cid,
             "replayRecordCID": replay_cid,
             "identityClaimReferrerCID": patched_referrer.get("referrerRef", {}).get("cid"),
+            "externalVerifier": "agntcy-identity-verifier-poc",
         },
         "status": {
             "stockPR2125": stock_status,
@@ -522,12 +576,13 @@ def main() -> None:
             "validated": [
                 "Agent Badge can serve as resolver evidence for Directory identity.v1 without becoming the IdentityClaim itself.",
                 "The agent proves control by signing the exact Directory CID with the key resolved from AGNTCY Identity ResolverMetadata.",
+                "Directory delegates AGNTCY-specific resolution and credential verification to an external verifier and accepts only a signed result bound to the complete request.",
                 "Directory can expose native identity_verified search after the claim, badge subject, badge proof, and embedded OASF definition all verify.",
                 "A claim replayed onto a different Directory CID is not verified.",
             ],
             "qualified": [
                 "identity.v1 is proposed in Directory PR #2125 and is not part of the pinned v1.7.1 release.",
-                "The stock PR #2125 branch admits IdentityClaim but has no agntcy: resolver; this PoC adds that resolver.",
+                "The stock PR #2125 branch admits IdentityClaim but has no agntcy: integration; this PoC adds a thin adapter to an external verifier.",
                 "The configured Identity Node is a relying-party trust decision; Directory does not make every Identity Node globally trusted.",
                 "Identity Node v0.0.26 verifies the Agent Badge with the credential subject's ResolverMetadata key; it does not independently resolve and validate a separate VC issuer key.",
                 "A legal-entity credential remains supplementary evidence and is not required to prove control of the Agent ID.",

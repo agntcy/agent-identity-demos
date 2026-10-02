@@ -9,6 +9,7 @@ PATCH_DIGEST="$(shasum -a 256 "${PATCH_FILE}" | awk '{print substr($1, 1, 12)}')
 SOURCE_DIR="${POC_DIR}/.work/dir-pr2125-${PATCH_DIGEST}"
 STOCK_IMAGE="${STOCK_DIRECTORY_IMAGE:-agntcy-dir-identity-claim-stock:pr2125}"
 PATCHED_IMAGE="${DIRECTORY_IMAGE:-agntcy-dir-identity-claim-badge-poc:pr2125}"
+VERIFIER_IMAGE="${VERIFIER_IMAGE:-agntcy-external-identity-verifier-poc:pr2125}"
 
 mkdir -p "${POC_DIR}/.work"
 
@@ -40,5 +41,6 @@ git -C "${SOURCE_DIR}" apply --unidiff-zero "${PATCH_FILE}"
 git -C "${SOURCE_DIR}" diff --check
 
 docker build --target production -t "${PATCHED_IMAGE}" -f "${SOURCE_DIR}/server/Dockerfile" "${SOURCE_DIR}"
+docker build -t "${VERIFIER_IMAGE}" -f "${POC_DIR}/verifier/Dockerfile" "${SOURCE_DIR}"
 
-echo "Built stock and AGNTCY-resolver Directory images from proposed identity.v1 commit ${DIRECTORY_COMMIT}."
+echo "Built stock Directory, patched Directory, and external AGNTCY verifier images from identity.v1 commit ${DIRECTORY_COMMIT}."

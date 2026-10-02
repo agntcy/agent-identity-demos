@@ -8,7 +8,7 @@ services:
         condition: service_healthy
       zot:
         condition: service_started
-      identity-node:
+      agntcy-identity-verifier:
         condition: service_started
     environment:
       DIRECTORY_SERVER_LISTEN_ADDRESS: 0.0.0.0:8888
@@ -26,7 +26,8 @@ services:
       DIRECTORY_SERVER_DATABASE_POSTGRES_USERNAME: postgres
       DIRECTORY_SERVER_DATABASE_POSTGRES_PASSWORD: ${POC_DB_PASSWORD:?run scripts/run.sh}
       DIRECTORY_SERVER_DATABASE_POSTGRES_SSL_MODE: disable
-      DIRECTORY_SERVER_IDENTITY_AGNTCY_IDENTITY_NODE_URL: http://identity-node:4000
+      DIRECTORY_SERVER_IDENTITY_AGNTCY_VERIFIER_URL: http://agntcy-identity-verifier:8080
+      DIRECTORY_SERVER_IDENTITY_AGNTCY_VERIFIER_PUBLIC_KEY_PATH: /verifier-trust/public.pem
       DIRECTORY_SERVER_ROUTING_LISTEN_ADDRESS: /ip4/0.0.0.0/tcp/8999
       DIRECTORY_SERVER_ROUTING_GOSSIPSUB_ENABLED: "false"
       DIRECTORY_SERVER_METRICS_ENABLED: "false"
@@ -35,6 +36,8 @@ services:
       DIRECTORY_LOGGER_LOG_FORMAT: text
     ports:
       - "127.0.0.1:8910:8888"
+    volumes:
+      - ${POC_VERIFIER_KEY_DIR:?run scripts/run.sh}/public.pem:/verifier-trust/public.pem:ro
     healthcheck:
       test: ["CMD", "/bin/grpc-health-probe", "-addr=127.0.0.1:8888"]
       interval: 5s
@@ -133,6 +136,21 @@ services:
     ports:
       - "127.0.0.1:4030:4000"
       - "127.0.0.1:4031:4001"
+
+  agntcy-identity-verifier:
+    image: agntcy-external-identity-verifier-poc:pr2125
+    depends_on:
+      identity-node:
+        condition: service_started
+    environment:
+      LISTEN_ADDRESS: 0.0.0.0:8080
+      IDENTITY_NODE_URL: http://identity-node:4000
+      RESULT_SIGNING_KEY_PATH: /verifier-keys/private.pem
+      VERIFIER_ID: agntcy-identity-verifier-poc
+    ports:
+      - "127.0.0.1:4040:8080"
+    volumes:
+      - ${POC_VERIFIER_KEY_DIR:?run scripts/run.sh}/private.pem:/verifier-keys/private.pem:ro
 
   identity-postgres:
     image: postgres:16
