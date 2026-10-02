@@ -87,14 +87,139 @@ sequenceDiagram
 
 ### What was validated
 
-- Stock Directory `v1.7.1` rejects both experimental types because API validation and autosync use fixed allow-lists.
-- A small patch admits the types, maps them to distinct OCI media types, preserves the top-level `artifactType`, and permits autosync.
-- Both credentials are stored as separate artifacts whose OCI subject is the exact OASF record-manifest digest.
-- A client can retrieve each artifact by a known record CID and referrer type, with the original VC bytes unchanged.
-- AGNTCY Identity verifies the credentials under its current subject-key semantics.
-- The client can validate each CID-binding signature and compare `operatedBy` with the legal-entity subject.
-- Directory's generic referrer store also accepts a deliberately tampered VC. Storage does not imply credential verification.
-- Existing OASF search finds the record, but Directory cannot search across records by attached referrer type or `legal-entity.v1` profile.
+#### 1. Stock type admission
+
+The PoC called `agntcy.dir.store.v1.StoreService/PushReferrer` on an unmodified Directory `v1.7.1` server with each experimental `type`. Both requests failed before reaching OCI storage:
+
+```text
+Code: InvalidArgument
+Message: validation error: type: value must be a valid referrer type
+```
+
+The failure comes from `proto/agntcy/dir/core/v1/rules.proto`, whose CEL rule admits only:
+
+```text
+agntcy.dir.sign.v1.PublicKey
+agntcy.dir.sign.v1.Signature
+agntcy.dir.security.v1.ScanReport
+```
+
+Autosync independently enforces the same closed set in `server/routing/autosync/autosync.go`. Therefore, the API message is generic in shape, but arbitrary referrer types are not accepted end to end.
+
+#### 2. Exact Directory patch
+
+The experimental patch makes five bounded changes:
+
+| File | Change |
+|---|---|
+| `api/core/v1/referrer_types.go` | Defines `AgentBadgeReferrerType` and `LegalEntityCredentialReferrerType`. |
+| `proto/agntcy/dir/core/v1/rules.proto` | Adds both strings to the API validation rule. |
+| `server/routing/autosync/autosync.go` | Adds both types to autosync admission. |
+| `server/store/oci/types.go` | Adds reversible API-type ↔ OCI-media-type mappings. |
+| `server/store/oci/referrers.go` | Passes the mapped media type to `oras.PackManifest` as the top-level `artifactType` instead of always using the generic OCI image-manifest type. |
+
+The mappings tested are:
+
+```text
+agntcy.identity.v1.AgentBadge
+  ↔ application/vnd.agntcy.identity.agent-badge.v1+json
+
+agntcy.trust.v1.LegalEntityCredential
+  ↔ application/vnd.agntcy.trust.legal-entity.v1+json
+```
+
+Focused unit tests verify both mapping directions.
+
+#### 3. OCI subject binding and type preservation
+
+In the recorded successful run, Directory returned this OASF record CID:
+
+```text
+baeareidnijvv6lst2sw4v6lzfxdemd6cbo75hqtnxpwkvg2czqgs2dazma
+```
+
+Its OCI record-manifest digest was:
+
+```text
+sha256:02db2d1df2b894ca5894dd009202709b9e386831a7b55a36611d3e63c9fb8304
+```
+
+Direct inspection of Zot's OCI manifests produced:
+
+| Referrer | Top-level `artifactType` | Layer media type | OCI `subject.digest` |
+|---|---|---|---|
+| Agent Badge | `application/vnd.agntcy.identity.agent-badge.v1+json` | Same | `sha256:02db2d1d...c9fb8304` |
+| Legal entity | `application/vnd.agntcy.trust.legal-entity.v1+json` | Same | `sha256:02db2d1d...c9fb8304` |
+
+The artifacts have different manifest digests and referrer CIDs, but both point to the same record-manifest digest. This verifies that they are independent attachments to the exact OASF record, rather than fields copied into that record.
+
+#### 4. Retrieval and byte preservation
+
+The client called `StoreService/PullReferrer` twice:
+
+```json
+{
+  "recordRef": {"cid": "<record CID>"},
+  "referrerType": "agntcy.identity.v1.AgentBadge"
+}
+```
+
+and then repeated the request with `agntcy.trust.v1.LegalEntityCredential`. For both responses, the test compared the returned `data.credential` string with the original compact JOSE VC and required exact equality. Directory therefore preserved the issuer's original signed bytes; it did not decode and reserialize the credential.
+
+#### 5. Credential verification boundary
+
+The client submitted each retrieved JOSE VC to AGNTCY Identity's `POST /v1alpha1/vc/verify` endpoint. Both returned `status: true` under Identity Node `v0.0.26` subject-key semantics.
+
+This proves that the retrieved bytes remain verifiable with the keys registered for their credential subjects. It does not prove that Directory performed the verification, that Directory trusts the issuer, or that Identity Node independently resolved a separate issuer key.
+
+#### 6. CID-binding and cross-credential checks
+
+For each referrer, the PoC independently verifies an RSA signature over:
+
+```json
+{
+  "recordCid": "<Directory record CID>",
+  "credentialDigest": "sha256:<digest of compact JOSE VC>",
+  "subjectId": "<credential subject>",
+  "profile": "<profile identifier>",
+  "iat": "<issued-at time>"
+}
+```
+
+The validation requires the signed `recordCid` and `credentialDigest` to match the retrieved record and credential. It then checks:
+
+```text
+AgentBadge.credentialSubject.operatedBy
+    == LegalEntityCredential.credentialSubject.id
+```
+
+These are client-side verification steps. Directory stores and returns the envelope but does not evaluate either relationship.
+
+#### 7. Negative tampering test
+
+The PoC changed the Agent Badge's `credentialSubject.id` while retaining its original JOSE signature. AGNTCY Identity rejected the modified credential because the signature no longer matched the payload. The same tampered credential was then submitted to patched Directory as an `AgentBadge` referrer, and `PushReferrer` succeeded and returned a new referrer CID.
+
+This is the concrete evidence for the statement that generic referrer storage is not credential verification. Directory validates the request shape and admitted type; it does not validate the enclosed VC signature or Agent Badge semantics.
+
+#### 8. Search behavior
+
+The existing `SearchService/SearchCIDs` request using:
+
+```json
+{
+  "queries": [{
+    "type": "RECORD_QUERY_TYPE_NAME",
+    "value": "security_autonomous_agent"
+  }]
+}
+```
+
+returned the expected OASF record CID. However, the `RecordQueryType` API exposes no referrer, attestation, or evidence predicate. Consequently:
+
+- a client can search ordinary OASF fields, obtain a CID, and then call `PullReferrer`;
+- a client cannot ask Directory to find every record with an `AgentBadge` attachment;
+- a client cannot filter records by `legal-entity.v1`, credential issuer, or verification result; and
+- adding the two storage types does not create a cross-record evidence index.
 
 ### Missing for production integration
 
