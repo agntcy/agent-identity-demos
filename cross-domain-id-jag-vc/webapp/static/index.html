@@ -6,7 +6,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Cross-Domain AI Agent Remediation — ID-JAG + AGNTCY</title>
+  <title>Agent Trust Demo</title>
   <style>
     :root {
       --bg: #0d1117; --panel: #161b22; --border: #30363d;
@@ -17,12 +17,6 @@
     * { box-sizing: border-box; }
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: var(--bg); color: var(--text); line-height: 1.5; }
-    /* Reserves the step-explainer toast's gutter as real layout space (not
-       just a margin on main) — otherwise main's centering math and the
-       toast's viewport-fixed position drift apart at wide-but-not-huge
-       viewport widths and the two visibly overlap. Matches the toast's own
-       display:none breakpoint below. */
-    @media (min-width: 981px) { body { padding-right: 340px; } }
     header { padding: 20px 32px; border-bottom: 1px solid var(--border);
       display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
     header h1 { font-size: 19px; margin: 0; }
@@ -364,13 +358,59 @@
     .step-menu button:hover { background: #21262d; }
     .step-menu button:disabled { color: var(--muted); cursor: not-allowed; }
     .step-menu button:disabled:hover { background: none; }
+
+    /* Keep the story and primary action visible; reveal diagnostics on demand. */
+    body { padding-right: 0; }
+    main { max-width: 1240px; padding: 28px 32px; }
+    header { max-width: 1440px; margin: auto; }
+    header h1 { font-size: 24px; letter-spacing: -.5px; }
+    .run-card { padding: 22px 24px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+    .run-card h2 { font-size: 20px; margin: 0 0 6px; }
+    .run-card p { color: var(--muted); margin: 0 0 18px; font-size: 14px; }
+    .run-card .controls { margin-bottom: 0; gap: 12px; }
+    button.action { padding: 11px 22px; font-size: 15px; }
+    .run-hint { font-size: 12px; color: var(--muted); }
+    .run-options { margin: 16px 0 0; }
+    .run-options summary { font-size: 13px; }
+    .run-options[open] summary { margin-bottom: 16px; }
+    .options-grid { align-items: end; padding-bottom: 14px; }
+    .options-grid .field { flex-direction: column; align-items: start; }
+    .field input { max-width: 100%; }
+    #repo { width: 260px; }
+    .field input[type=checkbox] { width: auto; }
+    .run-card .run-hint { margin: 8px 0; }
+    .journey-intro p, .journey-story-copy p { font-size: 14px; }
+    .journey-stage { min-height: 260px; }
+    .journey-story { grid-template-columns: minmax(240px, .8fr) minmax(0, 1.5fr); gap: 28px; }
+    .journey-node .node-title { font-size: 13px; }
+    .journey-proof { font-size: 12px; margin-top: 16px; }
+    .journey-phase { padding: 16px 12px; }
+    .journey-phase .phase-title { font-size: 14px; }
+    .evidence-panel { border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }
+    .evidence-panel > summary { font-size: 14px; color: var(--text); }
+    .evidence-panel .config-wrap { margin: 16px 0 0; }
+    .run-outcome { margin: 16px 0; padding: 18px 22px; border: 1px solid var(--ok); border-radius: 10px; background: rgba(63,185,80,.06); }
+    .run-outcome h3 { margin: 0 0 4px; }
+    .run-outcome p { margin: 0; color: var(--muted); }
+    .run-outcome.has-errors { border-color: var(--err); background: rgba(248,81,73,.06); }
+    body:not(.inspect-mode) .side-toast { display: none; }
+    .technical-sequence .diagram { overflow-x: auto; }
+    @media (min-width: 981px) { body.inspect-mode { padding-right: 340px; } }
+    @media (max-width: 900px) { .journey-story { grid-template-columns: 1fr; } }
+    @media (max-width: 600px) {
+      header { padding: 20px; } main { padding: 16px; }
+      .run-card { padding: 18px; } .journey-stage { padding: 18px; }
+      .journey-phase .phase-proof { margin-left: 0; }
+      .field { white-space: normal; } .options-grid .field { width: 100%; }
+      .options-grid input:not([type=checkbox]) { width: 100%; }
+    }
   </style>
 </head>
 <body>
 <header>
   <div>
-    <h1>Cross-Domain AI Agent Remediation &mdash; ID-JAG + AGNTCY Directory &amp; Identity</h1>
-    <div class="sub">Discover with <b>AGNTCY Directory</b> &rarr; prove agent + operator with <b>two VCs in one VP</b> &rarr; authorize with <b>ID-JAG</b> &rarr; execute over <b>A2A</b></div>
+    <h1>Agent Trust Demo</h1>
+    <div class="sub">Watch agents from two organizations verify trust and collaborate on a code fix.</div>
   </div>
   <nav class="tabs">
     <button class="tab active" data-tab="demo">Live demo</button>
@@ -381,30 +421,29 @@
 <main>
   <!-- ========================== LIVE DEMO ========================== -->
   <section id="tab-demo">
-    <div class="controls">
-      <button id="run" class="action">&#9654; Run (animated)</button>
-      <button id="step" class="secondary">Next step &#9654;</button>
-      <button id="reset" class="secondary" disabled>Reset</button>
-      <div class="field"><label>CVE:</label><input id="cve" value="CVE-2024-12345" /></div>
-      <div class="field"><label>Repo:</label><input id="repo" value="demo-admin/payments-service" /></div>
-      <div class="field"><label>Delay (ms):</label><input id="stepDelay" type="number" min="200" max="10000" step="100" value="2200" style="width:70px" /></div>
-      <div class="field"><label style="gap:5px"><input id="autoZoom" type="checkbox" style="width:auto" /> Auto-zoom</label></div>
-      <div class="field"><label style="gap:5px" title="Turn off to use a fast, clearly-labeled mock plan instead — useful when the real model provider is being unreliable"><input id="useRealOpencode" type="checkbox" style="width:auto" checked /> Real OpenCode (LLM)</label></div>
+    <div class="run-card">
+      <div><h2>Fix a vulnerability across organizations</h2>
+        <p>Follow the identity checks, permission decisions, and resulting pull request.</p></div>
+      <div class="controls">
+        <button id="run" class="action">&#9654; Run demo</button>
+        <button id="reset" class="secondary" disabled>Reset</button>
+        <span class="run-hint" id="modeHint">Live AI planning · may take a few minutes</span>
+      </div>
+      <details class="config-wrap run-options">
+        <summary>Customize run</summary>
+        <div class="controls options-grid">
+          <div class="field"><label for="cve">Vulnerability</label><input id="cve" value="CVE-2024-12345" /></div>
+          <div class="field"><label for="repo">Repository</label><input id="repo" value="demo-admin/payments-service" /></div>
+          <div class="field"><label for="stepDelay">Playback delay (ms)</label><input id="stepDelay" type="number" min="200" max="10000" step="100" value="1000" /></div>
+          <div class="field"><label><input id="useRealOpencode" type="checkbox" checked /> Use live AI planning</label></div>
+        </div>
+        <p class="run-hint">Turn off live AI planning to use a sample plan. Identity and authorization checks still run live.</p>
+        <div class="controls">
+          <button id="step" class="secondary">Next step &#9654;</button>
+          <div class="field"><label><input id="autoZoom" type="checkbox" /> Zoom technical diagram during playback</label></div>
+        </div>
+      </details>
     </div>
-
-    <details class="config-wrap">
-      <summary>Service config</summary>
-      <div class="config" id="config"><div><i>Loading config…</i></div></div>
-    </details>
-    <details class="config-wrap">
-      <summary>Vault (Transit signing keys)</summary>
-      <div class="config" id="vaultKeys"><div><i>Loading…</i></div></div>
-    </details>
-    <details class="config-wrap">
-      <summary>Registered agents (AGNTCY Directory + Identity Node)</summary>
-      <div class="config" id="registeredAgents"><div><i>Loading…</i></div></div>
-    </details>
-    <div class="status-bar" id="legend" style="margin-top:-8px"></div>
     <div class="status-bar" id="status"></div>
     <pre class="live-plan" id="livePlan" hidden></pre>
     <div class="status-bar" id="traceLink" style="margin-top:-8px"></div>
@@ -412,33 +451,27 @@
 
     <section class="journey" aria-labelledby="journeyTitle">
       <div class="journey-intro">
-        <div class="journey-eyebrow">The 30-second story</div>
-        <h2 id="journeyTitle">One agent request. Two credentials. One policy-bound action.</h2>
-        <p>Follow four chapters. The Directory helps agents find each other; Identity proves who the agent is;
-          a second VC proves its operator; the VP binds both proofs; and ID-JAG authorizes only this request.</p>
-        <div class="journey-legend" aria-label="Security artifact legend">
-          <span class="journey-chip directory">Directory = discover + audit</span>
-          <span class="journey-chip identity">VC / VP = identity evidence</span>
-          <span class="journey-chip authorization">ID-JAG = request authority</span>
-          <span class="journey-chip execution">A2A = agent transport</span>
-        </div>
+        <div class="journey-eyebrow">The trust journey</div>
+        <h2 id="journeyTitle">From task to trusted action</h2>
+        <p>Explore each stage, or run the demo to follow the evidence as it appears.</p>
+
       </div>
 
       <div class="journey-phases" role="tablist" aria-label="Trust journey phases">
         <button class="journey-phase active" type="button" role="tab" aria-selected="true" data-journey-phase="1">
-          <span class="phase-num">1</span><span class="phase-title">Receive &amp; identify</span>
+          <span class="phase-num">1</span><span class="phase-title">Identify</span>
           <span class="phase-proof">Which agent received the task?</span>
         </button>
         <button class="journey-phase" type="button" role="tab" aria-selected="false" data-journey-phase="2">
-          <span class="phase-num">2</span><span class="phase-title">Establish trust</span>
+          <span class="phase-num">2</span><span class="phase-title">Verify trust</span>
           <span class="phase-proof">Who is it, and who operates it?</span>
         </button>
         <button class="journey-phase" type="button" role="tab" aria-selected="false" data-journey-phase="3">
-          <span class="phase-num">3</span><span class="phase-title">Authorize request</span>
+          <span class="phase-num">3</span><span class="phase-title">Grant permission</span>
           <span class="phase-proof">What may it do right now?</span>
         </button>
         <button class="journey-phase" type="button" role="tab" aria-selected="false" data-journey-phase="4">
-          <span class="phase-num">4</span><span class="phase-title">Execute &amp; audit</span>
+          <span class="phase-num">4</span><span class="phase-title">Act &amp; record</span>
           <span class="phase-proof">What happened, and can we prove it?</span>
         </button>
       </div>
@@ -447,24 +480,24 @@
         <div class="journey-scene active" role="tabpanel" data-journey-scene="1">
           <div class="journey-story">
             <div class="journey-story-copy">
-              <h3>One autonomous agent, with OpenCode as an internal tool</h3>
-              <p>The webapp sends an A2A task to the Security Autonomous Agent. That same agent authenticates, owns the CIMD identity and Agent Badge, uses OpenCode internally, and later delegates to Triage.</p>
-              <div class="journey-proof"><b>Directory is not authorization.</b> It returns capabilities, a locator, an identity ID, a badge URL, and a content digest.</div>
+              <h3>Meet the agent</h3>
+              <p>A security agent in Org A receives a vulnerability report and uses OpenCode to plan a fix for a repository in Org B.</p>
+              <div class="journey-proof"><b>What is checked?</b> Directory links the agent’s signed identity to its published description.</div>
             </div>
             <div class="journey-flow" aria-label="Webapp dispatches the Security Autonomous Agent, which uses OpenCode internally">
               <div class="journey-node" data-journey-node="webapp">
                 <span class="node-kicker">Task trigger · A2A client</span><span class="node-title">Demo Webapp</span>
                 <span class="node-detail">Creates the initial task</span>
               </div>
-              <div class="journey-arrow"><span class="arrow-label">A2A SendMessage</span></div>
+              <div class="journey-arrow"><span class="arrow-label">Agent task</span></div>
               <div class="journey-node" data-journey-node="autonomous-agent">
                 <span class="node-kicker">Org A · A2A server + client</span><span class="node-title">Security Autonomous Agent</span>
-                <span class="node-detail">OAuth · CIMD · VC · VP · delegation</span>
+                <span class="node-detail">Identifies itself and plans the fix</span>
               </div>
               <div class="journey-arrow"><span class="arrow-label">internal API</span></div>
               <div class="journey-node" data-journey-node="opencode">
                 <span class="node-kicker">Private planning runtime</span><span class="node-title">OpenCode Engine</span>
-                <span class="node-detail">No Agent Card · no separate identity</span>
+                <span class="node-detail">Planning tool used by the security agent</span>
               </div>
             </div>
           </div>
@@ -473,26 +506,26 @@
         <div class="journey-scene" role="tabpanel" data-journey-scene="2">
           <div class="journey-story">
             <div class="journey-story-copy">
-              <h3>Two issuers, two claims, one presentation</h3>
-              <p>The first VC attests to the agent and embeds the canonical OASF definition. The independent second VC attests to the operating organization. The holder presents both together.</p>
-              <div class="journey-proof"><b>The VP is a container, not the trust anchor.</b> Trust comes from issuer keys, the CIMD holder key, and verifier policy.</div>
+              <h3>Verify the agent and its organization</h3>
+              <p>Two signed credentials prove the agent’s identity and its operating organization. Org B checks both before accepting the request.</p>
+              <div class="journey-proof"><b>What is checked?</b> Signatures, expiration, and the link between the agent and its organization.</div>
             </div>
             <div>
               <div class="credential-merge" aria-label="Agent Badge VC and Organization VC merge into a Verifiable Presentation">
                 <div class="credential-stack">
                   <div class="journey-node vc-card" data-journey-node="agent-vc">
                     <span class="vc-number">1</span><span class="node-kicker">Identity Service issuer</span>
-                    <span class="node-title">Agent Badge VC</span><span class="node-detail">CIMD subject · OASF badge · operatedBy</span>
+                    <span class="node-title">Agent credential</span><span class="node-detail">Signed identity and agent description</span>
                   </div>
                   <div class="journey-node vc-card" data-journey-node="org-vc">
                     <span class="vc-number">2</span><span class="node-kicker">Secondary independent issuer</span>
-                    <span class="node-title">Organization VC</span><span class="node-detail">Verified organization URI</span>
+                    <span class="node-title">Organization credential</span><span class="node-detail">Signed operating organization</span>
                   </div>
                 </div>
                 <div class="merge-rail" aria-hidden="true"><span></span><i></i></div>
                 <div class="journey-node vp-node" data-journey-node="vp">
-                  <span class="node-kicker">Holder-signed</span><span class="node-title">Verifiable Presentation</span>
-                  <span class="node-detail">2 VCs · challenge · audience</span>
+                  <span class="node-kicker">Holder-signed</span><span class="node-title">Combined proof</span>
+                  <span class="node-detail">Both credentials, signed by the agent</span>
                 </div>
                 <div class="journey-arrow"><span class="arrow-label">present</span></div>
                 <div class="journey-node verifier-node" data-journey-node="verifier">
@@ -500,7 +533,7 @@
                   <span class="node-detail">signatures · dates · binding · digest</span>
                 </div>
               </div>
-              <div class="binding"><b>Required binding:</b> AgentBadge.operatedBy == OrganizationVC.credentialSubject.id</div>
+              <div class="binding">The organization in the agent credential must match the organization credential.</div>
             </div>
           </div>
         </div>
@@ -508,14 +541,14 @@
         <div class="journey-scene" role="tabpanel" data-journey-scene="3">
           <div class="journey-story">
             <div class="journey-story-copy">
-              <h3>Turn trusted identity into narrow request authority</h3>
-              <p>After identity checks pass, the Security Autonomous Agent discovers Triage in the AGNTCY Directory and mints a short-lived ID-JAG. Org A constrains it; Org B independently validates it.</p>
-              <div class="journey-proof"><b>Identity and authorization remain separate.</b> A valid badge cannot grant access by itself; the ID-JAG carries the exact action, resource, audience, and act chain.</div>
+              <h3>Approve only the requested action</h3>
+              <p>The agent finds Org B’s Triage Agent. Both organizations check a short-lived permission for this task and repository.</p>
+              <div class="journey-proof"><b>What is checked?</b> Who may act, which repository they may access, and what they may do.</div>
             </div>
             <div class="journey-flow" aria-label="ID-JAG crosses enterprise policy boundaries">
               <div class="journey-node" data-journey-node="idjag">
-                <span class="node-kicker">Short-lived assertion</span><span class="node-title">ID-JAG</span>
-                <span class="node-detail">action · repo · audience · act</span>
+                <span class="node-kicker">Short-lived assertion</span><span class="node-title">Task permission (ID-JAG)</span>
+                <span class="node-detail">Approved action, repository and recipient</span>
               </div>
               <div class="journey-arrow"><span class="arrow-label">OPA egress</span></div>
               <div class="journey-node" data-journey-node="org-a">
@@ -534,9 +567,9 @@
         <div class="journey-scene" role="tabpanel" data-journey-scene="4">
           <div class="journey-story">
             <div class="journey-story-copy">
-              <h3>Execute through A2A agents and leave verifiable evidence</h3>
-              <p>Triage narrows authority again, dispatches a remediation sub-agent through A2A, and creates the pull request. Every agent turn is catalogued as an OASF audit record.</p>
-              <div class="journey-proof"><b>Least privilege is visible.</b> The sub-agent can write the approved file and open one PR; the deliberate out-of-scope attempt must be denied.</div>
+              <h3>Create the fix and keep the evidence</h3>
+              <p>Triage delegates a limited task to the remediation agent. It creates a pull request and records evidence of each agent’s actions.</p>
+              <div class="journey-proof"><b>What is checked?</b> The approved change succeeds. An extra action outside its permission is denied.</div>
             </div>
             <div class="journey-flow" aria-label="Triage delegates to remediation and records the result">
               <div class="journey-node" data-journey-node="triage">
@@ -546,12 +579,12 @@
               <div class="journey-arrow"><span class="arrow-label">A2A SendMessage</span></div>
               <div class="journey-node" data-journey-node="remediation">
                 <span class="node-kicker">Org B · A2A agent</span><span class="node-title">Remediation Agent</span>
-                <span class="node-detail">commit patch under sub-badge</span>
+                <span class="node-detail">Apply the approved code change</span>
               </div>
               <div class="journey-arrow"><span class="arrow-label">PR + OASF audit</span></div>
               <div class="journey-node" data-journey-node="gitea">
                 <span class="node-kicker">Evidence</span><span class="node-title">Gitea PR + Directory CID</span>
-                <span class="node-detail">result linked to the full act chain</span>
+                <span class="node-detail">Pull request and recorded agent actions</span>
               </div>
             </div>
           </div>
@@ -559,12 +592,12 @@
       </div>
 
       <div class="journey-live" id="journeyLive" aria-live="polite">
-        <span class="journey-live-dot"></span><span id="journeyLiveLabel"><b>Ready.</b> Choose a chapter or run the demo to watch evidence accumulate.</span>
+        <span class="journey-live-dot"></span><span id="journeyLiveLabel"><b>Ready to run.</b> Explore the four stages above, or start the demo.</span>
       </div>
     </section>
 
     <details class="technical-sequence" id="technicalSequence">
-      <summary>Technical sequence — inspect every identity, policy, and agent hop</summary>
+      <summary>Inspect protocol sequence</summary>
       <!-- ── Detailed authorization and execution sequence ── -->
       <div class="diagram">
       <!-- Actor-box header lives in its own small SVG, sticky-pinned above
@@ -1064,7 +1097,27 @@
       </div><!-- /diagram -->
     </details>
 
-    <div id="steps"></div>
+    <section id="runOutcome" class="run-outcome" aria-live="polite" hidden></section>
+    <details class="config-wrap evidence-panel">
+      <summary>Inspect step results <span id="resultCount"></span></summary>
+      <div id="steps"></div>
+    </details>
+    <details class="config-wrap evidence-panel">
+      <summary>Agent identities &amp; service details</summary>
+    <details class="config-wrap">
+      <summary>Service connections</summary>
+      <div class="config" id="config"><div><i>Loading config…</i></div></div>
+    </details>
+    <details class="config-wrap">
+      <summary>Signing keys</summary>
+      <div class="config" id="vaultKeys"><div><i>Loading…</i></div></div>
+    </details>
+    <details class="config-wrap">
+      <summary>Agent identities</summary>
+      <div class="config" id="registeredAgents"><div><i>Loading…</i></div></div>
+    </details>
+    <div class="status-bar" id="legend" style="margin-top:-8px"></div>
+    </details>
   </section>
 
   <!-- ========================== HOW IT WORKS ========================== -->
@@ -1963,11 +2016,11 @@ POST /realms/org-b/protocol/openid-connect/token
     });
 
     journeyLiveEl.classList.toggle('running', revealed.length > 0 && cursor < allSteps.length);
-    journeyLiveEl.classList.toggle('complete', allSteps.length > 0 && cursor === allSteps.length);
+    journeyLiveEl.classList.toggle('complete', allSteps.length > 0 && cursor === allSteps.length && !allSteps.some(s => s.status === 'error'));
     if (!revealed.length) {
-      journeyLiveLabelEl.textContent = 'Ready. Choose a chapter or run the demo to watch evidence accumulate.';
+      journeyLiveLabelEl.textContent = 'Ready to run. Explore the four stages above, or start the demo.';
     } else if (cursor === allSteps.length) {
-      journeyLiveLabelEl.textContent = `Complete. ${allSteps.length} checks produced a verified agent-to-agent remediation trail.`;
+      journeyLiveLabelEl.textContent = allSteps.some(s => s.status === 'error') ? 'Finished with errors. Inspect the step results below.' : 'Complete. Review the outcome and evidence below.';
     } else {
       journeyLiveLabelEl.textContent = `Now: ${latest?.title || latest?.id || JOURNEY_PHASE_COPY[livePhase]}`;
     }
@@ -2226,6 +2279,7 @@ POST /realms/org-b/protocol/openid-connect/token
     });
   }
   technicalSequenceEl.addEventListener('toggle', () => {
+    document.body.classList.toggle('inspect-mode', technicalSequenceEl.open);
     if (technicalSequenceEl.open) requestAnimationFrame(ensureSequenceHitAreas);
   });
 
@@ -2248,6 +2302,15 @@ POST /realms/org-b/protocol/openid-connect/token
     updateDiagram();
     updateProgressBar();
     updateJourney();
+    document.getElementById('resultCount').textContent = cursor ? `(${cursor})` : '';
+    const outcome = document.getElementById('runOutcome');
+    outcome.hidden = !allSteps.length || cursor !== allSteps.length;
+    if (!outcome.hidden) {
+      const errors = allSteps.filter(s => s.status === 'error');
+      const denied = allSteps.filter(s => s.status === 'denied');
+      outcome.classList.toggle('has-errors', errors.length > 0);
+      outcome.innerHTML = `<h3>${errors.length ? 'Run needs attention' : 'Demo complete'}</h3><p>${errors.length ? `${errors.length} step(s) failed. Open step results for details.` : 'The workflow finished. Open step results to inspect the evidence.'}${denied.length ? ` ${denied.length} action(s) were denied by policy.` : ''}</p>`;
+    }
   }
 
   function updateButtons() {
@@ -2445,6 +2508,8 @@ POST /realms/org-b/protocol/openid-connect/token
   function resetState() {
     allSteps = []; cursor = 0; animated.clear(); activeStepId = null;
     stepsEl.innerHTML = '';
+    document.getElementById('runOutcome').hidden = true;
+    document.getElementById('resultCount').textContent = '';
     setStatus('');
     hideToast();
     resetZoom();
@@ -2463,6 +2528,13 @@ POST /realms/org-b/protocol/openid-connect/token
     if (busy) return;
     resetState();
     updateButtons();
+  });
+
+  const planningChoice = document.getElementById('useRealOpencode');
+  planningChoice.addEventListener('change', () => {
+    document.getElementById('modeHint').textContent = planningChoice.checked
+      ? 'Live AI planning · may take a few minutes'
+      : 'Sample plan · live identity and authorization checks';
   });
 
   // ── Init ───────────────────────────────────────────────────────────────────
