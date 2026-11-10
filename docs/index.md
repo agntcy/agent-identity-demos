@@ -23,6 +23,8 @@ The most complete demo. The **Security Autonomous Agent** (Org A workload) asks 
 
 23 services total. The identity, authorization, and audit path is real (Keycloak, Vault, identity-node, Gitea, Directory, and two Built On Envoy inline OPA boundaries).
 
+- [AGNTCY component sequences](cross-domain/agntcy-sequences.md)
+- [D&B attestation proposal](cross-domain/dnb-attestation-proposal.md)
 - [Technical whitepaper: From agent discovery to verified action](cross-domain/whitepaper.md)
 - [Illustrated walkthrough: Making agent trust visible](cross-domain/blog.md)
 - [Overview](cross-domain/overview.md)
