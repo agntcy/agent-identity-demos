@@ -1,0 +1,30 @@
+// Copyright 2026 AGNTCY Contributors (https://github.com/agntcy)
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+package agntcy.dir.identity.v1;
+import "google/protobuf/timestamp.proto";
+
+// Wire-compatible read subset of Directory 9ad81444's identity API.
+service IdentityService {
+  rpc GetIdentityStatus(GetIdentityStatusRequest) returns (GetIdentityStatusResponse);
+}
+message GetIdentityStatusRequest {
+  optional string cid = 1;
+}
+enum ClaimVerificationStatus {
+  CLAIM_VERIFICATION_STATUS_UNSPECIFIED = 0;
+  CLAIM_VERIFICATION_STATUS_VERIFIED = 1;
+  CLAIM_VERIFICATION_STATUS_FAILED = 2;
+}
+message ClaimVerification {
+  int32 role = 1;
+  string subject = 2;
+  ClaimVerificationStatus status = 3;
+  optional string error = 4;
+  google.protobuf.Timestamp verified_at = 5;
+}
+message GetIdentityStatusResponse {
+  optional ClaimVerification identity = 1;
+  optional ClaimVerification owner = 2;
+}

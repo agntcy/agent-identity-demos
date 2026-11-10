@@ -44,6 +44,7 @@ from pydantic import BaseModel
 from agntcy_identity_client import VaultConfig
 from agntcy_identity_client import a2a
 from agntcy_identity_client import directory as dir_api
+from agntcy_identity_client import native_claims
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 KC_A_URL = os.environ.get("KC_A_URL", "http://keycloak-a:8080").rstrip("/")
@@ -319,6 +320,18 @@ async def registered_agents() -> JSONResponse:
                         }
                 except Exception:  # noqa: BLE001
                     pass
+            if DIR_APISERVER_URL:
+                try:
+                    cids = await asyncio.to_thread(
+                        native_claims.identity_cids, DIR_APISERVER_URL,
+                        client_id, "agntcy://" + cimd_id,
+                    )
+                    entry["directory_identity"] = (
+                        await asyncio.to_thread(native_claims.identity_status, DIR_APISERVER_URL, cids[0])
+                        if cids else {"status": "not published", "verified": False}
+                    )
+                except Exception as exc:
+                    entry["directory_identity"] = {"status": "unavailable", "verified": False, "error": str(exc)[:300]}
             try:
                 r = await client.post(f"{IDENTITY_NODE_URL}/v1alpha1/id/resolve",
                                        json={"id": cimd_id})

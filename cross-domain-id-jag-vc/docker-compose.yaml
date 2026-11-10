@@ -524,6 +524,7 @@ services:
       # AGNTCY services
       IDENTITY_NODE_URL: http://identity-node:4000
       DIR_APISERVER_URL: dir-apiserver:8888
+      DIRECTORY_NATIVE_CLAIMS: "true"
       SECONDARY_VC_ISSUER_URL: http://secondary-vc-issuer:8500
       TRUST_VERIFIER_URL: http://trust-verifier:8600
       OPERATING_ORGANIZATION_URI: urn:agntcy:organization:org-a
@@ -608,6 +609,7 @@ services:
       SECURITY_AUTONOMOUS_AGENT_PRINCIPAL: ${SECURITY_AUTONOMOUS_AGENT_PRINCIPAL:-service-account-security-autonomous-agent}
       IDENTITY_NODE_URL: http://identity-node:4000
       DIR_APISERVER_URL: dir-apiserver:8888
+      DIRECTORY_NATIVE_CLAIMS: "true"
       # CIMD proof signing — org-b trust authority key in Vault Transit
       VAULT_ADDR: http://identity-vault:8200
       VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:?set VAULT_DEV_ROOT_TOKEN in .env}
@@ -673,6 +675,7 @@ services:
       SECURITY_AUTONOMOUS_AGENT_PRINCIPAL: ${SECURITY_AUTONOMOUS_AGENT_PRINCIPAL:-service-account-security-autonomous-agent}
       IDENTITY_NODE_URL: http://identity-node:4000
       DIR_APISERVER_URL: dir-apiserver:8888
+      DIRECTORY_NATIVE_CLAIMS: "true"
       # CIMD proof signing — org-b trust authority key in Vault Transit
       VAULT_ADDR: http://identity-vault:8200
       VAULT_TOKEN: ${VAULT_DEV_ROOT_TOKEN:?set VAULT_DEV_ROOT_TOKEN in .env}
@@ -728,11 +731,66 @@ services:
     # zot is a distroless image (no shell/wget/nc) — cannot exec a CMD-SHELL
     # probe, so dependents key off service_started instead of service_healthy.
 
-  dir-apiserver:
-    image: ghcr.io/agntcy/dir-apiserver:v1.6.0
-    container_name: cd-dir-apiserver
-    pull_policy: always
+  # Directory #2292 is merged; pin the exact merge and compatible draft verifier.
+  directory-trust-init:
+    build: ./dir/tls
+    image: cd-directory-trust-init
+    volumes:
+      - cd-directory-ca:/ca
+      - cd-directory-verifier-secrets:/verifier
+      - cd-directory-verifier-trust:/trust
+      - cd-identity-node-tls:/node
+      - cd-directory-daemon-state:/state
+    restart: "no"
+
+  identity-node-tls:
+    image: nginx:1.28-alpine
     depends_on:
+      directory-trust-init:
+        condition: service_completed_successfully
+      identity-node:
+        condition: service_healthy
+    volumes:
+      - ./dir/node-tls.conf:/etc/nginx/nginx.conf:ro
+      - cd-identity-node-tls:/tls:ro
+    networks:
+      - cd-net
+
+  directory-identity-verifier:
+    build:
+      context: https://github.com/agntcy/identity.git#53ec1e34049ddb34e8caed9762b4ab0ae5516838:integrations/directory-verifier
+    image: cd-directory-identity-verifier:53ec1e3
+    depends_on:
+      directory-trust-init:
+        condition: service_completed_successfully
+      identity-node-tls:
+        condition: service_started
+    environment:
+      IDENTITY_NODE_URL: https://identity-node-tls:8443
+      SSL_CERT_FILE: /secrets/ca.crt
+      TLS_CERT_FILE: /secrets/tls.crt
+      TLS_KEY_FILE: /secrets/tls.key
+      RESULT_SIGNING_KEY_PATH: /secrets/result.key
+      VERIFIER_BEARER_TOKEN_FILE: /secrets/bearer.token
+      RESULT_TTL: 5m
+    volumes:
+      - cd-directory-verifier-secrets:/secrets:ro
+    networks:
+      - cd-net
+    restart: unless-stopped
+
+  dir-apiserver:
+    build:
+      context: https://github.com/agntcy/dir.git#9ad81444be3d213e2c84e2a4299021728da742ec
+      dockerfile: cli/Dockerfile
+    image: cd-directory-daemon:9ad81444
+    container_name: cd-dir-apiserver
+    command: [daemon, start, --config, /config/daemon.yaml, --data-dir, /state]
+    depends_on:
+      directory-trust-init:
+        condition: service_completed_successfully
+      directory-identity-verifier:
+        condition: service_started
       dir-postgres:
         condition: service_healthy
       dir-zot:
@@ -740,29 +798,15 @@ services:
     ports:
       - "${DIR_APISERVER_PORT:-8888}:8888"
     environment:
-      DIRECTORY_SERVER_LISTEN_ADDRESS: 0.0.0.0:8888
-      DIRECTORY_SERVER_STORE_OCI_REGISTRY_ADDRESS: dir-zot:5000
-      DIRECTORY_SERVER_STORE_OCI_REPOSITORY_NAME: dir
-      DIRECTORY_SERVER_DATABASE_POSTGRES_HOST: dir-postgres
-      DIRECTORY_SERVER_DATABASE_POSTGRES_PORT: 5432
-      DIRECTORY_SERVER_DATABASE_POSTGRES_DATABASE: directory
-      DIRECTORY_SERVER_DATABASE_POSTGRES_USERNAME: postgres
-      DIRECTORY_SERVER_DATABASE_POSTGRES_PASSWORD: ${DIR_POSTGRES_PASSWORD:-postgres}
-      DIRECTORY_SERVER_ROUTING_LISTEN_ADDRESS: /ip4/0.0.0.0/tcp/8999
-      DIRECTORY_SERVER_AUTHN_ENABLED: "false"
-      DIRECTORY_SERVER_AUTHZ_ENABLED: "false"
-      # schema.oasf.agntcy.org is unresolvable from this sandbox's egress;
-      # schema.oasf.outshift.com is Cisco Outshift's mirror of the same OASF schema service.
-      DIRECTORY_SERVER_OASF_API_VALIDATION_SCHEMA_URL: https://schema.oasf.outshift.com
+      DIRECTORY_DAEMON_SERVER_DATABASE_POSTGRES_PASSWORD: ${DIR_POSTGRES_PASSWORD:-postgres}
+      SSL_CERT_FILE: /trust/ca.crt
+    volumes:
+      - ./dir/daemon.yaml:/config/daemon.yaml:ro
+      - cd-directory-verifier-trust:/trust:ro
+      - cd-directory-daemon-state:/state
     networks:
       - cd-net
-    # distroless image (no shell/nc) — cannot exec a CMD-SHELL probe;
-    # dependents key off service_started instead of service_healthy.
-    #
-    # Note: ghcr.io/agntcy/dir-ctl is the `dirctl` one-shot CLI, not a daemon —
-    # there is no reconciler/sync sidecar to run here. dir-apiserver stores
-    # directly to dir-postgres + dir-zot on its own, so Push/Search work
-    # without an additional reconciler process.
+    restart: unless-stopped
 
   agent-dir-init:
     build:
@@ -777,6 +821,7 @@ services:
         condition: service_started
     environment:
       DIR_APISERVER_URL: dir-apiserver:8888
+      DIRECTORY_NATIVE_CLAIMS: "true"
       IDENTITY_NODE_URL: http://identity-node:4000
     networks:
       - cd-net
@@ -869,6 +914,7 @@ services:
     environment:
       IDENTITY_NODE_URL: http://identity-node:4000
       DIR_APISERVER_URL: dir-apiserver:8888
+      DIRECTORY_NATIVE_CLAIMS: "true"
       SECONDARY_ISSUER_URL: http://secondary-vc-issuer:8500
       TRUSTED_BADGE_ISSUER: agntcy:org-a
       TRUSTED_ORGANIZATION_ISSUER: agntcy:secondary-vc-issuer
@@ -934,6 +980,7 @@ services:
       EGRESS_PDP_URL: http://envoy-org-a:12000
       TRIAGE_AGENT_URL: http://envoy-org-b:10000
       DIR_APISERVER_URL: dir-apiserver:8888
+      DIRECTORY_NATIVE_CLAIMS: "true"
       SECONDARY_VC_ISSUER_URL: http://secondary-vc-issuer:8500
       TRUST_VERIFIER_URL: http://trust-verifier:8600
       # The merged agent owns A2A; OpenCode is its internal planning runtime.
@@ -976,3 +1023,9 @@ volumes:
   cd-identity-postgres-data:
   cd-dir-postgres-data:
   cd-dir-zot-data:
+
+  cd-directory-ca:
+  cd-directory-verifier-secrets:
+  cd-directory-verifier-trust:
+  cd-identity-node-tls:
+  cd-directory-daemon-state:

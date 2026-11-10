@@ -1,0 +1,55 @@
+# Copyright 2026 AGNTCY Contributors (https://github.com/agntcy)
+# SPDX-License-Identifier: Apache-2.0
+server:
+  listen_address: 0.0.0.0:8888
+  store:
+    provider: oci
+    oci:
+      registry_address: dir-zot:5000
+      repository_name: dir
+      auth_config:
+        insecure: true
+  database:
+    type: postgres
+    postgres:
+      host: dir-postgres
+      port: 5432
+      database: directory
+      username: postgres
+      ssl_mode: disable
+  routing:
+    listen_address: /ip4/0.0.0.0/tcp/8999
+    key_path: /state/node.key
+    datastore_dir: /state/routing
+  extractor:
+    asset_dir: /state/extractor-assets
+  policy:
+    operations:
+      - provider: oasf
+        op: [push, autosync, index]
+        name: schema
+        schema_url: https://schema.oasf.outshift.com
+  publication:
+    scheduler_interval: 5m
+    worker_count: 1
+    worker_timeout: 30m
+reconciler:
+  local_registry:
+    registry_address: dir-zot:5000
+    repository_name: dir
+    auth_config:
+      insecure: true
+  indexer:
+    enabled: true
+    interval: 5s
+  identity:
+    enabled: true
+    interval: 10s
+    record_timeout: 30s
+    agntcy:
+      verifier_url: https://directory-identity-verifier:8443
+      verifier_trust_bundle_file: /trust/result.pub
+      bearer_token_file: /trust/bearer.token
+      require_agent_badge: true
+      max_verification_age: 5m
+      request_timeout: 10s

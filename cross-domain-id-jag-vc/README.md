@@ -1,5 +1,9 @@
 # Cross-Domain AI Agent Remediation Demo (ID-JAG + VC)
 
+The demo now uses the merged Directory native identity-claim integration. See
+[Native Directory verification](docs/native-directory-claims.md) for the pinned
+builds, verification flow, experimental verifier dependency and test commands.
+
 A cross-domain agent delegation scenario: the **Security Autonomous Agent** in
 **Org A** uses **OpenCode as an internal planning engine** to fix a security
 weakness in a repo owned by **Org B**. The agent reads the real source through
@@ -295,7 +299,10 @@ flowchart TB
 | `identity-node-init` | `python:3.12-slim` | _(one-shot)_ | Bootstraps Vault Transit + registers org-a AND org-b as trust authorities |
 | `dir-postgres` | `postgres:16` | _(internal)_ | Search index DB for the Directory |
 | `dir-zot` | `ghcr.io/project-zot/zot:v2.1.17` | `5556` | OCI registry backing the Directory's content-addressed storage |
-| `dir-apiserver` | `ghcr.io/agntcy/dir-apiserver:v1.6.0` | `8888` | AGNTCY Directory Node (gRPC only) |
+| `dir-apiserver` | Directory merge `9ad81444` (`dirctl daemon`) | `8888` | Directory API, indexing and native identity reconciliation |
+| `directory-identity-verifier` | Identity draft `53ec1e3` | internal | Signed claim and Agent Badge verification |
+| `identity-node-tls` | `nginx:1.28-alpine` | internal | TLS termination for the existing Node API |
+| `directory-trust-init` | built from `./dir/tls` | none | Persistent internal TLS, verifier signing key and token setup |
 | `agent-dir-init` | built from `./agent-dir-init` | _(one-shot)_ | Pushes static OASF records for the Security Autonomous Agent and the 3 execution agents |
 | `gitea` | `gitea/gitea:1.22` | `3002` (HTTP), `2223` (SSH) | Protected resource (repo server) |
 | `gitea-init` | `gitea/gitea:1.22` | _(one-shot)_ | Seeds the Gitea admin + demo repo |

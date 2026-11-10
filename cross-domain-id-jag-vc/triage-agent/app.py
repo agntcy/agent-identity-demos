@@ -521,6 +521,7 @@ async def receive_ticket(
                 )
                 s.update(status="ok" if issued["verified"] else "error", result={
                     "credential_id": issued["credential_id"],
+                    "directory_identity": issued.get("directory_identity"),
                     "issuer": issued["issuer"],
                     "reused_existing_credential": issued.get("reused", False),
                     "verified_by": "identity-node /v1alpha1/vc/verify",

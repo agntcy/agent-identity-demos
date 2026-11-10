@@ -6,7 +6,7 @@ This proof of concept separates three concerns that are easy to conflate:
 
 | Component | Question it answers | Security role |
 |---|---|---|
-| AGNTCY Directory | What agents exist, what can they do, and where are they? | Discovery and content-addressed audit records |
+| AGNTCY Directory | What agents exist, what can they do, and where are they? | Discovery, native identity-claim verification and content-addressed audit records |
 | AGNTCY Identity Node | What cryptographic identity and signed credentials are registered for this agent? | CIMD resolution and Agent Badge VC publication/verification |
 | Trust Verifier | Should Org B accept this agent and its presented evidence for this interaction? | Relying-party verification and trust-policy enforcement |
 
@@ -61,7 +61,7 @@ The Directory stores the canonical OASF agent description used for discovery:
 
 It also stores separate, immutable OASF audit records for workflow events. Each pushed record receives a content identifier (CID). Canonical agent records are used for discovery; runtime audit records describe what happened during a task.
 
-Directory records are searchable metadata, not trusted credentials. Publishing a Directory record does not grant repository access or delegation authority.
+Publishing a Directory record does not grant repository access or delegation authority. The demo also publishes a native signed identity claim: Directory verifies agent control and exact record/badge consistency before including it in verified identity search. See [Native Directory verification](native-directory-claims.md). Org B's two-VC Trust Verifier still makes the organization-policy decision.
 
 ## AGNTCY Identity Node
 

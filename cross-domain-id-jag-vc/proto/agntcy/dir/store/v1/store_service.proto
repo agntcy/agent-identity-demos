@@ -6,7 +6,23 @@ package agntcy.dir.store.v1;
 option go_package = "github.com/agntcy/dir/api/store/v1";
 
 import "agntcy/dir/core/v1/record.proto";
+import "google/protobuf/struct.proto";
 
 service StoreService {
   rpc Push(stream agntcy.dir.core.v1.Record) returns (stream agntcy.dir.core.v1.RecordRef);
+  rpc PushReferrer(stream PushReferrerRequest) returns (stream PushReferrerResponse);
+}
+
+// Wire-compatible subset of Directory 9ad81444's native referrer API.
+message PushReferrerRequest {
+  agntcy.dir.core.v1.RecordRef record_ref = 1;
+  string type = 2;
+  map<string, string> annotations = 3;
+  string created_at = 4;
+  google.protobuf.Struct data = 5;
+}
+
+message PushReferrerResponse {
+  bool success = 1;
+  optional string error_message = 2;
 }

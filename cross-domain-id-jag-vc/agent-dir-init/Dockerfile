@@ -16,7 +16,8 @@ RUN python -m grpc_tools.protoc \
     --grpc_python_out=. \
     proto/agntcy/dir/core/v1/record.proto \
     proto/agntcy/dir/store/v1/store_service.proto \
-    proto/agntcy/dir/search/v1/search_service.proto
+    proto/agntcy/dir/search/v1/search_service.proto \
+    proto/agntcy/dir/identity/v1/identity_service.proto
 COPY --from=shared_lib . agntcy_identity_client/
 COPY init.py .
 CMD ["python", "init.py"]

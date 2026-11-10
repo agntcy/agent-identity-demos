@@ -24,6 +24,7 @@ external IdP" case the upstream proto anticipates.
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 
@@ -375,7 +376,7 @@ async def issue_badge(
     )
     if existing is not None:
         result = await verify_badge(client, identity_node_url, existing)
-        return {
+        return await _with_native_claim(client, cfg, subject_id, agent_definition, {
             "badge": existing,
             "credential_id": (result.get("document") or {}).get("id", ""),
             "issuer": cfg.issuer,
@@ -383,7 +384,7 @@ async def issue_badge(
             "document": result.get("document", {}),
             "reused": True,
             "superseded": [],
-        }
+        })
 
     credential = build_badge_credential(
         cfg,
@@ -405,7 +406,7 @@ async def issue_badge(
     # .well-known to a single live credential per grant in the meantime.
     superseded: list[str] = []
     result = await verify_badge(client, identity_node_url, jws)
-    return {
+    return await _with_native_claim(client, cfg, subject_id, agent_definition, {
         "badge": jws,
         "credential_id": credential["id"],
         "issuer": credential["issuer"],
@@ -413,4 +414,21 @@ async def issue_badge(
         "document": result.get("document", {}),
         "reused": False,
         "superseded": superseded,
-    }
+    })
+
+
+async def _with_native_claim(client, cfg, subject_id, agent_definition, issued):
+    """Only report native verification after Directory's reconciler accepts it."""
+    if (os.environ.get("DIRECTORY_NATIVE_CLAIMS", "false").lower() == "true"
+            and agent_definition is not None):
+        if not issued["verified"]:
+            raise ValueError("Identity Node rejected the badge; no native claim published")
+        from . import native_claims
+
+        address = os.environ.get("DIR_APISERVER_URL", "")
+        if not address:
+            raise ValueError("DIR_APISERVER_URL is required for native claims")
+        issued["directory_identity"] = await native_claims.publish_and_verify(
+            client, cfg, address, agent_definition, subject_id,
+        )
+    return issued

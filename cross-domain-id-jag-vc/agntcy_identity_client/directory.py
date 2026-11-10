@@ -122,7 +122,8 @@ def build_agent_record(
     ``identity_id`` and ``badge_url`` are discovery metadata. The
     ``credentialSubject.badge`` field carries this complete record so a
     verifier can compare the signed description with what Directory search
-    returned, while the Directory remains a non-authoritative catalog.
+    returned. Native claims establish identity and record consistency;
+    relying-party policy still decides authorization.
     """
     try:
         record = copy.deepcopy(_AGENT_CATALOG[client_id])
@@ -139,6 +140,7 @@ def build_agent_record(
     record["annotations"].update({
         "record_type": AGENT_RECORD_TYPE,
         "identity_id": resolved_identity_id,
+        "agntcy.dir/identity": "agntcy://" + resolved_identity_id,
         "badge_url": (
             f"{identity_node_url.rstrip('/')}/v1alpha1/vc/"
             f"{quote(resolved_identity_id, safe='')}/.well-known/vcs.json"
@@ -166,7 +168,7 @@ def push_record(dir_apiserver_url: str, record_dict: dict) -> str:
     channel = grpc.insecure_channel(dir_apiserver_url)
     try:
         stub = store_service_pb2_grpc.StoreServiceStub(channel)
-        refs = list(stub.Push(iter([record])))
+        refs = list(stub.Push(iter([record]), timeout=15))
     finally:
         channel.close()
     return refs[0].cid if refs else ""

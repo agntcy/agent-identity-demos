@@ -757,6 +757,7 @@ async def run(
             s.update(status="ok", token_preview=badge[:48] + "…", result={
                 "token": badge,
                 "credential_id": issued["credential_id"],
+                "directory_identity": issued.get("directory_identity"),
                 "issuer": issued["issuer"],
                 # One identity, one live credential: an existing valid one is
                 # reused rather than piling up contradictory entries under the

@@ -1570,6 +1570,9 @@ POST /realms/org-b/protocol/openid-connect/token
           : '<span style="color:var(--muted)">no live credential published</span>';
         return `<div style="margin-bottom:8px">
           <b>${esc(a.name)}</b> — Holder id <code>${esc(a.holder_id)}</code> (${esc(a.org)})<br/>
+          <span style="color:var(--muted)">Directory identity:</span>
+          <b style="color:${a.directory_identity?.verified ? 'var(--ok)' : 'var(--muted)'}">${esc(a.directory_identity?.status || 'not published')}</b>
+          ${a.directory_identity?.cid ? ` · CID <code>${esc(a.directory_identity.cid)}</code>` : ''}<br/>
           <span style="color:var(--muted)">Directory OASF:</span> ${a.directory_record
             ? `agent record ✓ · digest <code>${esc(a.directory_record.oasf_digest||'')}</code><br/>
                <span style="color:var(--muted)">Badge URL:</span> <code>${esc(a.directory_record.badge_url||'')}</code>`
