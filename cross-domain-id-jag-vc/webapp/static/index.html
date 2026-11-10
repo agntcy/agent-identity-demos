@@ -428,6 +428,10 @@
     .component-caption { padding: 14px 24px; border-top: 1px solid var(--border); color: #aebbc8; font-size: 13px; }
     @media (max-width: 760px) { .component-caption::after { content: ' Swipe the diagram to see every component.'; } }
     @media (prefers-reduced-motion: reduce) { .flow-packet { display: none; } }
+    #registeredAgents { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; line-height: 1.7; }
+    #registeredAgents > div { min-width: 0; overflow-wrap: anywhere; }
+    #registeredAgents > div:last-child { grid-column: 1 / -1; }
+    @media (max-width: 760px) { #registeredAgents { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>

@@ -46,6 +46,8 @@ nav:
   - Survey: survey.md
   - Cross-domain demo:
       - Overview: cross-domain/overview.md
+      - Technical whitepaper: cross-domain/whitepaper.md
+      - Illustrated walkthrough: cross-domain/blog.md
       - Architecture: cross-domain/architecture.md
       - Credentials vs assertions: cross-domain/credentials.md
       - Sequence: cross-domain/sequence.md

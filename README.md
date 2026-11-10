@@ -43,3 +43,8 @@ cross-issuer binding through CIMD/JWKS.
 
 - [agntcy/identity-service](https://github.com/agntcy/identity-service) — the Identity Service these demos run against
 - [AGNTCY Identity spec](https://spec.identity.agntcy.org) — the underlying identity specification
+
+## AGNTCY identity and trust: illustrated guides
+
+- [Technical whitepaper](docs/cross-domain/whitepaper.md): architecture, protocol bindings, trust decisions and validation.
+- [Blog walkthrough](docs/cross-domain/blog.md): a screenshot-led explanation of the deployed component flow and its purpose.
