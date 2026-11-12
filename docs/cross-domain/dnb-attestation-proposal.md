@@ -329,7 +329,26 @@ The first joint deliverable should be a scoped issue identifying the chosen refe
 8. A second marketplace can consume the same profile, with documented verification and acceptance behavior.
 9. For a pilot claiming current D&B assurance, exercise the agreed provider freshness hook and show that revoked, expired, stale and unavailable evidence receive the configured treatment in verification and any enforced discovery/access policy.
 
-## Discussion with the Directory team
+## Directory asks for Luca
+
+Luca ([@muscariello](https://github.com/muscariello)), the following are the requested Directory decisions and integration responsibilities. These are requests for review and agreement, not delivery commitments or an assumption that each item needs new code.
+
+| Directory item | Ask for Luca / Directory team | Completion evidence |
+|---|---|---|
+| Record representation | Confirm the annotation convention and supported OASF versions for the reference-only path. Existing annotation storage/search should be reused. | A representative record passes validation and retains its evidence reference through publish, search and retrieval |
+| Claim-resolver path | Review whether the proposed D&B subject URI fits identity or ownership semantics, and identify the supported resolver extension point. Agree the meaning of a verified result before a provider implements it. | Documented choice between the reference-only and custom claim-resolver paths, including subject/key/record binding |
+| Provider freshness hook | Identify the existing resolver/reconciler mechanism to reuse and any generic extension needed for provider status checks or authenticated cached updates. | Agreed interface for provider results, refresh scheduling, last successful check, validity bounds, and revoked/expired/stale/unavailable outcomes |
+| Result exposure | Confirm how authenticated provider results and their age reach consumers, and what storage or API changes, if any, are required. | Consumers can distinguish a declared evidence reference from a verified result and determine whether that result remains usable |
+| Search and enforcement integration | Identify how those results feed existing query and policy mechanisms, including re-evaluation when evidence changes or becomes stale. Keep provider-written annotations separate from trusted verdicts. | Configured policy stops stale or revoked evidence from qualifying in search and protected read paths, including during provider outages |
+| Review and validation | Agree Directory conformance cases and review the provider's integration contribution. Identify a Directory owner for any required core change. | Tests cover valid evidence, wrong subject/record, revocation, expiry, stale cache and unavailable provider, with explicit expected outcomes |
+
+**Already available:** annotation search, identity/ownership claim filters, and Directory 1.8 content-policy enforcement (#2205). The ask is to confirm reuse and fill the D&B integration gaps. It does not presume an OASF core schema change or a replacement enforcement framework.
+
+**Provider and marketplace ownership:** D&B or its implementation partner supplies the provider-specific adapter, evidence, verification material, status source and fixtures. The marketplace chooses accepted issuers/claims, maximum age and outage policy, and establishes its required agent-to-organization relationship. Outshift/AGNTCY can coordinate the joint acceptance test if agreed. Directory should expose and enforce the configured result semantics; it does not define D&B's business claims or the marketplace's acceptance policy.
+
+**Requested next step:** Luca confirms which items existing Directory interfaces already cover, identifies the remaining generic changes, and agrees their owners with the provider implementer. Record that scope in a focused issue before implementation.
+
+## Integration scope
 
 The request to the Directory team is to confirm use of existing annotations, distinguish that reference-only path from the deck's custom D&B claim-resolver track, and agree the reusable freshness-check extension point. Reuse shipped annotation/claim search and content-policy enforcement. Identify only the remaining integration needed to make authenticated D&B results and freshness available to those mechanisms. D&B retains responsibility for its attestation semantics, issuance and status source. Marketplaces retain responsibility for accepting that evidence and deciding its effect.
 
