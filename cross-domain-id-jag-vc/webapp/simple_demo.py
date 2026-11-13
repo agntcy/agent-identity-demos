@@ -37,7 +37,7 @@ async def login(client, base, realm, client_id, secret):
 
 
 
-async def run(*, annotations=None):
+async def run(*, annotations=None, single_keycloak=False):
     if RUN_LOCK.locked():
         yield event(-1, "error", "A demo is already running. Please wait for it to finish.")
         return
@@ -46,7 +46,7 @@ async def run(*, annotations=None):
         node = os.environ.get("IDENTITY_NODE_URL", "http://identity-node:4000").rstrip("/")
         address = os.environ.get("DIR_APISERVER_URL", "")
         pub = os.environ.get("TRIAGE_CLIENT_ID", "triage-agent")
-        con = os.environ.get("SECURITY_AUTONOMOUS_AGENT_CLIENT_ID", "security-autonomous-agent")
+        con = os.environ.get("SUB_AGENT_CLIENT_ID", "sub-agent") if single_keycloak else os.environ.get("SECURITY_AUTONOMOUS_AGENT_CLIENT_ID", "security-autonomous-agent")
         cfg_a = VaultConfig.from_env()
         cfg_b = VaultConfig(cfg_a.vault_addr, cfg_a.vault_token, "org-b-issuer", "org-b")
         try:
@@ -86,8 +86,11 @@ async def run(*, annotations=None):
                 yield event(step, "ok", "Directory confirmed the identity claim through its verifier", **status)
                 step = 4
                 yield event(step, "running", "Consumer agent authenticates and resolves its own identity")
-                auth = await login(client, os.environ.get("KC_A_URL", "http://keycloak-a:8080"), os.environ.get("KC_A_REALM", "org-a"), con, os.environ.get("SECURITY_AUTONOMOUS_AGENT_CLIENT_SECRET", ""))
-                consumer = await cimd.generate_id(client, node, cfg_a, con)
+                if single_keycloak:
+                    auth = await login(client, os.environ.get("KC_B_URL", "http://keycloak-b:8080"), os.environ.get("KC_B_REALM", "org-b"), con, os.environ.get("SUB_AGENT_CLIENT_SECRET", ""))
+                else:
+                    auth = await login(client, os.environ.get("KC_A_URL", "http://keycloak-a:8080"), os.environ.get("KC_A_REALM", "org-a"), con, os.environ.get("SECURITY_AUTONOMOUS_AGENT_CLIENT_SECRET", ""))
+                consumer = await cimd.generate_id(client, node, cfg_b if single_keycloak else cfg_a, con)
                 consumer_metadata = await cimd.resolve_id(client, node, consumer["id"])
                 if consumer_metadata.get("id") != consumer["id"]:
                     raise ValueError("Resolved consumer identity does not match")

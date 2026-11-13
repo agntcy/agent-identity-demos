@@ -971,6 +971,8 @@ services:
     environment:
       DEMO_MODE: ${DEMO_MODE:-full}
       TRIAGE_CLIENT_SECRET: ${TRIAGE_CLIENT_SECRET:-demo-triage-secret-change-me}
+      SUB_AGENT_CLIENT_ID: sub-agent
+      SUB_AGENT_CLIENT_SECRET: ${SUB_AGENT_CLIENT_SECRET:-demo-subagent-secret-change-me}
       SECURITY_AUTONOMOUS_AGENT_CLIENT_SECRET: ${SECURITY_AUTONOMOUS_AGENT_CLIENT_SECRET:-demo-security-autonomous-secret-change-me}
       KC_A_URL: ${KC_A_INTERNAL_URL:-http://keycloak-a:8080}
       KC_A_REALM: org-a

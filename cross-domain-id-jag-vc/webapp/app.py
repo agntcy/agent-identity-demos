@@ -420,7 +420,7 @@ def index(mode: str = "") -> FileResponse:
 
 @app.post("/api/simple/run")
 async def simple_run():
-    return StreamingResponse(simple_demo.run(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(simple_demo.run(single_keycloak=True), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.post("/api/dnb/run")
