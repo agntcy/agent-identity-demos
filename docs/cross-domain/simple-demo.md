@@ -24,3 +24,7 @@ Simple mode makes no Envoy, OPA, remediation, LLM, secondary credential or cross
 ## Validation
 
 The live smoke test must finish with `state: complete` from `POST /api/simple/run`, all seven operations successful, the publisher CID present in verified search, and the consumer's badge binding check successful. Unit tests cover rejected workload client/issuer/expiry, accepted signed workload tokens, and the existing badge/native-claim checks. The UI must support switching to full mode and resetting the view.
+
+## Presenter controls
+
+Choose **Next step** to start manual playback, then click it to reveal each completed operation. **Resume automatic** resumes timed playback. These controls are also available in the expanded diagram. The backend continues executing while the presentation waits; this is not a server-side debugger. **Show console** opens the full scrollable operation output in the upper-right corner.

@@ -22,3 +22,7 @@ The results deliberately separate **live native identity verification** from **s
 4. Use **Wrong organization** or **Tampered credential** to explain subject binding and signature checks.
 
 See the [proposal and responsibility split](dnb-attestation-proposal.md) for the work needed to replace the fixtures with an agreed provider integration.
+
+## Presenter controls
+
+Choose **Next step** to start manual playback, then click it to reveal each completed operation. **Resume automatic** resumes timed playback. These controls are also available in the expanded diagram. The backend continues executing while the presentation waits; this is not a server-side debugger. **Show console** opens the full scrollable operation output in the upper-right corner.

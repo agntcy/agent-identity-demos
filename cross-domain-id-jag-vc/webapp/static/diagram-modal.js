@@ -7,6 +7,16 @@
   dialog.innerHTML = '<div class="diagram-modal-toolbar"><strong id="diagramModalTitle">AGNTCY diagram</strong><div class="diagram-modal-controls"><button type="button" data-action="out" aria-label="Zoom out">−</button><span data-zoom aria-live="polite">Fit</span><button type="button" data-action="in" aria-label="Zoom in">+</button><button type="button" data-action="fit">Fit to window</button><button type="button" data-action="close" aria-label="Close diagram">Close ✕</button></div></div><div class="diagram-modal-scroll"><div class="diagram-modal-content"></div></div>';
   document.body.append(dialog);
   const content = dialog.querySelector('.diagram-modal-content');
+  const controls=dialog.querySelector('.diagram-modal-controls');
+  ['#nextStep, #step','#run','#consoleOpen'].forEach(selector=>{
+    const source=document.querySelector(selector);
+    if(!source)return;
+    const mirror=document.createElement('button');mirror.type='button';
+    const sync=()=>{mirror.textContent=source.textContent;mirror.disabled=source.disabled;};
+    sync();new MutationObserver(sync).observe(source,{attributes:true,childList:true,subtree:true,characterData:true});
+    mirror.addEventListener('click',()=>source.click());controls.prepend(mirror);
+  });
+
   let active = null, placeholder = null, trigger = null, previousOverflow = '', zoom = 1;
   let consolePanel = null, consolePlaceholder = null;
   function fit() {

@@ -305,12 +305,12 @@
     #legend a:hover { text-decoration: underline; }
     /* Right-side step explainer toast */
     .side-toast {
-      position: fixed; top: 96px; right: 24px; width: 300px; max-width: calc(100vw - 48px);
+      position: fixed; top: 96px; right: 24px; width: 460px; max-width: calc(100vw - 48px);
       background: var(--panel); border: 1px solid var(--accent); border-radius: 10px;
       padding: 16px 18px; box-shadow: 0 10px 30px rgba(0,0,0,.45);
       transform: translateX(340px); opacity: 0;
       transition: transform .35s ease, opacity .35s ease, width .25s ease, max-height .25s ease;
-      z-index: 50; pointer-events: none; max-height: calc(100vh - 130px); display: flex; flex-direction: column;
+      z-index: 50; pointer-events: none; max-height: calc(100vh - 130px); display: flex; flex-direction: column; overflow-y: auto;
     }
     .side-toast.show { transform: translateX(0); opacity: 1; pointer-events: auto; }
     .side-toast.expanded { width: min(620px, calc(100vw - 48px)); }
@@ -348,7 +348,7 @@
     .side-toast.expanded .toast-fact .fact-value { max-height: none; }
     .side-toast .toast-bar { height: 3px; border-radius: 2px; background: #21262d; margin-top: 12px; overflow: hidden; flex-shrink: 0; }
     .side-toast .toast-bar > div { height: 100%; background: var(--accent); width: 0%; transition: width linear; }
-    @media (max-width: 980px) { .side-toast { display: none; } }
+    @media (max-width: 980px) { .side-toast { right: 12px; top: 80px; max-width: calc(100vw - 24px); } }
 
     /* Popup shown when a diagram step is clicked — pick explainer vs. trace */
     .step-menu { position: fixed; z-index: 10000; background: #161b22; border: 1px solid var(--border);
@@ -393,7 +393,7 @@
     .run-outcome h3 { margin: 0 0 4px; }
     .run-outcome p { margin: 0; color: var(--muted); }
     .run-outcome.has-errors { border-color: var(--err); background: rgba(248,81,73,.06); }
-    body:not(.inspect-mode) .side-toast { display: none; }
+    /* Console is available in both presentation and inspection views. */
     .technical-sequence .diagram { overflow-x: auto; }
     @media (min-width: 981px) { body.inspect-mode { padding-right: 340px; } }
     @media (max-width: 900px) { .journey-story { grid-template-columns: 1fr; } }
@@ -453,6 +453,8 @@
     <div class="run-card">
       <div class="controls">
         <button id="run" class="action">&#9654; Run demo</button>
+        <button id="step" class="secondary">Next step &#9654;</button>
+        <button id="consoleOpen" class="secondary">Show console</button>
         <button id="reset" class="secondary" disabled>Reset</button>
         <button id="viewSequence" class="secondary">View sequence diagram</button>
         <span class="run-hint" id="modeHint">Live AI planning · may take a few minutes</span>
@@ -465,9 +467,8 @@
           <div class="field"><label for="stepDelay">Playback delay (ms)</label><input id="stepDelay" type="number" min="200" max="10000" step="100" value="1000" /></div>
           <div class="field"><label><input id="useRealOpencode" type="checkbox" checked /> Use live AI planning</label></div>
         </div>
-        <p class="run-hint">Turn off live AI planning to use a sample plan. Identity and authorization checks still run live.</p>
+        <p class="run-hint">Next step reveals one returned operation at a time; backend execution continues. Turn off live AI planning to use a sample plan. Identity and authorization checks still run live.</p>
         <div class="controls">
-          <button id="step" class="secondary">Next step &#9654;</button>
           <div class="field"><label><input id="autoZoom" type="checkbox" /> Zoom technical diagram during playback</label></div>
         </div>
       </details>
@@ -1559,12 +1560,13 @@ POST /realms/org-b/protocol/openid-connect/token
   <div class="toast-num">
     <span id="toastNum"></span>
     <span class="toast-progress" id="toastProgress"></span>
-    <button class="toast-expand-btn" id="toastExpandBtn" type="button">Expand ⤢</button>
+    <button class="toast-expand-btn" id="toastExpandBtn" type="button">Expand ⤢</button><button class="toast-expand-btn" id="toastCloseBtn" type="button" aria-label="Close console">✕</button>
   </div>
   <div class="toast-title" id="toastTitle"></div>
   <div class="toast-body" id="toastBody"></div>
   <div class="toast-detail" id="toastDetail" hidden></div>
   <div class="toast-fact" id="toastFact" hidden></div>
+  <details open class="toast-console"><summary>Console · actual step output</summary><pre id="toastConsole" style="white-space:pre-wrap;overflow-wrap:anywhere;font:11px/1.5 ui-monospace,monospace;max-height:45vh;overflow:auto">Run or choose Next step to see returned operation data.</pre></details>
   <div class="toast-bar"><div id="toastBar"></div></div>
 </div>
 
@@ -1808,13 +1810,23 @@ POST /realms/org-b/protocol/openid-connect/token
   // (some under `result`, some at the top level of the step object), so
   // check both. `copyable: true` gets a Copy button (long values worth
   // grabbing); short ids/CIDs don't need one.
+  function consoleSafe(value, key='') {
+    if (/^(access_token|refresh_token|id_token|token|assertion|authorization|client_secret|password|vault_token)$/i.test(key)) return '[hidden]';
+    if (Array.isArray(value)) return value.map(v=>consoleSafe(v));
+    if (value && typeof value==='object') return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,consoleSafe(v,k)]));
+    if (typeof value==='string') return value.replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,'[JWT hidden]');
+    return value;
+  }
+  function tokenMetadata(token) {
+    try {const parts=token.split('.');return {header:JSON.parse(atob(parts[0].replace(/-/g,'+').replace(/_/g,'/'))),claims:JSON.parse(atob(parts[1].replace(/-/g,'+').replace(/_/g,'/'))),note:'Decoded metadata; decoding alone does not verify a signature'};} catch {return {note:'Token present; bearer value hidden'};}
+  }
   function extractFacts(step) {
     const r = step.result || {};
     const facts = [];
     const token = r.token || step.token;
-    if (token) facts.push({ label: 'Token (full JWT)', value: token, copyable: true });
+    if (token) facts.push({ label: 'Token metadata (bearer hidden)', value: JSON.stringify(tokenMetadata(token),null,2), copyable: true });
     const assertion = r.assertion || step.assertion;
-    if (assertion) facts.push({ label: 'ID-JAG assertion (full JWT)', value: assertion, copyable: true });
+    if (assertion) facts.push({ label: 'ID-JAG metadata (bearer hidden)', value: JSON.stringify(tokenMetadata(assertion),null,2), copyable: true });
     const claims = r.claims || step.claims;
     if (claims) facts.push({ label: 'Decoded JWT claims', value: JSON.stringify(claims, null, 2), copyable: true });
     if (r.cid) facts.push({ label: 'OASF record CID', value: r.cid, copyable: true });
@@ -1833,7 +1845,7 @@ POST /realms/org-b/protocol/openid-connect/token
     // Fallback: nothing was specifically curated above, but the step still
     // has a response payload — show it raw rather than nothing at all.
     if (!facts.length && r && Object.keys(r).length) {
-      facts.push({ label: 'Response payload', value: JSON.stringify(r, null, 2), copyable: true });
+      facts.push({ label: 'Response payload', value: JSON.stringify(consoleSafe(r), null, 2), copyable: true });
     }
     return facts;
   }
@@ -1852,7 +1864,8 @@ POST /realms/org-b/protocol/openid-connect/token
       toastDetail.hidden = true;
     }
 
-    const facts = extractFacts(step);
+    document.getElementById("toastConsole").textContent=JSON.stringify(consoleSafe(step),null,2);
+    const facts = extractFacts(step).map(f=>({...f,value:consoleSafe(f.value)}));
     if (facts.length) {
       toastFact.innerHTML = facts.map((f, i) => {
         const copyBtn = f.copyable ? `<button class="fact-copy-btn" data-fact-index="${i}" type="button">Copy</button>` : '';
@@ -1892,6 +1905,7 @@ POST /realms/org-b/protocol/openid-connect/token
   // Shown once, before the animated run's first step — sets up the story
   // so the per-step toasts that follow read like chapters, not isolated facts.
   function showIntroToast(durationMs) {
+    document.getElementById('toastConsole').textContent='Waiting for real service results. Playback does not pause backend execution.';
     toastNum.textContent = 'Story overview';
     toastProgress.textContent = '';
     toastTitle.textContent = 'Cross-domain remediation, step by step';
@@ -1910,6 +1924,9 @@ POST /realms/org-b/protocol/openid-connect/token
       toastBar.style.width = '100%';
     }
   }
+
+  document.getElementById('toastCloseBtn').addEventListener('click',hideToast);
+  document.getElementById('consoleOpen').addEventListener('click',()=>{if(cursor&&allSteps[cursor-1])showToast(allSteps[cursor-1],cursor-1,allSteps.length);else showIntroToast();});
 
   // Expand/collapse persists across steps until the user toggles it back —
   // once you want to read full JWTs, you probably want to keep reading them.
@@ -2492,6 +2509,7 @@ POST /realms/org-b/protocol/openid-connect/token
     const cve  = document.getElementById('cve').value.trim()  || 'CVE-2024-12345';
     const repo = document.getElementById('repo').value.trim() || 'demo-admin/payments-service';
     const useRealOpencode = document.getElementById('useRealOpencode').checked;
+    showIntroToast();
     startStatusSpinner(useRealOpencode
       ? 'Running full sequence — waiting on identity-node, Keycloak, and the real OpenCode/LLM call…'
       : 'Running full sequence — waiting on identity-node, Keycloak (OpenCode plan is mocked)…');
