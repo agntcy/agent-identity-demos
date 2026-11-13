@@ -13,7 +13,7 @@ RUN_LOCK = asyncio.Lock()
 
 
 def event(step, state, detail, **evidence):
-    return json.dumps({"step": step, "state": state, "detail": detail, "evidence": evidence}) + "\n"
+    return json.dumps({"timestamp": datetime.now(timezone.utc).isoformat(), "step": step, "state": state, "detail": detail, "evidence": evidence}) + "\n"
 
 
 async def login(client, base, realm, client_id, secret):
@@ -33,7 +33,7 @@ async def login(client, base, realm, client_id, secret):
     # This proves token issuance for this workload; it grants no downstream API access.
     if claims.get("azp") != client_id or claims.get("preferred_username") != "service-account-" + client_id:
         raise ValueError("Keycloak token names an unexpected workload identity")
-    return {"client": client_id, "realm": realm, "signature_verified": True, "expires_at": claims["exp"]}
+    return {"client": client_id, "realm": realm, "signature_verified": True, "expires_at": claims["exp"], "token_info": {"header": {k: header.get(k) for k in ("alg", "kid", "typ")}, "claims": {k: claims.get(k) for k in ("iss", "sub", "azp", "aud", "scope", "iat", "exp", "preferred_username")}, "raw_token": "Not exposed"}}
 
 
 
@@ -61,7 +61,7 @@ async def run():
                 resolved = await cimd.resolve_id(client, node, publisher_id)
                 if resolved.get("id") != publisher_id:
                     raise ValueError("Resolved publisher identity does not match")
-                yield event(step, "ok", "Publisher identity resolved with public verification material", identity=publisher_id, reused=identity["already_registered"])
+                yield event(step, "ok", "Publisher identity resolved with public verification material", identity=publisher_id, reused=identity["already_registered"], verification_methods=[{"id": m.get("id"), "type": m.get("type"), "kid": (m.get("publicKeyJwk") or {}).get("kid")} for m in resolved.get("verificationMethod", [])])
                 step = 2
                 yield event(step, "running", "Publishing a Vault-signed Agent Badge")
                 record = directory.build_agent_record(pub, node, identity_id=publisher_id)
@@ -75,7 +75,7 @@ async def run():
                 checked = await vc.verify_badge(client, node, badge)
                 if not checked.get("status"):
                     raise ValueError("Identity Node rejected the publisher badge")
-                yield event(step, "ok", "Identity verified the badge for this exact agent description", identity=publisher_id, badge_verified=True, reused=reused, signer="Vault Transit / org-b-issuer")
+                yield event(step, "ok", "Identity verified the badge for this exact agent description", identity=publisher_id, badge_verified=True, reused=reused, signer="Vault Transit / org-b-issuer", badge_info={k: (checked.get("document") or {}).get(k) for k in ("id", "issuer", "type", "issuanceDate", "expirationDate")}, oasf=record)
                 step = 3
                 yield event(step, "running", "Publishing the record and claim; waiting for Directory verification")
                 status = await native_claims.publish_and_verify(client, cfg_b, address, record, publisher_id)
@@ -99,7 +99,7 @@ async def run():
                 found = next((r for r in records if directory.canonical_oasf(r) == directory.canonical_oasf(record)), None)
                 if found is None:
                     raise ValueError("Directory did not return the matching canonical record")
-                yield event(step, "ok", "Consumer found the publisher in verified search", cid=status["cid"], publisher=publisher_id, annotations=found["annotations"])
+                yield event(step, "ok", "Consumer found the publisher in verified search", cid=status["cid"], publisher=publisher_id, annotations=found["annotations"], oasf=found)
                 step = 6
                 yield event(step, "running", "Consumer retrieves and verifies the publisher's badge")
                 retrieved = await vc.find_live_badge(client, node, **{**args, "agent_definition": found})

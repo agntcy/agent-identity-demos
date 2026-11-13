@@ -433,7 +433,7 @@
     #registeredAgents > div:last-child { grid-column: 1 / -1; }
     @media (max-width: 760px) { #registeredAgents { grid-template-columns: 1fr; } }
   </style>
-</head>
+<link rel="stylesheet" href="/static/diagram-modal.css"></head>
 <body>
 <a href="/?mode=simple" style="position:fixed;right:20px;top:12px;z-index:100;background:#122236;color:#b9f5d9;padding:8px 14px;border-radius:8px;text-decoration:none">Switch to simple demo</a>
 <header>
@@ -480,6 +480,7 @@
     <section class="component-map" aria-labelledby="componentTitle">
       <div class="component-heading"><div class="journey-eyebrow">AGNTCY in action</div>
         <h2 id="componentTitle">Register. Publish. Verify.</h2>
+        <button type="button" class="diagram-expand" data-diagram-target=".component-map">Expand diagram ⤢</button>
         <p>The agent proves its identity, publishes its description, and earns a verified Directory entry.</p>
       </div>
       <div class="component-scroll">
@@ -2691,5 +2692,5 @@ POST /realms/org-b/protocol/openid-connect/token
   });
   if (!document.getElementById('tab-how')?.hidden) renderTrustMermaid();
 </script>
-</body>
+<script src="/static/diagram-modal.js"></script></body>
 </html>

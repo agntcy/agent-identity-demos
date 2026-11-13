@@ -2,6 +2,10 @@
 
 Select **Simple discovery** on the demo site, or open `/?mode=simple`. Click **Run live demo**. Use **Reset view** to clear the display without deleting identities or records. **Full agent workflow** returns to the existing remediation demo.
 
+Use **Expand diagram** in either demo mode to open the diagram in a large modal. Zoom controls, **Fit to window**, Escape and **Close** are supported. The existing live diagram moves into the modal so its state continues updating.
+
+Simple mode has a **Step delay** selector (0, 2, 4 or 6 seconds, default 2). This paces presentation of completed operations, not the backend verification. The top-right console shows timestamped operation events, validated token headers/selected claims, badge metadata, CIDs and OASF records. Reusable bearer tokens and credentials stay on the server. The console can be collapsed or closed and remains available inside the modal.
+
 Set `DEMO_MODE=simple` in the Compose environment to make simple mode the default. `DEMO_MODE=full` restores the original landing page. Recreate only `webapp` after changing the environment setting.
 
 The demo driver performs two paths with existing workload identities:
