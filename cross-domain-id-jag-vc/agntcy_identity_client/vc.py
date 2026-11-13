@@ -24,12 +24,14 @@ external IdP" case the upstream proto anticipates.
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 
 import httpx
 
 from . import VaultConfig
+from . import directory as dir_api
 from .vault import b64url, build_proof_jwt, get_issuer_jwk, vault_sign_rs256
 
 # CredentialEnvelopeType / CredentialContentType from
@@ -68,6 +70,8 @@ def build_badge_credential(
     intent: str,
     act_chain: list[str],
     delegatable: list[str] | None = None,
+    agent_definition: dict | None = None,
+    operated_by: str | None = None,
     ttl_seconds: int = 3600,
 ) -> dict:
     """The unsigned W3C credential asserting this agent's delegated capability.
@@ -80,7 +84,40 @@ def build_badge_credential(
     able to state.
     """
     now = int(time.time())
+    agent_identity_id = (agent_definition.get("annotations") or {}).get("identity_id") if agent_definition else None
+    if agent_definition is not None and agent_identity_id != subject_id:
+        raise ValueError("canonical OASF identity_id does not match badge subject")
+    catalog_org = (agent_definition.get("annotations") or {}).get("org") if agent_definition else None
+    resolved_operator = operated_by or (
+        f"urn:agntcy:organization:{catalog_org}" if catalog_org else None
+    )
     context = [W3C_CREDENTIALS_CONTEXT]
+    subject = {
+        "id": subject_id,
+        "caps": caps,
+        "delegating_user": delegating_user,
+        "intent": intent,
+        "act_chain": act_chain,
+        "delegatable": list(delegatable or []),
+    }
+    if agent_definition is not None:
+        # The complete OASF record is signed as the badge description. The
+        # Directory remains a discovery/audit layer; this copy is what a
+        # verifier can cryptographically compare against Directory search.
+        subject.update({
+            "badge": agent_definition,
+            "relatedResource": [{
+                "id": agent_identity_id,
+                "digest": dir_api.oasf_digest(agent_definition),
+                "digestAlgorithm": "sha-256",
+            }],
+            "directoryRecord": {
+                "identity_id": agent_identity_id,
+                "badge_url": (agent_definition.get("annotations") or {}).get("badge_url", ""),
+            },
+        })
+    if resolved_operator:
+        subject["operatedBy"] = resolved_operator
     return {
         # "@context" is the JSON-LD keyword a W3C verifier reads; identity-node
         # reads the proto field name "context". Emit both so the signed payload
@@ -98,14 +135,7 @@ def build_badge_credential(
         # unrevocable. There is no way to mint a live, revocable credential on
         # this version, so we issue live-and-unrevocable and rely on
         # publish-once + expiry. See revoke_badge()/supersede_badges().
-        "credentialSubject": {
-            "id": subject_id,
-            "caps": caps,
-            "delegating_user": delegating_user,
-            "intent": intent,
-            "act_chain": act_chain,
-            "delegatable": list(delegatable or []),
-        },
+        "credentialSubject": subject,
     }
 
 
@@ -233,14 +263,26 @@ async def well_known_badges(
 
 def _subject_matches(credential: dict, *, subject_id: str, caps: list[str],
                      delegating_user: str, intent: str,
-                     delegatable: list[str] | None = None) -> bool:
+                     delegatable: list[str] | None = None,
+                     agent_definition: dict | None = None,
+                     operated_by: str | None = None) -> bool:
     subject = (credential.get("credentialSubject") or {})
+    catalog_org = (agent_definition.get("annotations") or {}).get("org") if agent_definition else None
+    resolved_operator = operated_by or (
+        f"urn:agntcy:organization:{catalog_org}" if catalog_org else None
+    )
     return (
         subject.get("id") == subject_id
         and list(subject.get("caps") or []) == list(caps)
         and list(subject.get("delegatable") or []) == list(delegatable or [])
         and subject.get("delegating_user") == delegating_user
         and subject.get("intent") == intent
+        and (resolved_operator is None or subject.get("operatedBy") == resolved_operator)
+        and (agent_definition is None or (
+            subject.get("badge") == agent_definition
+            and (subject.get("relatedResource") or [{}])[0].get("digest")
+            == dir_api.oasf_digest(agent_definition)
+        ))
     )
 
 
@@ -266,6 +308,8 @@ async def find_live_badge(
     delegating_user: str,
     intent: str,
     delegatable: list[str] | None = None,
+    agent_definition: dict | None = None,
+    operated_by: str | None = None,
 ) -> str | None:
     """The agent's current, still-valid credential for this grant, if any.
 
@@ -287,6 +331,8 @@ async def find_live_badge(
         if _still_valid(credential) and _subject_matches(
             credential, subject_id=subject_id, caps=caps,
             delegating_user=delegating_user, intent=intent, delegatable=delegatable,
+            agent_definition=agent_definition,
+            operated_by=operated_by,
         ):
             return jws
     return None
@@ -309,6 +355,8 @@ async def issue_badge(
     intent: str,
     act_chain: list[str],
     delegatable: list[str] | None = None,
+    agent_definition: dict | None = None,
+    operated_by: str | None = None,
     ttl_seconds: int = 3600,
 ) -> dict:
     """Return this agent's live credential, issuing one only if none exists.
@@ -323,11 +371,12 @@ async def issue_badge(
     existing = await find_live_badge(
         client, identity_node_url,
         subject_id=subject_id, caps=caps, delegating_user=delegating_user, intent=intent,
-        delegatable=delegatable,
+        delegatable=delegatable, agent_definition=agent_definition,
+        operated_by=operated_by,
     )
     if existing is not None:
         result = await verify_badge(client, identity_node_url, existing)
-        return {
+        return await _with_native_claim(client, cfg, subject_id, agent_definition, {
             "badge": existing,
             "credential_id": (result.get("document") or {}).get("id", ""),
             "issuer": cfg.issuer,
@@ -335,7 +384,7 @@ async def issue_badge(
             "document": result.get("document", {}),
             "reused": True,
             "superseded": [],
-        }
+        })
 
     credential = build_badge_credential(
         cfg,
@@ -345,6 +394,8 @@ async def issue_badge(
         intent=intent,
         act_chain=act_chain,
         delegatable=delegatable,
+        agent_definition=agent_definition,
+        operated_by=operated_by,
         ttl_seconds=ttl_seconds,
     )
     jws = await sign_credential(client, cfg, credential)
@@ -355,7 +406,7 @@ async def issue_badge(
     # .well-known to a single live credential per grant in the meantime.
     superseded: list[str] = []
     result = await verify_badge(client, identity_node_url, jws)
-    return {
+    return await _with_native_claim(client, cfg, subject_id, agent_definition, {
         "badge": jws,
         "credential_id": credential["id"],
         "issuer": credential["issuer"],
@@ -363,4 +414,21 @@ async def issue_badge(
         "document": result.get("document", {}),
         "reused": False,
         "superseded": superseded,
-    }
+    })
+
+
+async def _with_native_claim(client, cfg, subject_id, agent_definition, issued):
+    """Only report native verification after Directory's reconciler accepts it."""
+    if (os.environ.get("DIRECTORY_NATIVE_CLAIMS", "false").lower() == "true"
+            and agent_definition is not None):
+        if not issued["verified"]:
+            raise ValueError("Identity Node rejected the badge; no native claim published")
+        from . import native_claims
+
+        address = os.environ.get("DIR_APISERVER_URL", "")
+        if not address:
+            raise ValueError("DIR_APISERVER_URL is required for native claims")
+        issued["directory_identity"] = await native_claims.publish_and_verify(
+            client, cfg, address, agent_definition, subject_id,
+        )
+    return issued

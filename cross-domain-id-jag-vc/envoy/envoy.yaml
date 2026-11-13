@@ -42,7 +42,7 @@ static_resources:
                       domains: ["*"]
                       routes:
                         # Org B badge-scope PDP: Triage presents the inbound
-                        # (Sarah-federated) access token + the narrowing it
+                        # (Security Autonomous Agent-federated) access token + the narrowing it
                         # wants; inline OPA decides and answers with the
                         # scoped-down sub-badge scope/resource. Decision-only
                         # route — no upstream.

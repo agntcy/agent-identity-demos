@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Real OpenCode (opencode.ai) running headless — Org A's AI coding agent.
-# Pinned npm release; the identity orchestrator (opencode-agent service)
+# Pinned npm release; the Security Autonomous Agent
 # drives it over the HTTP API on :4096.
 FROM node:22-bookworm-slim
 

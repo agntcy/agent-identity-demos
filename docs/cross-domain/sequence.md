@@ -4,7 +4,7 @@ Every hop below actually happens against the real services in this stack (Keyclo
 
 Phases, matching the [demo-local sequence diagram](https://github.com/agntcy/agent-identity-demos/blob/main/cross-domain-id-jag-vc/docs/architecture.md):
 
-1. **Local** — Sarah delegates; no cross-domain auth yet
+1. **Local** — the Security Autonomous Agent initiates; no cross-domain auth yet
 2. **Discovery + identity** — CIMD register/resolve, policy-scoped VC badge
 3. **Cross-domain** — ID-JAG mint, Org A egress PDP, Keycloak B redemption, Org B ingress
 4. **Sub-agent spawn** — narrowed assertion, bounded Gitea write/PR, audit
@@ -12,7 +12,7 @@ Phases, matching the [demo-local sequence diagram](https://github.com/agntcy/age
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Sarah
+    actor SAA as Security Autonomous Agent
     participant OC as OpenCode (Org A)
     participant KCA as Keycloak A
     participant Dir as AGNTCY Directory
@@ -28,8 +28,8 @@ sequenceDiagram
     participant GW as Gitea Gateway
     participant Gitea
 
-    Sarah->>OC: "Fix the CVE in the Org B repo"
-    OC->>KCA: OIDC password grant
+    SAA->>OC: "Fix the CVE in the Org B repo"
+    OC->>KCA: OAuth client_credentials grant
     KCA-->>OC: access token
 
     Note over OC,IdNode: OpenCode registers its OWN identity — before any work
@@ -40,7 +40,7 @@ sequenceDiagram
     OC->>IdNode: resolve id
     IdNode-->>OC: ResolverMetadata + public key
 
-    OC->>EnvoyA: POST /api/badge-scope-check (Sarah's access token + requested task)
+    OC->>EnvoyA: POST /api/badge-scope-check (Security Autonomous Agent token + requested task)
     Note over EnvoyA: verify KC-A JWT; OPA scopes the task down
     EnvoyA-->>OC: ALLOW + x-agntcy-scoped-intent
 
@@ -72,10 +72,10 @@ sequenceDiagram
     OC->>Dir: search "triage-agent"
     Dir-->>OC: agent record
 
-    OC->>KCA: token-exchange (subject_token=Sarah, actor_token=badge)
+    OC->>KCA: token-exchange (subject_token=Security Autonomous Agent, actor_token=badge)
     Note over KCA: validates subject_token; does not process actor_token<br/>into an act claim (real Keycloak behavior)
     KCA-->>OC: exchanged access token
-    OC->>KCA: mint assertion (token-exchange, native SPI; sub=Sarah, scope=triage:create, intent=create-pr-fix)
+    OC->>KCA: mint assertion (token-exchange, native SPI; sub=Security Autonomous Agent, scope=triage:create, intent=create-pr-fix)
     KCA-->>OC: signed assertion (RS256)
 
     OC->>EnvoyA: POST /api/egress-check (assertion as Bearer)
@@ -102,7 +102,7 @@ sequenceDiagram
     Triage->>Envoy: POST /api/subbadge-scope-check (may this be narrowed?)
     Envoy-->>Triage: ALLOW + scoped scope/resource
     Triage->>KCB: mint sub-badge natively (token-exchange, requested_token_type=id-jag)
-    KCB-->>Triage: sub-badge (act_chain: Sarah→OpenCode→Triage)
+    KCB-->>Triage: sub-badge (act_chain: Security Autonomous Agent→OpenCode→Triage)
     Triage->>Dir: push Triage turn record (OASF)
     Dir-->>Triage: CID
     Triage->>Dir: search "sub-agent"
@@ -138,9 +138,9 @@ sequenceDiagram
     Dir-->>Sub: CID
     Sub-->>Triage: PR link + denied-attempt result
     Triage-->>OC: ticket complete
-    OC-->>Sarah: PR ready — full act-chain audit trail
+    OC-->>SAA: PR ready — full act-chain audit trail
 ```
 
-OpenTelemetry `trace_id` links every hop. Full causal audit: Sarah → OpenCode → Triage → Sub-Agent. Envoy + OPA is the Policy Decision Point at each boundary.
+OpenTelemetry `trace_id` links every hop. Full causal audit: Security Autonomous Agent → OpenCode → Triage → Sub-Agent. Envoy + OPA is the Policy Decision Point at each boundary.
 
 See also [credentials vs assertions](credentials.md) and the [demo README sequence flow](https://github.com/agntcy/agent-identity-demos/blob/main/cross-domain-id-jag-vc/README.md#sequence-flow).

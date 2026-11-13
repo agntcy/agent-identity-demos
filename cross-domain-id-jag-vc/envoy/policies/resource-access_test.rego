@@ -10,12 +10,12 @@ valid_resource_access := {
 	"sub": "org-b-user-id",
 	"azp": "sub-agent",
 	"scope": "profile email gitea:write gitea:pr",
-	"preferred_username": "sarah",
+	"preferred_username": "service-account-security-autonomous-agent",
 }
 
 valid_sub_badge := {
 	"iss": "http://idjag-issuer:9000",
-	"sub": "sarah@org-a.example",
+	"sub": "service-account-security-autonomous-agent",
 	"aud": "http://keycloak-b:8080/realms/org-b",
 	"azp": "sub-agent",
 	"client_id": "sub-agent",
@@ -24,7 +24,7 @@ valid_sub_badge := {
 	"resource": ["demo-admin/payments-service"],
 	"act": {
 		"sub": "triage-agent",
-		"act_chain": ["opencode-agent", "triage-agent"],
+		"act_chain": ["security-autonomous-agent", "triage-agent"],
 	},
 }
 
@@ -35,7 +35,7 @@ valid_resource_headers := {
 
 valid_context := {
 	"intent": "create-pr-fix",
-	"act_chain": ["opencode-agent", "triage-agent", "sub-agent"],
+	"act_chain": ["security-autonomous-agent", "triage-agent", "sub-agent"],
 	"ticket_id": "TRIAGE-2024-12345",
 }
 
@@ -108,7 +108,7 @@ test_parent_triage_scope_is_not_inherited if {
 }
 
 test_delegation_chain_mismatch_denied if {
-	body := object.union(valid_context, {"act_chain": ["opencode-agent", "triage-agent", "different-agent"]})
+	body := object.union(valid_context, {"act_chain": ["security-autonomous-agent", "triage-agent", "different-agent"]})
 	result := allow with input as resource_input("push", "payments-service", body, valid_resource_headers)
 	not result.allowed
 }
@@ -147,21 +147,21 @@ test_non_main_pr_base_denied if {
 valid_read_access := {
 	"iss": "http://keycloak-b:8080/realms/org-b",
 	"sub": "org-b-opencode-id",
-	"azp": "opencode-agent",
+	"azp": "security-autonomous-agent",
 	"scope": "profile email gitea:read",
-	"preferred_username": "sarah",
+	"preferred_username": "service-account-security-autonomous-agent",
 }
 
 valid_read_assertion := {
 	"iss": "http://keycloak-a:8080/realms/org-a",
-	"sub": "sarah@org-a.example",
+	"sub": "service-account-security-autonomous-agent",
 	"aud": "http://keycloak-b:8080/keycloak-b/realms/org-b",
-	"azp": "opencode-agent",
-	"client_id": "opencode-agent",
+	"azp": "security-autonomous-agent",
+	"client_id": "security-autonomous-agent",
 	"scope": "openid gitea:read",
 	"intent": ["scan-source"],
 	"resource": ["demo-admin/payments-service"],
-	"act": {"sub": "opencode-agent", "act_chain": ["opencode-agent"]},
+	"act": {"sub": "security-autonomous-agent", "act_chain": ["security-autonomous-agent"]},
 }
 
 read_headers(access, actor) := {
@@ -237,7 +237,7 @@ test_read_protected_repository_denied if {
 test_read_with_delegated_chain_denied if {
 	deeper := json.patch(valid_read_assertion, [{
 		"op": "replace", "path": "/act", "value": {
-			"sub": "triage-agent", "act_chain": ["opencode-agent", "triage-agent"],
+			"sub": "triage-agent", "act_chain": ["security-autonomous-agent", "triage-agent"],
 		},
 	}])
 	result := allow with input as read_request(valid_read_access, deeper)

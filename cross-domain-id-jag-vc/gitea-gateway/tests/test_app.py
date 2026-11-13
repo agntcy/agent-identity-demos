@@ -71,7 +71,7 @@ def _policy_headers(token: str, action: str, repository: str) -> dict:
 def _resource_context() -> dict:
     return {
         "intent": "create-pr-fix",
-        "act_chain": ["opencode-agent", "triage-agent", "sub-agent"],
+        "act_chain": ["security-autonomous-agent", "triage-agent", "sub-agent"],
         "ticket_id": "TRIAGE-2024-12345",
     }
 
@@ -186,7 +186,7 @@ def test_resource_request_rejects_incomplete_audit_chain(monkeypatch):
     monkeypatch.setattr(gw, "REQUIRE_ENVOY_POLICY", True)
     tok = _token(scope="gitea:write")
     context = _resource_context()
-    context["act_chain"] = ["opencode-agent", "triage-agent"]
+    context["act_chain"] = ["security-autonomous-agent", "triage-agent"]
     r = client.post(
         "/api/gitea/push/demo-admin/payments-service",
         headers=_policy_headers(

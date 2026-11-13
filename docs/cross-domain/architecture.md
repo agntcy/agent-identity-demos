@@ -4,7 +4,7 @@
 
 ```mermaid
 flowchart TB
-    Sarah(("Sarah"))
+    SAA(("Security Autonomous Agent"))
 
     subgraph OrgA[" Org A "]
         KCA["Keycloak A\norg-a realm"]
@@ -28,7 +28,7 @@ flowchart TB
         Gitea[("Gitea")]
     end
 
-    Sarah -->|"OIDC login"| OC
+    SAA -->|"client credentials"| OC
     OC -->|"push / search records"| Dir
     OC -->|"generate / resolve id"| IdNode
     IdNode -.->|"proof JWT signing"| Vault
@@ -59,7 +59,7 @@ A hop-by-hop sequence, including the policy-gated source read, is on the [sequen
 
 | Service | Image | Host port(s) | Purpose |
 |---|---|---|---|
-| `keycloak-a` | built from `./keycloak-a` (`quay.io/keycloak/keycloak:26.7` + `keycloak-idjag-spi`) | `8082` | Org A IdP (`org-a` realm), authenticates Sarah, natively mints ID-JAG assertions via a custom token-exchange SPI |
+| `keycloak-a` | built from `./keycloak-a` (`quay.io/keycloak/keycloak:26.7` + `keycloak-idjag-spi`) | `8082` | Org A IdP (`org-a` realm), authenticates the Security Autonomous Agent with client credentials, and natively mints ID-JAG assertions via a custom token-exchange SPI |
 | `kc-a-init` | `quay.io/keycloak/keycloak:26.7` | _(one-shot)_ | Registers `triage:create` optional scope |
 | `keycloak-b` | built from `./keycloak-b` (`quay.io/keycloak/keycloak:26.7` + `keycloak-idjag-spi`) | `8083` | Org B IdP (`org-b` realm), redeems ID-JAG assertions, natively mints Triage's narrowed sub-badge |
 | `kc-b-init` | `quay.io/keycloak/keycloak:26.7` | _(one-shot)_ | Registers `triage:create`/`gitea:*` optional scopes |

@@ -79,8 +79,8 @@ if [ ! -f /workspace/README.md ]; then
   cat > /workspace/README.md <<'EOF'
 # Org A remediation workspace
 
-This workspace belongs to OpenCode, Org A's AI coding agent, acting on
-behalf of Sarah (sarah@org-a.example). Tasks arriving here concern CVE
+This workspace belongs to OpenCode, Org A's AI coding agent, executing work
+initiated by the Security Autonomous Agent. Tasks arriving here concern CVE
 remediation in repositories owned by Org B, accessed cross-domain through
 AGNTCY identity delegation (ID-JAG + VC badges). Produce concise, concrete
 remediation plans.

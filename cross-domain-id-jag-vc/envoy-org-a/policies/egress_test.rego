@@ -7,15 +7,15 @@ import rego.v1
 
 valid_actor := {
 	"iss": "http://idjag-issuer:9000",
-	"sub": "sarah@org-a.example",
+	"sub": "service-account-security-autonomous-agent",
 	"aud": "http://keycloak-b:8080/realms/org-b",
 	"azp": "triage-agent",
 	"client_id": "triage-agent",
 	"scope": "openid triage:create",
 	"intent": ["create-pr-fix"],
 	"act": {
-		"sub": "opencode-agent",
-		"act_chain": ["opencode-agent"],
+		"sub": "security-autonomous-agent",
+		"act_chain": ["security-autonomous-agent"],
 	},
 }
 
@@ -84,7 +84,7 @@ test_wrong_azp_denied if {
 test_act_chain_too_deep_denied if {
 	actor := object.union(valid_actor, {"act": {
 		"sub": "sub-agent",
-		"act_chain": ["opencode-agent", "triage-agent", "sub-agent"],
+		"act_chain": ["security-autonomous-agent", "triage-agent", "sub-agent"],
 	}})
 	headers := {"x-verified-actor-token-payload": base64url.encode(json.marshal(actor))}
 	result := allow with input as egress_input(headers)
@@ -92,7 +92,7 @@ test_act_chain_too_deep_denied if {
 }
 
 test_empty_act_chain_denied if {
-	actor := object.union(valid_actor, {"act": {"sub": "opencode-agent", "act_chain": []}})
+	actor := object.union(valid_actor, {"act": {"sub": "security-autonomous-agent", "act_chain": []}})
 	headers := {"x-verified-actor-token-payload": base64url.encode(json.marshal(actor))}
 	result := allow with input as egress_input(headers)
 	not result.allowed
@@ -113,10 +113,9 @@ test_act_chain_origin_mismatch_denied if {
 valid_user := {
 	"iss": "http://keycloak-a:8080/realms/org-a",
 	"sub": "8f7a2c1e-demo-user-id",
-	"azp": "opencode-agent",
-	"scope": "openid profile email",
-	"email": "sarah@org-a.example",
-	"preferred_username": "sarah",
+	"azp": "security-autonomous-agent",
+	"scope": "openid",
+	"preferred_username": "service-account-security-autonomous-agent",
 }
 
 badge_scope_input(user, extra_headers) := {"attributes": {"request": {"http": {
@@ -149,7 +148,7 @@ test_badge_scope_wrong_client_denied if {
 }
 
 test_badge_scope_wrong_user_denied if {
-	user := object.union(valid_user, {"email": "mallory@org-a.example"})
+	user := object.union(valid_user, {"preferred_username": "mallory"})
 	result := allow with input as badge_scope_input(user, valid_badge_request_headers)
 	not result.allowed
 }
@@ -179,14 +178,14 @@ test_badge_scope_missing_task_headers_denied if {
 
 valid_read_assertion := {
 	"iss": "http://keycloak-a:8080/realms/org-a",
-	"sub": "sarah@org-a.example",
+	"sub": "service-account-security-autonomous-agent",
 	"aud": "http://keycloak-b:8080/keycloak-b/realms/org-b",
-	"azp": "opencode-agent",
-	"client_id": "opencode-agent",
+	"azp": "security-autonomous-agent",
+	"client_id": "security-autonomous-agent",
 	"scope": "openid gitea:read",
 	"intent": ["scan-source"],
 	"resource": ["demo-admin/payments-service"],
-	"act": {"sub": "opencode-agent", "act_chain": ["opencode-agent"]},
+	"act": {"sub": "security-autonomous-agent", "act_chain": ["security-autonomous-agent"]},
 }
 
 read_egress_request(actor) := {"attributes": {"request": {"http": {
@@ -229,7 +228,7 @@ test_read_of_unlisted_repository_denied if {
 test_read_with_delegated_chain_denied if {
 	deeper := json.patch(valid_read_assertion, [{
 		"op": "replace", "path": "/act", "value": {
-			"sub": "triage-agent", "act_chain": ["opencode-agent", "triage-agent"],
+			"sub": "triage-agent", "act_chain": ["security-autonomous-agent", "triage-agent"],
 		},
 	}])
 	result := allow with input as read_egress_request(deeper)

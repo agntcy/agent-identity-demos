@@ -10,20 +10,20 @@ valid_access := {
 	"sub": "org-b-user-id",
 	"azp": "triage-agent",
 	"scope": "openid triage:create",
-	"preferred_username": "sarah",
+	"preferred_username": "service-account-security-autonomous-agent",
 }
 
 valid_actor := {
 	"iss": "http://keycloak-a:8080/realms/org-a",
-	"sub": "sarah@org-a.example",
+	"sub": "service-account-security-autonomous-agent",
 	"aud": "http://keycloak-b:8080/keycloak-b/realms/org-b",
 	"azp": "triage-agent",
 	"client_id": "triage-agent",
 	"scope": "triage:create",
 	"intent": ["create-pr-fix"],
 	"act": {
-		"sub": "opencode-agent",
-		"act_chain": ["opencode-agent"],
+		"sub": "security-autonomous-agent",
+		"act_chain": ["security-autonomous-agent"],
 	},
 }
 
@@ -36,8 +36,8 @@ valid_body := {
 	"repo": "demo-admin/payments-service",
 	"cve": "CVE-2026-1234",
 	"severity": "HIGH",
-	"delegating_agent": "opencode-agent",
-	"act_chain": ["opencode-agent"],
+	"delegating_agent": "security-autonomous-agent",
+	"act_chain": ["security-autonomous-agent"],
 	"intent": "create-pr-fix",
 }
 
@@ -51,6 +51,24 @@ ticket_input(headers, body) := {
 }
 
 valid_input := ticket_input(valid_headers, valid_body)
+
+a2a_ticket_input(headers, body) := {
+	"attributes": {"request": {"http": {
+		"method": "POST",
+		"path": "/a2a",
+		"headers": headers,
+	}}},
+	"body": {
+		"jsonrpc": "2.0",
+		"id": "request-1",
+		"method": "SendMessage",
+		"params": {"message": {
+			"messageId": "message-1",
+			"role": "ROLE_USER",
+			"parts": [{"data": body, "mediaType": "application/json"}],
+		}},
+	},
+}
 
 test_health_allowed if {
 	result := allow with input as {"attributes": {"request": {"http": {
@@ -66,6 +84,12 @@ test_valid_delegation_allowed if {
 	result := allow with input as valid_input
 	result.allowed
 	result.headers["x-agntcy-delegation-depth"] == "1"
+}
+
+test_valid_a2a_send_message_allowed if {
+	result := allow with input as a2a_ticket_input(valid_headers, valid_body)
+	result.allowed
+	result.headers["x-agntcy-policy-rule"] == "org-b-ticket-delegation"
 }
 
 test_missing_actor_token_denied if {

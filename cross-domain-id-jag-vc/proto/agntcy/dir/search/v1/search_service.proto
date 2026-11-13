@@ -27,6 +27,8 @@ enum RecordQueryType {
   RECORD_QUERY_TYPE_SCAN_SEVERITY = 17;
   RECORD_QUERY_TYPE_SCAN_SAFE = 18;
   RECORD_QUERY_TYPE_DESCRIPTION = 19;
+  RECORD_QUERY_TYPE_IDENTITY = 22;
+  RECORD_QUERY_TYPE_IDENTITY_VERIFIED = 24;
 }
 
 enum SortMode {
@@ -55,4 +57,14 @@ message SearchRecordsResponse {
 
 service SearchService {
   rpc SearchRecords(SearchRecordsRequest) returns (stream SearchRecordsResponse);
+  rpc SearchCIDs(SearchCIDsRequest) returns (stream SearchCIDsResponse);
+}
+
+message SearchCIDsRequest {
+  repeated RecordQuery queries = 1;
+  optional uint32 limit = 2;
+}
+
+message SearchCIDsResponse {
+  string record_cid = 1;
 }

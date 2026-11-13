@@ -52,7 +52,7 @@
     {
       "clientId": "triage-agent",
       "name": "Triage Agent (Org B receiver)",
-      "description": "Org B remediation agent. Receives cross-domain ID-JAG assertions from OpenCode (Org A) and issues downscoped access tokens.",
+      "description": "Org B remediation agent. Receives cross-domain ID-JAG assertions from the Security Autonomous Agent (Org A) and issues downscoped access tokens for its workflow.",
       "enabled": true,
       "publicClient": false,
       "secret": "demo-triage-secret-change-me",
@@ -81,14 +81,14 @@
       }
     },
     {
-      "clientId": "opencode-agent",
-      "name": "OpenCode Agent (Org A) — source read only",
-      "description": "Org A's agent as a known party in Org B. Redeems a read-scoped ID-JAG from Keycloak A to read repository source for scanning. Granted gitea:read and nothing else: it cannot write, open PRs, create tickets, or mint further assertions.",
+      "clientId": "security-autonomous-agent",
+      "name": "Security Autonomous Agent (Org A) — source read only",
+      "description": "Org A's autonomous security agent as a known party in Org B. Redeems a read-scoped ID-JAG from Keycloak A to inspect repository source. OpenCode is its internal tool, not another identity.",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": false,
-      "serviceAccountsEnabled": true,
-      "secret": "demo-opencode-secret-change-me",
+      "serviceAccountsEnabled": false,
+      "secret": "demo-security-autonomous-secret-change-me",
       "attributes": {
         "oauth2.jwt.authorization.grant.enabled": "true",
         "oauth2.jwt.authorization.grant.idp": "id-jag-keycloak-a"
@@ -97,28 +97,28 @@
   ],
   "users": [
     {
-      "username": "sarah",
-      "email": "sarah@org-a.example",
-      "firstName": "Sarah",
-      "lastName": "Org-A (federated)",
+      "username": "service-account-security-autonomous-agent",
+      "email": "security-autonomous-agent@org-a.example",
+      "firstName": "Security Autonomous",
+      "lastName": "Agent (Org A)",
       "enabled": true,
       "emailVerified": true,
       "credentials": [],
       "federatedIdentities": [
         {
           "identityProvider": "id-jag",
-          "userId": "sarah@org-a.example",
-          "userName": "sarah"
+          "userId": "service-account-security-autonomous-agent",
+          "userName": "service-account-security-autonomous-agent"
         },
         {
           "identityProvider": "id-jag-keycloak-a",
-          "userId": "sarah@org-a.example",
-          "userName": "sarah"
+          "userId": "service-account-security-autonomous-agent",
+          "userName": "service-account-security-autonomous-agent"
         },
         {
           "identityProvider": "id-jag-keycloak-b",
-          "userId": "sarah@org-a.example",
-          "userName": "sarah"
+          "userId": "service-account-security-autonomous-agent",
+          "userName": "service-account-security-autonomous-agent"
         }
       ]
     }

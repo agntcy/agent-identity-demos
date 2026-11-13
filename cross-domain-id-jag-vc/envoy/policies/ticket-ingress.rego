@@ -5,6 +5,8 @@ package envoy.authz
 
 import rego.v1
 
+autonomous_subject := "service-account-security-autonomous-agent"
+
 # Envoy's jwt_authn filter verifies both signatures before this policy runs and
 # forwards only the verified JWT payloads in internal headers. The policy binds
 # those credentials to the requested delegation, intent, and resource.
@@ -42,7 +44,7 @@ allow := {
 	},
 } if {
 	input.attributes.request.http.method == "POST"
-	input.attributes.request.http.path == "/api/ticket"
+	ticket := ticket_request
 
 	access := verified_payload("x-verified-access-token-payload")
 	actor := verified_payload("x-verified-actor-token-payload")
@@ -52,18 +54,30 @@ allow := {
 	access.azp == "triage-agent"
 	actor.azp == "triage-agent"
 	actor.client_id == "triage-agent"
-	sprintf("%s@org-a.example", [access.preferred_username]) == actor.sub
-	actor.sub == "sarah@org-a.example"
+	access.preferred_username == actor.sub
+	actor.sub == autonomous_subject
 
-	input.body.delegating_agent == actor.act.sub
-	input.body.act_chain == actor.act.act_chain
+	ticket.delegating_agent == actor.act.sub
+	ticket.act_chain == actor.act.act_chain
 	count(actor.act.act_chain) > 0
 	count(actor.act.act_chain) <= 2
-	input.body.intent == "create-pr-fix"
-	input.body.intent in actor.intent
+	ticket.intent == "create-pr-fix"
+	ticket.intent in actor.intent
 
-	startswith(input.body.repo, "demo-admin/")
-	well_formed_finding_id(input.body.cve)
+	startswith(ticket.repo, "demo-admin/")
+	well_formed_finding_id(ticket.cve)
+}
+
+# Support both the compatibility REST endpoint and the A2A 1.0 JSON-RPC
+# SendMessage envelope. The same policy is applied to the normalized ticket.
+ticket_request := input.body if {
+	input.attributes.request.http.path == "/api/ticket"
+}
+
+ticket_request := input.body.params.message.parts[0].data if {
+	input.attributes.request.http.path == "/a2a"
+	input.body.jsonrpc == "2.0"
+	input.body.method == "SendMessage"
 }
 
 # The ticket's finding identifier. Since the scan became a real source
@@ -77,7 +91,8 @@ well_formed_finding_id(id) if startswith(id, "CWE-")
 # ── Sub-badge scope PDP ──────────────────────────────────────────────────────
 # Before Triage mints the narrowed sub-badge at Keycloak B, it must ask this
 # policy whether — and how narrowly — the delegation may be re-narrowed. It
-# presents the inbound Sarah-federated access token (verified by jwt_authn)
+# presents the inbound Security Autonomous Agent-federated access token
+# (verified by jwt_authn)
 # plus the narrowing it requests; the answer carries the policy-approved
 # scope/resource the sub-badge must be minted with. Least privilege decided
 # by policy, not by the agent.
@@ -105,7 +120,7 @@ allow := {
 
 	access.azp == "triage-agent"
 	scope_contains(access.scope, "triage:create")
-	sprintf("%s@org-a.example", [access.preferred_username]) == "sarah@org-a.example"
+	access.preferred_username == autonomous_subject
 
 	requested_scope := input.attributes.request.http.headers["x-agntcy-requested-scope"]
 	requested_repo := input.attributes.request.http.headers["x-agntcy-requested-repo"]

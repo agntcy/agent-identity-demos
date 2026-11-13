@@ -1,0 +1,23 @@
+{
+  "captured_on": "2026-11-10",
+  "deployment": "agent-identity-demo.outshift.io",
+  "access": "Administrative SSH tunnel to the deployed webapp; no local mock application",
+  "figures": [
+    {
+      "file": "01-component-flow.jpg",
+      "sha256": "2ed0dd312eebacc5b5b1d1f603d626d699262edc7b48dd8e8b03503704da6056"
+    },
+    {
+      "file": "02-verified-agents.jpg",
+      "sha256": "bba85e7b8119d8a2d1d71f39217b8269489a4b237bd274ae968918b27675a331"
+    },
+    {
+      "file": "03-protocol-sequence.jpg",
+      "sha256": "0c09af7c265675ec5cb1dfdcb1856de20970fea204921bf49d14418dda2183ca"
+    },
+    {
+      "file": "04-two-credential-trust.jpg",
+      "sha256": "3a7f8b68ab0c30bffabd307e2993eecc6a1b7abd8edc2717a0ddcd67dc3d18c6"
+    }
+  ]
+}

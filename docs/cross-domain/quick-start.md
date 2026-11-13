@@ -5,7 +5,7 @@ The demo README is the operational source of truth. This page is the shortest pa
 ```bash
 cd cross-domain-id-jag-vc
 cp .env.example .env
-# SARAH_PASSWORD / OPENCODE_CLIENT_SECRET / TRIAGE_CLIENT_SECRET /
+# SECURITY_AUTONOMOUS_AGENT_CLIENT_SECRET / OPENCODE_CLIENT_SECRET / TRIAGE_CLIENT_SECRET /
 # SUB_AGENT_CLIENT_SECRET must stay as the .env.example defaults (or be
 # changed to match keycloak-a/org-a-realm.json + keycloak-b/org-b-realm.json)
 # — everything else can be freely changed.

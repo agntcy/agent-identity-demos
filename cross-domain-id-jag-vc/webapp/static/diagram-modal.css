@@ -1,0 +1,18 @@
+.diagram-expand{margin-top:14px;cursor:pointer;padding:8px 13px;border:1px solid #496176;border-radius:8px;background:#152738;color:#e8f0f8;font:600 13px system-ui,sans-serif}
+.diagram-modal{width:calc(100vw - 28px);max-width:none;height:calc(100dvh - 28px);max-height:none;padding:0;border:1px solid #496176;border-radius:14px;background:#0c1722;color:#e8f0f8;overflow:hidden}
+.diagram-modal::backdrop{background:rgba(0,0,0,.82);backdrop-filter:blur(5px)}
+.diagram-modal[open]{display:flex;flex-direction:column}
+.diagram-modal-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 20px;border-bottom:1px solid #33485b;flex-shrink:0}
+.diagram-modal-toolbar strong{font:650 17px system-ui,sans-serif}
+.diagram-modal-controls{display:flex;align-items:center;gap:8px}
+.diagram-modal-controls button{padding:7px 12px;border:1px solid #496176;border-radius:7px;background:#152738;color:#e8f0f8;cursor:pointer;font:600 14px system-ui,sans-serif}
+.diagram-modal-controls button:focus-visible,.diagram-expand:focus-visible{outline:2px solid #62e4b4;outline-offset:3px}
+.diagram-modal-scroll{overflow:auto;flex:1;min-height:0;padding:16px}
+.diagram-modal-content{margin:0 auto}
+.diagram-modal .component-map,.diagram-modal .diagram{margin:0;width:100%}
+.diagram-modal .diagram-expand{display:none}
+.diagram-modal .component-scroll,.diagram-modal .canvas{overflow:visible}
+.diagram-modal svg{min-width:0!important}
+.diagram-modal[data-fit="true"] svg{width:100%;height:calc(100dvh - 265px);min-height:220px}
+.diagram-modal[data-fit="false"] svg{width:100%;height:auto}
+@media(max-width:650px){.diagram-modal-toolbar{padding:10px}.diagram-modal-scroll{padding:8px}.diagram-modal-controls{gap:4px}.diagram-modal-controls button{padding:7px 9px}}
