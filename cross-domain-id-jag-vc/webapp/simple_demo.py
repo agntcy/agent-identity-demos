@@ -37,7 +37,7 @@ async def login(client, base, realm, client_id, secret):
 
 
 
-async def run():
+async def run(*, annotations=None):
     if RUN_LOCK.locked():
         yield event(-1, "error", "A demo is already running. Please wait for it to finish.")
         return
@@ -65,6 +65,8 @@ async def run():
                 step = 2
                 yield event(step, "running", "Publishing a Vault-signed Agent Badge")
                 record = directory.build_agent_record(pub, node, identity_id=publisher_id)
+                if annotations:
+                    record["annotations"].update(annotations)
                 args = dict(subject_id=publisher_id, caps=["directory:publish"], delegating_user="service-account-" + pub, intent="Publish a discoverable agent identity", delegatable=[], agent_definition=record)
                 badge = await vc.find_live_badge(client, node, **args)
                 reused = badge is not None

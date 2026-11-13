@@ -49,6 +49,7 @@ from agntcy_identity_client import a2a
 from agntcy_identity_client import directory as dir_api
 from agntcy_identity_client import native_claims
 import simple_demo
+import dnb_demo
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 KC_A_URL = os.environ.get("KC_A_URL", "http://keycloak-a:8080").rstrip("/")
@@ -414,9 +415,14 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get("/")
 def index(mode: str = "") -> FileResponse:
     selected = mode or os.environ.get("DEMO_MODE", "full")
-    return FileResponse("static/simple.html" if selected == "simple" else "static/index.html")
+    return FileResponse({"simple": "static/simple.html", "dnb": "static/dnb.html"}.get(selected, "static/index.html"))
 
 
 @app.post("/api/simple/run")
 async def simple_run():
     return StreamingResponse(simple_demo.run(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/dnb/run")
+async def dnb_run(scenario: str = "valid"):
+    return StreamingResponse(dnb_demo.run(scenario), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

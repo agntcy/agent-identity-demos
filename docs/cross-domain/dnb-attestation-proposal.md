@@ -4,6 +4,8 @@
 **Updated:** November 11, 2026\
 **Baseline:** [Current AGNTCY demo sequences](agntcy-sequences.md)
 
+**Concept demonstration:** [Third demo: live AGNTCY plus simulated D&B evidence](dnb-demo.md). This illustrates the reference-only path; it does not implement a D&B integration or the proposed Directory freshness hook.
+
 This proposal extends the current agent-identity flow with an organization attestation issued by D&B. D&B would supply evidence about an organization. AGNTCY Identity would continue to establish agent identity and serve Agent Badges. Directory would make the agent record and its attestation reference discoverable. A marketplace, or its chosen verifier, would evaluate the evidence under its own trust policy.
 
 All D&B interactions below are conceptual. They do not describe an existing D&B API, credential schema, signing algorithm, status protocol or integration commitment. Those contracts must be agreed with D&B and the pilot marketplace. No pilot or partner integration is asserted to be operational.
