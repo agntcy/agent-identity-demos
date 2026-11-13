@@ -46,6 +46,7 @@ nav:
   - Survey: survey.md
   - Cross-domain demo:
       - Overview: cross-domain/overview.md
+      - Simple discovery demo: cross-domain/simple-demo.md
       - AGNTCY component sequences: cross-domain/agntcy-sequences.md
       - D&B attestation proposal: cross-domain/dnb-attestation-proposal.md
       - Technical whitepaper: cross-domain/whitepaper.md

@@ -4,7 +4,7 @@
 # assisted-by claude code claude-sonnet-4-6
 """Cross-Domain AI Agent Remediation Demo — webapp UI backend.
 
-This file has no task-lifecycle logic of its own: /api/run sends an A2A task
+In full mode, /api/run sends an A2A task
 directly to the Security Autonomous Agent. OpenCode is an internal planning
 engine used by that agent, not a second agent or delegation hop. The webapp
 animates the steps produced by the live agent. See opencode-agent/app.py for
@@ -12,6 +12,9 @@ the authoritative lifecycle — A2A dispatch → OAuth → CIMD + Agent Badge VC
 secondary Organization VC → two-VC VP verification → work → cross-domain
 ID-JAG delegation. The UI therefore cannot show a security or A2A step that
 did not run.
+
+Simple mode uses /api/simple/run to drive registration and verified discovery
+with the shared identity client. It does not dispatch remediation tasks.
 
 Endpoints
 ---------
@@ -45,6 +48,7 @@ from agntcy_identity_client import VaultConfig
 from agntcy_identity_client import a2a
 from agntcy_identity_client import directory as dir_api
 from agntcy_identity_client import native_claims
+import simple_demo
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 KC_A_URL = os.environ.get("KC_A_URL", "http://keycloak-a:8080").rstrip("/")
@@ -375,6 +379,7 @@ def health() -> JSONResponse:
 @app.get("/api/config")
 def config() -> JSONResponse:
     return JSONResponse({
+        "demo_mode": os.environ.get("DEMO_MODE", "full"),
         "kc_a_url": KC_A_URL,
         "kc_a_realm": KC_A_REALM,
         "kc_a_issuer": KC_A_ISSUER,
@@ -407,5 +412,11 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/")
-def index() -> FileResponse:
-    return FileResponse("static/index.html")
+def index(mode: str = "") -> FileResponse:
+    selected = mode or os.environ.get("DEMO_MODE", "full")
+    return FileResponse("static/simple.html" if selected == "simple" else "static/index.html")
+
+
+@app.post("/api/simple/run")
+async def simple_run():
+    return StreamingResponse(simple_demo.run(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

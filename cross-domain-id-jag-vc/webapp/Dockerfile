@@ -19,6 +19,6 @@ RUN python -m grpc_tools.protoc \
     proto/agntcy/dir/search/v1/search_service.proto \
     proto/agntcy/dir/identity/v1/identity_service.proto
 COPY --from=shared_lib . agntcy_identity_client/
-COPY app.py tracing.py ./
+COPY app.py tracing.py simple_demo.py ./
 COPY static/ static/
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8090"]

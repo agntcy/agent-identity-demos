@@ -46,6 +46,7 @@ cross-issuer binding through CIMD/JWKS.
 
 ## AGNTCY identity and trust: illustrated guides
 
+- [Simple identity and discovery demo](docs/cross-domain/simple-demo.md): publisher/consumer paths, feature toggle and live verification.
 - [Current AGNTCY sequence diagrams](docs/cross-domain/agntcy-sequences.md): identity, Vault, badges, Directory and verifiers.
 - [Proposed D&B attestation sequence diagrams](docs/cross-domain/dnb-attestation-proposal.md): external organization evidence, discovery and marketplace verification.
 
