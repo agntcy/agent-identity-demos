@@ -183,3 +183,15 @@ verified_payload(header_name) := payload if {
 scope_contains(scopes, required) if {
 	required in split(scopes, " ")
 }
+
+# Enforce OASF behavior_profile tool containment at the resource boundary
+tool_authorized if {
+	allowed := input.parsed_body.behavior_profile.allowed_tools
+	requested := input.parsed_body.requested_tool
+	requested in allowed
+}
+
+# Reject requests if session was invalidated by Authoritative Monitor eviction
+session_active if {
+	not input.attributes.request.http.headers["x-agntcy-evicted"] == "true"
+}
