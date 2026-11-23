@@ -107,6 +107,27 @@ static_resources:
                             - header:
                                 key: x-agntcy-delegation-depth
                                 value: "%REQ(x-agntcy-delegation-depth)%"
+                        - match:
+                            prefix: "/v1/chat/completions"
+                          route:
+                            cluster: llm_provider
+                            # 1. Input Interception: Asynchronously mirror prompt JSON to Identity Service monitor
+                            request_mirror_policies:
+                              - cluster: identity_service_monitor
+                                runtime_fraction:
+                                  default_value:
+                                    numerator: 100
+                                    denominator: HUNDRED
+                          typed_per_filter_config:
+                            # 2. Output Interception: Stream LLM SSE chunks/tool_calls out-of-band without blocking
+                            envoy.filters.http.ext_proc:
+                              "@type": ://googleapis.com
+                              overrides:
+                                processing_mode:
+                                  request_header_mode: SEND
+                                  request_body_mode: NONE
+                                  response_header_mode: SKIP
+                                  response_body_mode: STREAMED
                 http_filters:
                   - name: envoy.filters.http.jwt_authn
                     typed_config:
@@ -197,3 +218,35 @@ static_resources:
                     socket_address:
                       address: keycloak-a
                       port_value: 8080
+    - name: llm_provider
+      connect_timeout: 5s
+      type: LOGICAL_DNS
+      lb_policy: ROUND_ROBIN
+      load_assignment:
+        cluster_name: llm_provider
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: host.docker.internal
+                      port_value: 11434
+
+    - name: identity_service_monitor
+      connect_timeout: 2s
+      type: STRICT_DNS
+      lb_policy: ROUND_ROBIN
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": ://googleapis.com
+          explicit_http_config:
+            http2_protocol_options: {}
+      load_assignment:
+        cluster_name: identity_service_monitor
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: identity-node
+                      port_value: 4006

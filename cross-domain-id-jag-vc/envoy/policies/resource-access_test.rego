@@ -4,6 +4,7 @@
 package envoy.authz
 
 import rego.v1
+import data.envoy.authz
 
 valid_resource_access := {
 	"iss": "http://keycloak-b:8080/realms/org-b",
@@ -248,4 +249,52 @@ test_read_with_delegated_chain_denied if {
 test_subagent_token_cannot_read_source if {
 	result := allow with input as read_request(valid_resource_access, valid_sub_badge)
 	not result.allowed
+}
+
+test_allow_authorized_tool_and_active_session if {
+	authz.tool_authorized with input as {
+		"parsed_body": {
+			"behavior_profile": {
+				"allowed_tools": ["calculate_yield", "fetch_ticker_history"],
+			},
+			"requested_tool": "calculate_yield",
+		},
+	}
+
+	authz.session_active with input as {
+		"attributes": {
+			"request": {
+				"http": {
+					"headers": {
+						"x-agntcy-evicted": "false",
+					},
+				},
+			},
+		},
+	}
+}
+
+test_deny_unauthorized_tool_structural_drift if {
+	not authz.tool_authorized with input as {
+		"parsed_body": {
+			"behavior_profile": {
+				"allowed_tools": ["calculate_yield", "fetch_ticker_history"],
+			},
+			"requested_tool": "export_system_db",
+		},
+	}
+}
+
+test_deny_evicted_agent_session if {
+	not authz.session_active with input as {
+		"attributes": {
+			"request": {
+				"http": {
+					"headers": {
+						"x-agntcy-evicted": "true",
+					},
+				},
+			},
+		},
+	}
 }
